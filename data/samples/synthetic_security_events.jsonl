@@ -1,0 +1,5 @@
+{"event_id": "syn-l-0001", "timestamp": "2026-02-01T12:00:00Z", "source_type": "network", "src_ip": "10.1.0.4", "dst_ip": "10.1.0.9", "dst_port": 3389, "protocol": "tcp", "label": "BENIGN", "dataset": "synthetic-sample", "features": {"bytes_out": 900}}
+{"event_id": "syn-l-0002", "timestamp": "2026-02-01T12:00:05Z", "source_type": "authentication", "user": "alice.example", "event_type": "login_success", "severity": "informational", "label": "BENIGN", "dataset": "synthetic-sample"}
+
+{"event_id": "syn-l-0003", "timestamp": "2026-02-01T12:00:09Z", "source_type": "network", "src_ip": "10.1.0.4"
+{"message": "heartbeat", "dataset": "synthetic-sample"}

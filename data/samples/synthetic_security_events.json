@@ -1,0 +1,96 @@
+{
+  "description": "SYNTHETIC sample for SentinelAI development and tests. Hand-written; not real telemetry, not real attacks, not experimental results. Records 6-10 are intentionally invalid.",
+  "records": [
+    {
+      "event_id": "syn-0001",
+      "timestamp": "2026-01-15T09:30:00Z",
+      "source_type": "network",
+      "src_ip": "10.0.0.5",
+      "dst_ip": "10.0.0.20",
+      "src_port": 51515,
+      "dst_port": 22,
+      "protocol": "TCP",
+      "event_type": "connection",
+      "label": "BENIGN",
+      "dataset": "synthetic-sample",
+      "features": {"bytes_out": 1520, "bytes_in": 3200, "duration_ms": 850}
+    },
+    {
+      "event_id": "syn-0002",
+      "timestamp": "2026-01-15T09:31:12+01:00",
+      "source_type": "authentication",
+      "src_ip": "10.0.0.77",
+      "event_type": "login_failure",
+      "severity": "Medium",
+      "user": "svc-backup",
+      "host": "auth-01",
+      "label": "credential_stuffing",
+      "dataset": "synthetic-sample",
+      "features": {"failed_attempts_5m": 14, "mfa_enabled": false}
+    },
+    {
+      "event_id": "syn-0003",
+      "timestamp": 1768469400,
+      "source_type": "endpoint",
+      "host": "ws-042",
+      "event_type": "process_start",
+      "severity": "info",
+      "process_name": "powershell.exe",
+      "parent_process": "winword.exe",
+      "dataset": "synthetic-sample",
+      "features": {"parent_is_office": true, "cmd_length": 412}
+    },
+    {
+      "event_id": "syn-0004",
+      "timestamp": "2026-01-15T10:00:00Z",
+      "source_type": "application",
+      "src_ip": "2001:db8::10",
+      "dst_port": 443,
+      "protocol": "tcp",
+      "event_type": "http_request",
+      "severity": "low",
+      "label": "BENIGN",
+      "dataset": "synthetic-sample",
+      "features": {"status_code": 200, "path_depth": 3, "method": "GET"}
+    },
+    {
+      "event_id": "syn-0001",
+      "timestamp": "2026-01-15T09:45:00Z",
+      "source_type": "network",
+      "src_ip": "10.0.0.6",
+      "dst_ip": "10.0.0.20",
+      "dst_port": 22,
+      "protocol": 6,
+      "label": "BENIGN",
+      "dataset": "synthetic-sample"
+    },
+    {
+      "event_id": "syn-0006",
+      "timestamp": "2026-01-15 10:05:00",
+      "source_type": "network",
+      "dataset": "synthetic-sample"
+    },
+    {
+      "event_id": "syn-0007",
+      "timestamp": "2026-01-15T10:06:00Z",
+      "source_type": "authentication",
+      "severity": "urgent",
+      "dataset": "synthetic-sample"
+    },
+    {
+      "event_id": "syn-0008",
+      "timestamp": "2026-01-15T10:07:00Z",
+      "source_type": "firewall",
+      "dataset": "synthetic-sample"
+    },
+    "not a record",
+    {
+      "event_id": "syn-0010",
+      "timestamp": "2026-01-15T10:09:00Z",
+      "source_type": "network",
+      "dst_ip": "10.0.0.20",
+      "dst_port": 70000,
+      "dataset": "synthetic-sample"
+    }
+  ]
+}
