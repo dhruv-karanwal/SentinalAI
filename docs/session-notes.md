@@ -1,8 +1,224 @@
-# Session notes — M2: alert schema and AIT-ADS loader
+# Session notes
+
+Newest milestone first. All numbers are copied from command output; none
+are estimates.
+
+---
+
+# M3: alert-source variants, study sampler, frozen split
+
+Date: 2026-10-31. Branch `phase2/alert-sources` (from `phase2/alert-schema`
+at `531bb44`). Code commit: `429ee76`.
+
+## What was done
+
+1. **fast.log re-attribution (decision 1).** A first pass over the Wazuh
+   file builds a `SuricataTwinIndex`. Each fast.log record claims one
+   eve.json twin, greedily in file order. With a twin it is a `wazuh`
+   duplicate (excluded); without one it becomes a `suricata` alert flagged
+   `fast_log_unmatched` (kept). This supersedes the M2 rule below, which
+   flagged every fast.log record as a duplicate.
+2. **MatchValueAverageChangeDetector** stays `kind="event"`. This is
+   documented in `mappings.py`, CLAUDE.md and the methodology doc.
+3. **Frozen split** in `experiments/config/study.json`: dev = russellmitchell,
+   shaw; held-out = fox, harrison, santos, wardbeck, wheeler, wilson. It is
+   also written into `docs/research-methodology.md`. `ScenarioSplit.require_dev`
+   guards dev-only code. `test_study_config.py` checks, for each of the six
+   held-out scenarios, that `dev_triage_report` raises `HeldOutScenarioError`.
+   The CLI refuses them too (`variants --scenario fox` exits with code 2).
+4. **Variants** (`app/study/variants.py`) over the pool of
+   investigation-eligible alerts: `wazuh`, `suricata`, `aminer`, `fused`,
+   `oracle`, `random-<ref>`. Each variant has a manifest: rule, seeds,
+   counts, counts by detector, attack share by event_label and by
+   time_label, selection, and the sha256 of the source alerts file. Variant
+   alert files are byte-identical copies of the ingested lines.
+5. **Study sampler:** `study_sample`, N=20 from `fused`, seed 20261031,
+   proportional stratification on event_label, never rebalanced. The
+   decision and its justification are in the methodology doc.
+6. **Triage:** `triage_by_truth` uses `app/evaluation/metrics.py`. The
+   verdict is "alert is in the variant", scored over the pool.
+   `event_label` is the primary truth; `time_label` is the sensitivity
+   analysis.
+7. No new dependency.
+
+## Final test and type-check output
+
+```
+$ ../.venv/Scripts/python.exe -m pytest
+...
+tests\test_ait_ads_real.py ...                                           [  1%]
+tests\test_alert_normalizer.py ........................                  [ 12%]
+tests\test_alert_pipeline.py ......                                      [ 15%]
+tests\test_alert_schema.py ............                                  [ 20%]
+tests\test_data_quality.py ........                                      [ 24%]
+tests\test_event_schema.py .................                             [ 31%]
+tests\test_ground_truth.py ................                              [ 39%]
+tests\test_ingestion.py .................................                [ 54%]
+tests\test_metrics.py .....                                              [ 56%]
+tests\test_normalizer.py ............................................... [ 78%]
+............                                                             [ 83%]
+tests\test_pipeline.py .......                                           [ 86%]
+tests\test_study_config.py ................                              [ 94%]
+tests\test_variants.py .............                                     [100%]
+
+============================= 219 passed in 8.75s =============================
+
+$ ../.venv/Scripts/python.exe -m mypy
+Success: no issues found in 23 source files
+```
+
+## Re-ingest after decision 1 (dev scenarios)
+
+| | russellmitchell | shaw |
+|---|---|---|
+| wazuh alerts (fast.log duplicates) | 32,302 (9,186) | 51,831 (16,692) |
+| suricata alerts (of which fast_log_unmatched) | 9,186 (0) | 16,708 (16) |
+| aminer alerts | 4,056 | 2,243 |
+| investigation pool / excluded by selection | 35,932 / 9,612 | 53,645 / 17,137 |
+| event label link | linked, 0 rejected | linked, 0 rejected |
+
+## DEV-SCENARIO NUMBERS — detector-level triage
+
+These are dev-scenario numbers, not held-out results. They score the alert
+sources, not the agent. Verdict = alert is in the variant; universe = the
+scenario's investigation pool; "share" = the variant's attack share.
+Command (once per scenario):
+
+```
+python -m app.main variants --scenario <s> --random-reference fused \
+    --random-reference wazuh --random-reference suricata --random-reference aminer
+```
+
+The config default for random controls is `fused` only. I added the
+per-detector random references on the command line for this report.
+Seed 20261031 (from `study.json`).
+
+### russellmitchell — truth: event_label (primary)
+
+```
+variant           alerts   share     TP     FP     FN     TN    prec  recall      F1     FNR
+wazuh              23116  0.3305   7639  15477   3318   9498  0.3305  0.6972  0.4484  0.3028
+suricata            9186  0.0048     44   9142  10913  15833  0.0048  0.0040  0.0044  0.9960
+aminer              3630  0.9019   3274    356   7683  24619  0.9019  0.2988  0.4489  0.7012
+fused              35932  0.3049  10957  24975      0      0  0.3049  1.0000  0.4674  0.0000
+oracle             10957  1.0000  10957      0      0  24975  1.0000  1.0000  1.0000  0.0000
+random-fused       35932  0.3049  10957  24975      0      0  0.3049  1.0000  0.4674  0.0000  (degenerate: = pool)
+random-wazuh       23116  0.3049   7047  16069   3910   8906  0.3049  0.6432  0.4136  0.3568
+random-suricata     9186  0.3052   2804   6382   8153  18593  0.3052  0.2559  0.2784  0.7441
+random-aminer       3630  0.3196   1160   2470   9797  22505  0.3196  0.1059  0.1590  0.8941
+```
+
+### russellmitchell — truth: time_label (sensitivity)
+
+```
+variant           alerts   share     TP     FP     FN     TN    prec  recall      F1     FNR
+wazuh              23116  0.3509   8111  15005   3686   9130  0.3509  0.6875  0.4646  0.3125
+suricata            9186  0.0232    213   8973  11584  15162  0.0232  0.0181  0.0203  0.9819
+aminer              3630  0.9567   3473    157   8324  23978  0.9567  0.2944  0.4502  0.7056
+fused              35932  0.3283  11797  24135      0      0  0.3283  1.0000  0.4943  0.0000
+oracle             10957  1.0000  10957      0    840  24135  1.0000  0.9288  0.9631  0.0712
+random-fused       35932  0.3283  11797  24135      0      0  0.3283  1.0000  0.4943  0.0000  (degenerate: = pool)
+random-wazuh       23116  0.3270   7559  15557   4238   8578  0.3270  0.6408  0.4330  0.3592
+random-suricata     9186  0.3278   3011   6175   8786  17960  0.3278  0.2552  0.2870  0.7448
+random-aminer       3630  0.3402   1235   2395  10562  21740  0.3402  0.1047  0.1601  0.8953
+```
+
+### shaw — truth: event_label (primary)
+
+```
+variant           alerts   share     TP     FP     FN     TN    prec  recall      F1     FNR
+wazuh              35139  0.1479   5198  29941    862  17644  0.1479  0.8578  0.2523  0.1422
+suricata           16708  0.0000      0  16708   6060  30877  0.0000  0.0000     n/a  1.0000
+aminer              1798  0.4794    862    936   5198  46649  0.4794  0.1422  0.2194  0.8578
+fused              53645  0.1130   6060  47585      0      0  0.1130  1.0000  0.2030  0.0000
+oracle              6060  1.0000   6060      0      0  47585  1.0000  1.0000  1.0000  0.0000
+random-fused       53645  0.1130   6060  47585      0      0  0.1130  1.0000  0.2030  0.0000  (degenerate: = pool)
+random-wazuh       35139  0.1144   4020  31119   2040  16466  0.1144  0.6634  0.1952  0.3366
+random-suricata    16708  0.1135   1896  14812   4164  32773  0.1135  0.3129  0.1665  0.6871
+random-aminer       1798  0.1057    190   1608   5870  45977  0.1057  0.0314  0.0484  0.9686
+```
+
+### shaw — truth: time_label (sensitivity)
+
+```
+variant           alerts   share     TP     FP     FN     TN    prec  recall      F1     FNR
+wazuh              35139  0.1582   5558  29581   1170  17336  0.1582  0.8261  0.2655  0.1739
+suricata           16708  0.0122    204  16504   6524  30413  0.0122  0.0303  0.0174  0.9697
+aminer              1798  0.5373    966    832   5762  46085  0.5373  0.1436  0.2266  0.8564
+fused              53645  0.1254   6728  46917      0      0  0.1254  1.0000  0.2229  0.0000
+oracle              6060  1.0000   6060      0    668  46917  1.0000  0.9007  0.9478  0.0993
+random-fused       53645  0.1254   6728  46917      0      0  0.1254  1.0000  0.2229  0.0000  (degenerate: = pool)
+random-wazuh       35139  0.1267   4452  30687   2276  16230  0.1267  0.6617  0.2127  0.3383
+random-suricata    16708  0.1250   2088  14620   4640  32297  0.1250  0.3103  0.1782  0.6897
+random-aminer       1798  0.1162    209   1589   6519  45328  0.1162  0.0311  0.0490  0.9689
+```
+
+### Study sample (N=20 from fused, proportional on event_label, seed 20261031)
+
+| | russellmitchell | shaw |
+|---|---|---|
+| derived seed | 4516658805501130058 | 1560837036131065743 |
+| strata available → taken | attack 10,957 → 6; benign 24,975 → 14 | attack 6,060 → 2; benign 47,585 → 18 |
+| by detector | wazuh 13, suricata 6, aminer 1 | wazuh 15, suricata 5, aminer 0 |
+| attack by time_label | 8/20 | 2/20 |
+
+## Surprises
+
+1. **`random-fused` is degenerate.** The pool is the union of the three
+   detectors, so a random draw at the fused volume is the whole pool. The
+   manifest flags it (`degenerate: true`). The size-matched single-detector
+   random controls are the informative ones, and they show differences:
+   AMiner beats its random control by a wide margin (precision 0.90 vs 0.32
+   in russellmitchell, 0.48 vs 0.11 in shaw), Wazuh slightly (0.33 vs 0.30;
+   0.15 vs 0.11), and Suricata scores *below* random (0.005 vs 0.31; 0.000
+   vs 0.11).
+2. **Suricata has almost no attack event labels.** In the pool, 44/9,186
+   (russellmitchell) and 0/16,708 (shaw) Suricata alerts carry one. By
+   time_label the figures are 213 and 204. Per the authors' `analyze.py`,
+   Suricata event labels come from AIT-NDS netflow matching (DNS-log
+   matching for one .biz rule), not log-line matching. Whether this is
+   Suricata's real behaviour or a limit of the labelling method is open.
+   It decides how the Suricata condition can be interpreted.
+3. **The fused sample is dominated by Wazuh** (13/20 and 15/20). AMiner
+   contributes 1 and 0 alerts. Sampling from `fused` alone therefore says
+   little about the AMiner condition.
+4. **Few attacks per sample:** 6/20 and 2/20. That is the honest base rate
+   of the fused source, but recall-type agent metrics on 2 positives per
+   scenario will be very noisy.
+5. **Oracle recall under time_label is below 1** (0.929 and 0.901): 840 and
+   668 alerts fall inside attack windows but have no event label. This is
+   the expected gap between the two truths, and it is why time_label is
+   only a sensitivity analysis.
+
+## Open questions for the user
+
+1. **Random control at fused volume.** Keep `random-fused` (degenerate, =
+   pool) as the default, or make the per-detector random controls the
+   default in `study.json`? A non-degenerate fused-volume control would
+   need a population larger than the alert pool (raw log lines), which is
+   out of scope without AIT-LDSv2.
+2. **Sample per variant.** For a detector-conditioned study, the agent
+   should probably investigate N alerts drawn *from each variant* (wazuh,
+   suricata, aminer, fused, oracle, random-*), not only from fused. The
+   sampler already supports any variant; should M7 sample every variant
+   (and is N=20 per variant per scenario right, given finding 4)?
+3. **Suricata labels.** Given finding 2, should the Suricata condition be
+   reported with time_label alongside event_label as a co-primary truth,
+   or carry a stated limitation?
+4. **Empty Suricata attack stratum.** In shaw, `sample-suricata` would have
+   no attack alerts at all, so proportional allocation gives 0 attacks.
+   Accept that as the true base rate?
+
+---
+
+# M2: alert schema and AIT-ADS loader
 
 Date: 2026-10-31. Branch `phase2/alert-schema` (from `phase2/alert-foundation`
-at `a6fecf7`). Code commit: `0ad0b50`. All numbers below are copied from
-command output in this session; none are estimates.
+at `a6fecf7`). Code commit: `0ad0b50`.
+
+> Superseded in M3: fast.log records without an eve.json twin are now
+> Suricata alerts (`fast_log_unmatched`), not duplicates; AIT-LDSv2 will not
+> be added; MatchValueAverageChangeDetector stays an event alert.
 
 ## What was done
 
