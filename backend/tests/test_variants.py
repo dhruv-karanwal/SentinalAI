@@ -59,8 +59,15 @@ def test_pool_is_investigation_eligible_and_time_sorted(pool: AlertPool) -> None
 
 
 def test_variants(pool: AlertPool) -> None:
-    v = build_variants(pool, seed=SEED, random_references=("fused", "wazuh"))
-    assert list(v) == ["wazuh", "suricata", "aminer", "fused", "oracle", "random-fused", "random-wazuh"]
+    v = build_variants(pool, seed=SEED, shuffled_references=("fused", "wazuh"),
+                       noise_references=("suricata",))
+    assert list(v) == ["wazuh", "suricata", "aminer", "fused", "oracle", "shuffled-fused",
+                       "shuffled-wazuh", "noise-suricata"]
+    # Scenario-level noise: count-matched to suricata, drawn only from event-benign alerts.
+    assert len(v["noise-suricata"].alert_ids) == 2
+    assert set(v["noise-suricata"].alert_ids) == {W1, S4}
+    assert v["noise-suricata"].family == "noise" and v["shuffled-wazuh"].family == "shuffled"
+    assert v["wazuh"].family == "detector" and v["fused"].family == "fused"
     a2 = aminer_id(pool)
     assert v["wazuh"].alert_ids == (W1, W5)
     assert v["suricata"].alert_ids == (S2, S4)
@@ -72,23 +79,23 @@ def test_variants(pool: AlertPool) -> None:
         times = [e.timestamp for e in variant.entries]
         assert times == sorted(times)
     # Random at the fused volume draws the whole pool: flagged, not hidden.
-    assert set(v["random-fused"].alert_ids) == set(v["fused"].alert_ids)
-    assert v["random-fused"].degenerate
-    assert len(v["random-wazuh"].alert_ids) == 2 and not v["random-wazuh"].degenerate
-    assert v["random-wazuh"].reference == "wazuh"
+    assert set(v["shuffled-fused"].alert_ids) == set(v["fused"].alert_ids)
+    assert v["shuffled-fused"].degenerate
+    assert len(v["shuffled-wazuh"].alert_ids) == 2 and not v["shuffled-wazuh"].degenerate
+    assert v["shuffled-wazuh"].reference == "wazuh"
 
 
-def test_random_is_seeded(pool: AlertPool) -> None:
+def test_shuffled_is_seeded(pool: AlertPool) -> None:
     def draw(seed: int) -> tuple[str, ...]:
-        return build_variants(pool, seed=seed, random_references=("wazuh",))["random-wazuh"].alert_ids
+        return build_variants(pool, seed=seed, shuffled_references=("wazuh",))["shuffled-wazuh"].alert_ids
 
     assert draw(SEED) == draw(SEED)
     assert len({draw(seed) for seed in range(20)}) > 1
 
 
-def test_unknown_random_reference_raises(pool: AlertPool) -> None:
+def test_unknown_shuffled_reference_raises(pool: AlertPool) -> None:
     with pytest.raises(ValueError, match="reference"):
-        build_variants(pool, seed=SEED, random_references=("oracle-x",))
+        build_variants(pool, seed=SEED, shuffled_references=("oracle-x",))
 
 
 def test_variant_alerts_are_the_ingested_records(pool: AlertPool, processed: Path) -> None:
@@ -120,7 +127,7 @@ def test_triage_scores(pool: AlertPool) -> None:
 
 
 def test_manifest(pool: AlertPool) -> None:
-    v = build_variants(pool, seed=SEED, random_references=("wazuh",))
+    v = build_variants(pool, seed=SEED, shuffled_references=("wazuh",))
     m = variant_manifest(v["fused"], pool)
     assert m["variant"] == "fused" and m["scenario"] == "synthetic"
     assert m["alerts"] == 5 and m["pool_size"] == 5
@@ -131,7 +138,7 @@ def test_manifest(pool: AlertPool) -> None:
                               "include_aggregates": False}
     assert m["source"]["alerts_file"] == "synthetic.alerts.jsonl"
     assert len(m["source"]["alerts_sha256"]) == 64
-    r = variant_manifest(v["random-wazuh"], pool)
+    r = variant_manifest(v["shuffled-wazuh"], pool)
     assert (r["seed"], r["reference_variant"], r["reference_size"]) == (SEED, "wazuh", 2)
     assert isinstance(r["derived_seed"], int) and r["degenerate"] is False
 
@@ -156,7 +163,8 @@ def test_pool_requires_ground_truth_for_every_alert(processed: Path) -> None:
 def synthetic_config(tmp_path: Path) -> Path:
     data = json.loads(DEFAULT_STUDY_CONFIG.read_text(encoding="utf-8"))
     data["split"]["dev"] = ["synthetic"]
-    data["variants"]["random_reference"] = ["aminer"]
+    data["pilot"]["scenarios"] = ["synthetic"]
+    data["variants"]["shuffled_reference"] = ["aminer"]
     path = tmp_path / "study.json"
     path.write_text(json.dumps(data), encoding="utf-8")
     return path
@@ -168,16 +176,18 @@ def test_dev_triage_report(processed: Path, tmp_path: Path) -> None:
     assert report["scenario_split"] == "dev"
     assert report["truth"] == {"primary": "event_label", "sensitivity": "time_label"}
     assert list(report["variants"]) == [
-        "wazuh", "suricata", "aminer", "fused", "oracle", "random-aminer"]
+        "wazuh", "suricata", "aminer", "fused", "oracle", "shuffled-aminer",
+        "noise-wazuh", "noise-suricata", "noise-aminer"]
+    assert report["variants"]["noise-aminer"]["triage"]["event_label"]["tp"] == 0
     assert report["variants"]["oracle"]["triage"]["event_label"]["f1"] == 1.0
-    # random-fused survives only as a manifest, marked degenerate, never as a variant.
-    only = report["manifest_only"]["random-fused"]
+    # shuffled-fused survives only as a manifest, marked degenerate, never as a variant.
+    only = report["manifest_only"]["shuffled-fused"]
     assert only["degenerate"] is True and only["experiment_variant"] is False
     assert "sample" not in report
     out = tmp_path / "out" / "synthetic"
     assert (out / "synthetic.variant.fused.manifest.json").exists()
-    assert (out / "synthetic.variant.random-fused.manifest.json").exists()
-    assert not (out / "synthetic.variant.random-fused.alerts.jsonl").exists()
+    assert (out / "synthetic.variant.shuffled-fused.manifest.json").exists()
+    assert not (out / "synthetic.variant.shuffled-fused.alerts.jsonl").exists()
     assert json.loads((out / "synthetic.dev_triage.json").read_text("utf-8")) == report
 
 

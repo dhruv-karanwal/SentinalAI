@@ -2,7 +2,12 @@ from pathlib import Path
 
 import pytest
 
-from app.evaluation.case_scoring import alert_claim_index, flatten_record, score_case
+from app.evaluation.case_scoring import (
+    alert_claim_index,
+    alert_quote_index,
+    flatten_record,
+    score_case,
+)
 from app.evaluation.metrics import Claim
 from app.ingestion.ground_truth import AttackTimeline
 from app.study.cases import CaseKind, build_cases, case_alerts
@@ -17,7 +22,7 @@ CONFIG = CaseConfig(seed=7, padding_seconds=0, max_alerts=100, truncation="earli
 def views(pool: AlertPool, samples_dir: Path) -> dict[str, object]:  # noqa: F811
     timeline = AttackTimeline.from_labels_csv(
         samples_dir / "synthetic_ait_ads" / "synthetic_labels.csv", "synthetic")
-    fused = build_variants(pool, seed=7, random_references=())["fused"]
+    fused = build_variants(pool, seed=7, shuffled_references=())["fused"]
     return {c.case_id: (c, case_alerts(c, fused, max_alerts=100, truncation="earliest"))
             for c in build_cases(pool, timeline, CONFIG).cases}
 
@@ -49,7 +54,7 @@ def test_flatten_record() -> None:
 
 def test_unsupported_claims_against_alert_record(pool: AlertPool, samples_dir: Path) -> None:  # noqa: F811
     case, view = views(pool, samples_dir)["synthetic:attack:network_scans"]  # type: ignore[misc]
-    alerts = list(pool.alerts(build_variants(pool, seed=7, random_references=())["fused"]))
+    alerts = list(pool.alerts(build_variants(pool, seed=7, shuffled_references=())["fused"]))
     index = alert_claim_index(a for a in alerts if a.alert_id in {e.alert_id for e in view.entries})
     assert set(index) == {W5}
     record = index[W5]
@@ -66,3 +71,27 @@ def test_unsupported_claims_against_alert_record(pool: AlertPool, samples_dir: P
     score = score_case(case, view, [W5], claims=claims, claim_index=index)
     assert score.unsupported_claim_rate == pytest.approx(2 / 5)
     assert score.claims == 5
+
+
+def test_citation_precision(pool: AlertPool, samples_dir: Path) -> None:  # noqa: F811
+    case, view = views(pool, samples_dir)["synthetic:attack:dirb"]  # type: ignore[misc]
+    every = score_case(case, view, [e.alert_id for e in view.entries])  # s2, a2, s4
+    assert (every.citation_precision_event, every.citation_precision_time) == (2 / 3, 1.0)
+    assert (every.cited_event_attack, every.cited_in_phase) == (2, 3)
+    # Ids outside the case count against precision: the agent cited something it never saw.
+    half = score_case(case, view, [S2, "made-up", S2])  # duplicates are cited once
+    assert (half.cited, half.citation_precision_event, half.citation_precision_time) == (2, 0.5, 0.5)
+    none = score_case(case, view, [])
+    assert none.citation_precision_event is None and none.citation_precision_time is None
+
+
+def test_quote_claims_in_case_scoring(pool: AlertPool, samples_dir: Path) -> None:  # noqa: F811
+    case, view = views(pool, samples_dir)["synthetic:attack:network_scans"]  # type: ignore[misc]
+    alerts = [a for a in pool.alerts(build_variants(pool, seed=7, shuffled_references=())["fused"])
+              if a.alert_id == W5]
+    quotes = alert_quote_index(alerts)
+    assert quotes[W5][0].startswith("10.0.0.9 - - [14/Nov")
+    claims = [Claim.quote(W5, '"GET /synthetic-probe HTTP/1.1"'), Claim.quote(W5, "get /synthetic")]
+    score = score_case(case, view, [W5], claims=claims, claim_index=alert_claim_index(alerts),
+                       quote_index=quotes)
+    assert (score.claims, score.unsupported_claims, score.unsupported_claim_rate) == (2, 1, 0.5)

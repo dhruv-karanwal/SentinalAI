@@ -101,13 +101,21 @@ eligible alerts (no training-mode, duplicate or aggregate alerts).
 - `fused`: union of the three (the whole pool), time-ordered, each alert once.
 - `oracle`: pool alerts with an attack `event_label`, i.e. a perfect detector
   restricted to what the detectors already raised.
-- `random-wazuh`, `random-suricata`, `random-aminer` (the default random
-  controls): a seeded uniform draw from the pool with the count of that
-  detector's variant. `random-fused` would be the whole pool (the pool *is*
-  the union of the detectors), so it is written only as a manifest, flagged
-  `degenerate` and `experiment_variant: false`, and is never used as a
-  variant. A random control at the fused volume would need a population
-  larger than the alert pool (e.g. raw log events), which is out of scope.
+- `noise-wazuh`, `noise-suricata`, `noise-aminer` (**the random control**,
+  decision of M4b): alerts whose `event_label` is benign, count-matched to
+  the reference detector. In cases they are rebuilt per case: as many
+  alerts as the detector has in the case window, drawn from event-benign
+  alerts of the same window first, then from the scenario pool's other
+  event-benign alerts (which then lie outside the window). Each case
+  manifest records the split (`from_window`, `from_fallback`, `shortfall`).
+  At scenario level (triage tables) it is a seeded draw of the detector's
+  count from the pool's event-benign alerts. It measures what an agent does
+  when its alert source is pure noise at a real detector's volume.
+- `shuffled-wazuh`, `shuffled-suricata`, `shuffled-aminer` ("shuffled-pool"
+  rows, the M3 random controls, kept for comparison): a seeded uniform draw
+  from the whole pool with the detector's count. `shuffled-fused` would be
+  the whole pool, so it is written only as a manifest, flagged `degenerate`
+  and `experiment_variant: false`.
 
 Detector-level triage (verdict = "alert is in the variant", over the pool)
 uses `app/evaluation/metrics.py`. These scores describe the alert sources,
@@ -124,7 +132,9 @@ longer applies.)
   = the phase interval `[start, end)` widened by `padding_seconds` (default
   0) on both sides.
 - **Benign cases:** per attack case, `benign_per_attack` (default 1) windows
-  of the same length. Whole-second starts are drawn uniformly (seed
+  of the same length. They are deliberately *not* matched on time of day;
+  every case manifest records the UTC time of day of each window's start and
+  end so the difference can be reported. Whole-second starts are drawn uniformly (seed
   20261031, derived per scenario) from every start whose padded window
   lies inside the observation range (first to last investigation-eligible
   alert), outside every attack interval widened by the padding, and
@@ -135,13 +145,16 @@ longer applies.)
   difference is part of what a source contributes.
 - **Alerts per case:** the variant's alerts with
   `window_start <= timestamp < window_end`, time-ordered, capped at
-  `max_alerts` (default 100) by the `earliest` rule (first 100 by time,
-  the order an analyst queue shows them). Every case manifest records,
-  per variant: the alerts in the window, those kept, those dropped, how
+  `max_alerts` (default 100). Default rule `spread` (decision of M4b): keep
+  the alerts at time ranks `floor((i + 0.5) * n / 100)`, i = 0..99, so the
+  kept alerts are spread evenly over the window. `earliest` (first 100 by
+  time) remains an option. Every case manifest records, per variant: the
+  rule used, the alerts in the window, those kept, those dropped, and how
   many dropped alerts were attack-labelled (by event_label and by
-  time_label), and the rule. The cap is not neutral: in the large web-scan
-  phases (dirb, wpscan) it drops thousands of attack-labelled alerts. That
-  is reported for every case.
+  time_label). The cap is not neutral: in the large web-scan phases it
+  drops thousands of attack-labelled alerts, and in the dev scenario shaw
+  the `spread` rule drops all 3 event-labelled alerts of the 547-alert
+  `cracking` case of the fused source (the `earliest` rule kept them).
 
 ### Case-level scores (deterministic, no LLM)
 
@@ -150,16 +163,57 @@ longer applies.)
   cited alert of the case lies inside the phase interval.
 - The same with `event_label` (sensitivity): only cited alerts with an
   attack event_label count.
-- Unsupported-claim rate: `Claim(record_id=alert_id, field, value)`
-  checked by exact (stripped) string match against the case's own alert
-  records: canonical fields, `raw_alert.*`, and whole raw log lines
-  (`evidence.log_lines.<i>`). Claims about alerts outside the case are
-  unsupported.
+- Coverage is reported over **all** attack phases and over the
+  **alert-reachable** subset: phases where at least one investigation-
+  eligible alert of any detector has an attack event_label inside the phase
+  interval. Unreachable phases (dev: network_scans, reverse_shell, dnsteal
+  in russellmitchell; dnsteal, service_scans, reverse_shell in shaw) are
+  listed in every report; no alert source can cover them by event_label.
+- Citation precision: fraction of the distinct cited ids that are case
+  alerts with an attack event_label (primary), and the fraction inside the
+  case's phase interval (time version; 0 for benign cases). Cited ids that
+  are not alerts of the case count as wrong citations.
+- Unsupported-claim rate, `Claim(record_id=alert_id, ...)` against the
+  case's own alert records, two kinds (decision of M4b):
+  - *field-value*: the flattened record (canonical fields, `raw_alert.*`,
+    `evidence.log_lines.<i>`) has `field == value`, exact after stripping;
+  - *quote*: `value` is an exact, case-sensitive substring of one of the
+    alert's raw log lines (`evidence.log_lines`), at least 8 characters, no
+    whitespace or case normalization.
+  Claims about alerts outside the case are unsupported. Positional
+  `Claim(id, field, value)` remains a field-value claim.
 - Investigation load: number of alerts in the case after the cap.
 
 **Coverage ceilings** score each case as if the agent cited every alert it
 was given. They bound what any agent can reach from a source and are
 reported as ceilings, not agent results.
+
+**Time-label coverage can be reached by noise.** Event-benign alerts that
+fall inside an attack interval count as "inside the phase", so noise
+controls reach up to 5/10 (russellmitchell) and 6/10 (shaw) time coverage
+with 0/10 event-label coverage. Event-label coverage on the reachable
+phases is the measure noise cannot inflate.
+
+### Deterministic baselines (M4b)
+
+`app/study/baselines.py` defines non-LLM citers that see only what an
+agent sees (the case's alerts) and never look at labels: `cite-all` (its
+coverage is the ceiling), `cite-none`, `cite-top-k-wazuh-level` (Wazuh
+alerts by `rule.level` descending, then the rest in time order; k = 5),
+`cite-top-k-detector-order` (by detector in the order aminer, wazuh,
+suricata, set from the M3 dev triage precision, a dev-derived choice; then
+time; k = 5) and `cite-aminer-only`. Each cited alert gets one field-value
+claim (`rule_id`, else `rule_name`) and one quote claim (first 60
+characters of its first raw log line, if >= 8 characters), copied from the
+record; their unsupported-claim rate is 0 by construction and checks the
+claim machinery on real records. These baselines are the reference points
+an LLM agent must beat and are reported as baselines, not agent results.
+
+## Pilot
+
+The pilot runs on the dev scenarios only (`pilot.scenarios` in
+`study.json`, validated as a subset of `split.dev`). Held-out scenarios
+stay untouched until the final runs.
 
 ## Labels and features
 

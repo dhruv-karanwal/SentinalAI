@@ -59,11 +59,11 @@ def test_real_variants_invariants(tmp_path: Path) -> None:
     run_alert_ingest(AitAdsInputs.from_layout(RAW_DIR, SCENARIO), output_dir=tmp_path, collect=False)
     pool = AlertPool.from_processed(tmp_path, SCENARIO)
     variants = build_variants(pool, seed=config.variant_seed,
-                              random_references=("fused", "wazuh", "suricata", "aminer"))
+                              shuffled_references=("fused", "wazuh", "suricata", "aminer"))
     singles = [variants[d] for d in ("wazuh", "suricata", "aminer")]
     assert sum(len(v.entries) for v in singles) == len(variants["fused"].entries) == len(pool.entries)
     assert set(variants["oracle"].alert_ids) <= set(variants["fused"].alert_ids)
-    assert variants["random-fused"].degenerate
+    assert variants["shuffled-fused"].degenerate
     for d in ("wazuh", "suricata", "aminer"):
-        assert len(variants[f"random-{d}"].entries) == len(variants[d].entries)
+        assert len(variants[f"shuffled-{d}"].entries) == len(variants[d].entries)
 

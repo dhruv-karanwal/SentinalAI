@@ -15,16 +15,27 @@ given, together with the alerts one alert source raised in that window:
   processing attack cases in time order. When no valid start is left the
   case is listed under ``unavailable`` in the sampling log, not invented.
 
+Every case records the time of day (UTC) of its start and end; benign
+windows are deliberately not matched on time of day.
+
 For each case and variant the alerts are those with
 ``window_start <= timestamp < window_end``, time-ordered. A case holds at
-most ``max_alerts``; with the ``earliest`` rule the first ``max_alerts`` by
-time are kept (the order an analyst's queue shows them). Every truncation
-is recorded: alerts dropped, and how many of those were attack-labelled by
-event_label and by time_label, so a cap that hides an attack is visible.
+most ``max_alerts``. The default ``spread`` rule keeps alerts at evenly
+spaced time ranks across the window, so long phases are seen from start to
+end; ``earliest`` keeps the first ``max_alerts`` (analyst-queue order).
+Every truncation is recorded: the rule, alerts dropped, and how many of
+those were attack-labelled by event_label and by time_label.
+
+Noise controls (``noise-<det>``) are rebuilt per case: as many alerts as
+``<det>`` has in the window (before the cap), drawn from event-benign
+alerts of the same window first, then from the scenario pool's other
+event-benign alerts (which then lie outside the window), with the split
+recorded. The cap then applies as for any variant.
 
 Ceilings: scoring a case as if the agent cited *every* alert it was given
 gives the best coverage any agent could reach from that alert source.
-These are ceilings, not agent results.
+Baselines (app.study.baselines) are deterministic non-LLM citers scored on
+every variant. Both are reference points, not agent results.
 """
 
 from __future__ import annotations
@@ -33,15 +44,17 @@ import bisect
 import json
 import math
 import random
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from app.evaluation.case_scoring import CaseScore, score_case
+from app.evaluation.case_scoring import CaseScore, alert_claim_index, alert_quote_index, score_case
 from app.ingestion.ground_truth import AttackTimeline
-from app.study.config import TRUNCATION_CHOICES, CaseConfig, StudyConfig
+from app.study.baselines import BASELINE_NAMES, baseline_citations, baseline_claims
+from app.study.config import TRUNCATION_CHOICES, BaselineConfig, CaseConfig, StudyConfig
 from app.study.variants import AlertPool, PoolEntry, Variant, derive_seed, experiment_variants
 
 
@@ -162,13 +175,14 @@ class CaseAlerts:
     case_id: str
     variant: str
     entries: tuple[PoolEntry, ...]
-    in_window: int
+    in_window: int  # before the cap (for a noise control: the alerts drawn)
     dropped: int
     dropped_event_attack: int
     dropped_time_attack: int
     in_phase_before_cap: int
     in_phase_event_attack_before_cap: int
     truncation_rule: str
+    noise: dict[str, int] | None = None
 
 
 def in_phase(case: Case, entry: PoolEntry) -> bool:
@@ -176,17 +190,36 @@ def in_phase(case: Case, entry: PoolEntry) -> bool:
     return case.kind is CaseKind.ATTACK and case.start <= entry.timestamp < case.end
 
 
-def case_alerts(case: Case, variant: Variant, *, max_alerts: int, truncation: str) -> CaseAlerts:
+def _time_key(entry: PoolEntry) -> tuple[datetime, str, int]:
+    return (entry.timestamp, entry.source_file, entry.source_line)
+
+
+def _truncate(window: Sequence[PoolEntry], max_alerts: int,
+              truncation: str) -> tuple[tuple[PoolEntry, ...], tuple[PoolEntry, ...], str]:
     if truncation not in TRUNCATION_CHOICES:
         raise ValueError(f"truncation must be one of {', '.join(TRUNCATION_CHOICES)}")
-    times = [e.timestamp for e in variant.entries]  # variants are time-ordered
-    lo = bisect.bisect_left(times, case.window_start)
-    hi = bisect.bisect_left(times, case.window_end)
-    window = variant.entries[lo:hi]
-    kept, dropped = window[:max_alerts], window[max_alerts:]
+    n = len(window)
+    if truncation == "earliest":
+        keep = set(range(min(n, max_alerts)))
+        rule = (f"earliest {max_alerts} by timestamp (tiebreak source_file, source_line); "
+                "later alerts dropped")
+    else:
+        keep = (set(range(n)) if n <= max_alerts
+                else {((2 * i + 1) * n) // (2 * max_alerts) for i in range(max_alerts)})
+        rule = (f"spread: {max_alerts} alerts at evenly spaced time ranks "
+                f"floor((i + 0.5) * n / {max_alerts}), i = 0..{max_alerts - 1}, of the n alerts "
+                "in the window (time order, tiebreak source_file, source_line)")
+    kept = tuple(window[i] for i in range(n) if i in keep)
+    dropped = tuple(window[i] for i in range(n) if i not in keep)
+    return kept, dropped, rule
+
+
+def _view(case: Case, name: str, window: Sequence[PoolEntry], max_alerts: int, truncation: str,
+          noise: dict[str, int] | None = None) -> CaseAlerts:
+    kept, dropped, rule = _truncate(window, max_alerts, truncation)
     return CaseAlerts(
         case_id=case.case_id,
-        variant=variant.name,
+        variant=name,
         entries=kept,
         in_window=len(window),
         dropped=len(dropped),
@@ -194,9 +227,71 @@ def case_alerts(case: Case, variant: Variant, *, max_alerts: int, truncation: st
         dropped_time_attack=sum(e.time_attack for e in dropped),
         in_phase_before_cap=sum(in_phase(case, e) for e in window),
         in_phase_event_attack_before_cap=sum(in_phase(case, e) and bool(e.event_attack) for e in window),
-        truncation_rule=(f"earliest {max_alerts} by timestamp (tiebreak source_file, source_line); "
-                         "later alerts dropped"),
+        truncation_rule=rule,
+        noise=noise,
     )
+
+
+def _window(entries: Sequence[PoolEntry], case: Case) -> tuple[int, int]:
+    times = [e.timestamp for e in entries]  # time-ordered
+    return bisect.bisect_left(times, case.window_start), bisect.bisect_left(times, case.window_end)
+
+
+def case_alerts(case: Case, variant: Variant, *, max_alerts: int, truncation: str) -> CaseAlerts:
+    lo, hi = _window(variant.entries, case)
+    return _view(case, variant.name, variant.entries[lo:hi], max_alerts, truncation)
+
+
+def noise_case_alerts(case: Case, benign: Sequence[PoolEntry], count: int, *, seed: int, name: str,
+                      max_alerts: int, truncation: str) -> CaseAlerts:
+    """``count`` event-benign alerts for a case: same window first, scenario pool as fallback.
+
+    ``benign`` is the pool's event-benign alerts in time order. The split
+    (from_window / from_fallback / shortfall) is recorded on the view.
+    """
+    lo, hi = _window(benign, case)
+    inside, outside = list(benign[lo:hi]), list(benign[:lo]) + list(benign[hi:])
+    rng = random.Random(derive_seed(seed, "noise-case", case.case_id, name))
+    from_window = min(count, len(inside))
+    chosen = [inside[i] for i in rng.sample(range(len(inside)), from_window)]
+    from_fallback = min(count - from_window, len(outside))
+    chosen += [outside[i] for i in rng.sample(range(len(outside)), from_fallback)]
+    chosen.sort(key=_time_key)
+    record = {"reference_count": count, "from_window": from_window, "from_fallback": from_fallback,
+              "shortfall": count - from_window - from_fallback}
+    return _view(case, name, chosen, max_alerts, truncation, noise=record)
+
+
+def variant_case_views(case_set: CaseSet, variants: dict[str, Variant], pool: AlertPool,
+                       config: CaseConfig) -> dict[str, list[CaseAlerts]]:
+    """Case views for every variant; noise controls are rebuilt per case."""
+    views: dict[str, list[CaseAlerts]] = {}
+    benign = pool.event_benign()
+    for name, variant in variants.items():
+        if variant.family == "noise":
+            reference = views[str(variant.reference)]  # detectors come before noise controls
+            views[name] = [
+                noise_case_alerts(case, benign, ref.in_window, seed=config.seed, name=name,
+                                  max_alerts=config.max_alerts, truncation=config.truncation)
+                for case, ref in zip(case_set.cases, reference)]
+        else:
+            views[name] = [case_alerts(case, variant, max_alerts=config.max_alerts,
+                                       truncation=config.truncation) for case in case_set.cases]
+    return views
+
+
+def reachable_phases(case_set: CaseSet, pool: AlertPool) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Attack phases with / without an event-labelled pool alert inside the phase interval."""
+    times = [e.timestamp for e in pool.entries]
+    reachable: list[str] = []
+    unreachable: list[str] = []
+    for case in case_set.cases:
+        if case.kind is not CaseKind.ATTACK:
+            continue
+        lo, hi = bisect.bisect_left(times, case.start), bisect.bisect_left(times, case.end)
+        hit = any(e.event_attack for e in pool.entries[lo:hi])
+        (reachable if hit else unreachable).append(case.phase)
+    return tuple(reachable), tuple(unreachable)
 
 
 def _rate(covered: int, cases: int) -> dict[str, Any]:
@@ -211,6 +306,10 @@ def _summary(cases: tuple[Case, ...], views: list[CaseAlerts], scores: list[Case
     kinds = [c.kind for c in cases]
     attack = [i for i, k in enumerate(kinds) if k is CaseKind.ATTACK]
     benign = [i for i, k in enumerate(kinds) if k is CaseKind.BENIGN]
+    noise = None
+    if views and views[0].noise is not None:
+        noise = {key: sum(v.noise[key] for v in views if v.noise is not None)
+                 for key in ("reference_count", "from_window", "from_fallback", "shortfall")}
     return {
         "attack_cases": len(attack),
         "benign_cases": len(benign),
@@ -241,7 +340,62 @@ def _summary(cases: tuple[Case, ...], views: list[CaseAlerts], scores: list[Case
         },
         "benign_cases_with_event_attack_alert": sum(
             any(e.event_attack for e in views[i].entries) for i in benign),
+        "noise": noise,
     }
+
+
+def _baseline_summaries(case_set: CaseSet, views: list[CaseAlerts], pool: AlertPool,
+                        config: BaselineConfig, reachable: tuple[str, ...]) -> dict[str, Any]:
+    cases = case_set.cases
+    attack = [i for i, c in enumerate(cases) if c.kind is CaseKind.ATTACK]
+    benign = [i for i, c in enumerate(cases) if c.kind is CaseKind.BENIGN]
+    reach = [i for i in attack if cases[i].phase in reachable]
+    flat: dict[str, dict[str, str]] = {}
+    summaries: dict[str, Any] = {}
+    for name in BASELINE_NAMES:
+        scores = []
+        for case, view in zip(cases, views):
+            cited = baseline_citations(name, view, config)
+            wanted = set(cited)
+            alerts = [pool.alert(e) for e in view.entries if e.alert_id in wanted]
+            for alert in alerts:
+                if alert.alert_id not in flat:
+                    flat[alert.alert_id] = alert_claim_index([alert])[alert.alert_id]
+            scores.append(score_case(
+                case, view, cited, claims=baseline_claims(alerts, quote_chars=config.quote_chars),
+                claim_index={a.alert_id: flat[a.alert_id] for a in alerts},
+                quote_index=alert_quote_index(alerts)))
+        cited_total = sum(s.cited for s in scores)
+        claims = sum(s.claims for s in scores)
+        summaries[name] = {
+            "coverage": {
+                "time_label": {
+                    "all": _rate(sum(scores[i].coverage_time == 1.0 for i in attack), len(attack)),
+                    "reachable": _rate(sum(scores[i].coverage_time == 1.0 for i in reach), len(reach)),
+                },
+                "event_label": {
+                    "all": _rate(sum(scores[i].coverage_event == 1.0 for i in attack), len(attack)),
+                    "reachable": _rate(sum(scores[i].coverage_event == 1.0 for i in reach), len(reach)),
+                },
+            },
+            "citation_precision": {
+                "event_label": (sum(s.cited_event_attack for s in scores) / cited_total
+                                if cited_total else None),
+                "time_label": sum(s.cited_in_phase for s in scores) / cited_total if cited_total else None,
+                "cited": cited_total,
+                "event_attack": sum(s.cited_event_attack for s in scores),
+                "in_phase": sum(s.cited_in_phase for s in scores),
+            },
+            "unsupported_claim_rate": sum(s.unsupported_claims for s in scores) / claims if claims else None,
+            "claims": claims,
+            "alerts_cited": {
+                "total": cited_total,
+                "mean_per_case": _mean([s.cited for s in scores]),
+                "mean_per_attack_case": _mean([scores[i].cited for i in attack]),
+                "mean_per_benign_case": _mean([scores[i].cited for i in benign]),
+            },
+        }
+    return summaries
 
 
 def _dump(path: Path, data: Any) -> None:
@@ -251,29 +405,35 @@ def _dump(path: Path, data: Any) -> None:
 
 def dev_case_report(processed_dir: str | Path, labels_path: str | Path, scenario: str,
                     config: StudyConfig, *, output_dir: str | Path | None = None) -> dict[str, Any]:
-    """Build the cases of a dev scenario and their per-variant coverage ceilings."""
+    """Cases of a dev scenario: per-variant ceilings and deterministic baselines."""
     config.split.require_dev(scenario)
     cfg = config.cases
     pool = AlertPool.from_processed(processed_dir, scenario)
     timeline = AttackTimeline.from_labels_csv(labels_path, scenario)
     case_set = build_cases(pool, timeline, cfg)
     variants = experiment_variants(pool, config)
+    views_by_variant = variant_case_views(case_set, variants, pool, cfg)
+    reachable, unreachable = reachable_phases(case_set, pool)
 
     case_records: list[dict[str, Any]] = [
         {"case_id": c.case_id, "kind": c.kind.value, "phase": c.phase,
          "start": c.start.isoformat(), "end": c.end.isoformat(),
+         "start_time_of_day_utc": c.start.strftime("%H:%M:%S"),
+         "end_time_of_day_utc": c.end.strftime("%H:%M:%S"),
          "window_start": c.window_start.isoformat(), "window_end": c.window_end.isoformat(),
+         "phase_reachable": (c.phase in reachable) if c.kind is CaseKind.ATTACK else None,
          "variants": {}}
         for c in case_set.cases
     ]
     summaries: dict[str, Any] = {}
-    for name, variant in variants.items():
-        views = [case_alerts(c, variant, max_alerts=cfg.max_alerts, truncation=cfg.truncation)
-                 for c in case_set.cases]
+    baselines: dict[str, Any] = {}
+    for name, views in views_by_variant.items():
         # Ceiling: the agent cites every alert it was given; no claims.
         scores = [score_case(c, v, [e.alert_id for e in v.entries])
                   for c, v in zip(case_set.cases, views)]
-        summaries[name] = _summary(case_set.cases, views, scores)
+        summaries[name] = {"family": variants[name].family,
+                           **_summary(case_set.cases, views, scores)}
+        baselines[name] = _baseline_summaries(case_set, views, pool, config.baselines, reachable)
         for record, view, score in zip(case_records, views, scores):
             record["variants"][name] = {
                 "alerts_in_window": view.in_window,
@@ -284,6 +444,7 @@ def dev_case_report(processed_dir: str | Path, labels_path: str | Path, scenario
                 "in_phase_before_cap": view.in_phase_before_cap,
                 "in_phase_event_attack_before_cap": view.in_phase_event_attack_before_cap,
                 "truncation_rule": view.truncation_rule,
+                "noise": view.noise,
                 "ceiling_coverage_time": score.coverage_time,
                 "ceiling_coverage_event": score.coverage_event,
                 "alert_ids": [e.alert_id for e in view.entries],
@@ -292,17 +453,29 @@ def dev_case_report(processed_dir: str | Path, labels_path: str | Path, scenario
     case_config = {"seed": cfg.seed, "padding_seconds": cfg.padding_seconds,
                    "max_alerts": cfg.max_alerts, "truncation": cfg.truncation,
                    "benign_per_attack": cfg.benign_per_attack}
+    b = config.baselines
     report: dict[str, Any] = {
         "scenario": scenario,
         "scenario_split": "dev",
-        "note": ("DEV-SCENARIO CEILINGS: best coverage any agent could reach from each alert "
-                 "source (agent cites every alert it is given); not agent results"),
+        "note": ("DEV-SCENARIO CEILINGS AND BASELINES: ceilings = best coverage any agent could "
+                 "reach from each alert source (agent cites every alert it is given); baselines "
+                 "= deterministic non-LLM citers; not agent results"),
         "study_config": config.source,
         "case_config": case_config,
+        "baseline_config": {"top_k": b.top_k, "detector_order": list(b.detector_order),
+                            "quote_chars": b.quote_chars},
         "cases": {"attack": sum(c.kind is CaseKind.ATTACK for c in case_set.cases),
                   "benign": sum(c.kind is CaseKind.BENIGN for c in case_set.cases)},
+        "phases": {
+            "all": [c.phase for c in case_set.cases if c.kind is CaseKind.ATTACK],
+            "reachable": list(reachable),
+            "unreachable": list(unreachable),
+            "rule": ("reachable = at least one investigation-eligible alert (any detector) with "
+                     "an attack event_label lies inside the phase interval"),
+        },
         "benign_sampling": case_set.benign_sampling,
         "variants": summaries,
+        "baselines": baselines,
     }
     if output_dir is not None:
         out = Path(output_dir) / scenario
