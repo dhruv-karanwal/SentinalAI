@@ -43,3 +43,10 @@ def test_unsupported_claims() -> None:
     ]
     assert unsupported_claim_rate(claims, logs) == 0.75
     assert unsupported_claim_rate([], logs) is None
+
+
+def test_claim_record_id_is_generic_and_backward_compatible() -> None:
+    claim = Claim("alert-1", "rule.id", "52507")
+    assert claim.record_id == "alert-1" and claim.event_id == "alert-1"
+    assert Claim.about_alert("alert-1", "rule.id", "52507") == claim
+    assert unsupported_claim_rate([claim], {"alert-1": {"rule.id": "52507"}}) == 0.0

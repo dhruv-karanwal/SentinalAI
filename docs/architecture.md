@@ -146,3 +146,26 @@ data/processed/<scenario>.ground_truth.jsonl ┘
 - The pool keeps only a small index per alert; variant alerts are re-read
   from `alerts.jsonl` by byte offset, so variant files are byte-identical
   copies of ingested records and memory stays small.
+
+# Phase 2 — Cases and case-level scoring (M4)
+
+```
+AlertPool + labels.csv (AttackTimeline)
+        │  build_cases: attack case per phase + matched benign windows (seeded)
+        ▼
+ for each experiment variant × case:
+   case_alerts ── window [start-pad, end+pad), time-ordered, cap (earliest) ── truncation recorded
+        │
+        ▼
+ score_case (app/evaluation/case_scoring.py)
+   coverage by time / event_label (attack_step_coverage, alert ids)
+   unsupported claims (Claim.record_id = alert_id vs flattened alert records)
+   load = alerts in case
+        │
+        ▼
+ data/processed/cases/<scenario>/<scenario>.cases.json          windows, sampling log, ids, truncation
+ data/processed/cases/<scenario>/<scenario>.case_ceilings.json  per-variant ceilings (dev only)
+```
+
+`app.evaluation.case_scoring` imports `app.study.cases` for types only, so
+the evaluation layer has no runtime dependency on the study layer.

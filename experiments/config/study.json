@@ -9,12 +9,15 @@
   },
   "variants": {
     "selection": "investigation",
-    "random_reference": ["fused"]
-  },
-  "sampling": {
     "seed": 20261031,
-    "sample_size": 20,
-    "variant": "fused",
-    "stratify": "proportional"
+    "random_reference": ["wazuh", "suricata", "aminer"],
+    "manifest_only_random_reference": ["fused"]
+  },
+  "cases": {
+    "seed": 20261031,
+    "padding_seconds": 0,
+    "max_alerts": 100,
+    "truncation": "earliest",
+    "benign_per_attack": 1
   }
 }

@@ -73,8 +73,24 @@ label alignment only.
 - **Primary:** `event_label`. An alert is an attack when the dataset assigns
   it an event label (any value); benign when the label is `-`.
 - **Sensitivity analysis:** `time_label` (attack when the alert falls inside
-  an attack-phase interval). Every output (ground truth file, variant
-  manifests, dev reports) carries both, so either can be computed.
+  an attack-phase interval). Every output (ground truth file, variant and
+  case manifests, dev reports) carries both, and every variant is reported
+  under both.
+
+### Limitation: Suricata event labels
+
+The dataset authors did not label Suricata alerts the way they labelled
+Wazuh and AMiner alerts. Wazuh and AMiner alerts get an `event_label` when
+their raw log line matches a labelled line of AIT-LDSv2; Suricata alerts
+get one only when their flow 5-tuple matches a labelled AIT-NDS netflow
+within 2 s (and, for one `.biz` DNS rule in two scenarios, a labelled DNS
+log line). In the dev scenarios only 44/9,186 (russellmitchell) and
+0/16,708 (shaw) investigation-eligible Suricata alerts carry an attack
+`event_label`, against 213 and 204 by `time_label`. Low Suricata precision
+under `event_label` may therefore partly reflect this labelling method, not
+only the detector. Suricata results must be reported under both labels,
+with this caveat. The low Suricata base rate is accepted as it is; it is
+not corrected.
 
 ## Alert-source variants
 
@@ -83,49 +99,67 @@ eligible alerts (no training-mode, duplicate or aggregate alerts).
 
 - `wazuh`, `suricata`, `aminer`: one detector.
 - `fused`: union of the three (the whole pool), time-ordered, each alert once.
-- `oracle`: pool alerts with an attack `event_label` — a perfect detector
+- `oracle`: pool alerts with an attack `event_label`, i.e. a perfect detector
   restricted to what the detectors already raised.
-- `random-<ref>`: seeded uniform draw from the pool with the count of
-  variant `<ref>`. **Limitation:** because the pool is the union of the
-  detectors, `random-fused` is the whole pool (flagged `degenerate` in its
-  manifest). Size-matched random controls for each single detector
-  (`random-wazuh`, ...) are the informative ones; a random control at the
-  fused volume would need a population larger than the alert pool (e.g.
-  raw log events), which is out of scope without AIT-LDSv2.
+- `random-wazuh`, `random-suricata`, `random-aminer` (the default random
+  controls): a seeded uniform draw from the pool with the count of that
+  detector's variant. `random-fused` would be the whole pool (the pool *is*
+  the union of the detectors), so it is written only as a manifest, flagged
+  `degenerate` and `experiment_variant: false`, and is never used as a
+  variant. A random control at the fused volume would need a population
+  larger than the alert pool (e.g. raw log events), which is out of scope.
 
 Detector-level triage (verdict = "alert is in the variant", over the pool)
 uses `app/evaluation/metrics.py`. These scores describe the alert sources,
 not the agent.
 
-## Study sample and stratification (decision)
+## Study unit: cases (M4)
 
-The study sample is drawn per scenario from a variant (default `fused`,
-N = 20, seed 20261031, all in `experiments/config/study.json`) by
-`study_sample`. Each manifest records the base seed, the derived seed, the
-rule and the stratum sizes.
+The unit of investigation is a **case**: a time window of one scenario plus
+the alerts one variant raised in it. (The M3 per-variant 20-alert study
+sample was retired in favour of cases; its stratification decision no
+longer applies.)
 
-**Decision: proportional stratification on `event_label`, no
-rebalancing.** The N alerts are allocated to the attack and benign strata
-in proportion to their share in the source variant (largest-remainder
-rounding), then drawn uniformly within each stratum. Justification:
+- **Attack cases:** one per (scenario, attack phase) of `labels.csv`, window
+  = the phase interval `[start, end)` widened by `padding_seconds` (default
+  0) on both sides.
+- **Benign cases:** per attack case, `benign_per_attack` (default 1) windows
+  of the same length. Whole-second starts are drawn uniformly (seed
+  20261031, derived per scenario) from every start whose padded window
+  lies inside the observation range (first to last investigation-eligible
+  alert), outside every attack interval widened by the padding, and
+  disjoint from the benign windows already drawn. Attack cases are
+  processed in time order. Cases that do not fit are listed as
+  `unavailable`, never invented. Matching on length keeps attack and benign
+  cases comparable in time span; their alert volumes differ, and that
+  difference is part of what a source contributes.
+- **Alerts per case:** the variant's alerts with
+  `window_start <= timestamp < window_end`, time-ordered, capped at
+  `max_alerts` (default 100) by the `earliest` rule (first 100 by time,
+  the order an analyst queue shows them). Every case manifest records,
+  per variant: the alerts in the window, those kept, those dropped, how
+  many dropped alerts were attack-labelled (by event_label and by
+  time_label), and the rule. The cap is not neutral: in the large web-scan
+  phases (dirb, wpscan) it drops thousands of attack-labelled alerts. That
+  is reported for every case.
 
-- The study varies the alert source, and a source's attack share
-  (precision) is the property under test. Rebalancing to, say, 50/50 would
-  give every source the same attack share and erase that difference, and
-  would overstate how often analysts see real attacks.
-- With N = 20, a simple random draw can easily miss the few attack alerts
-  of a low-precision source by chance; proportional allocation fixes the
-  count to the expected value and removes that variance without changing
-  the proportion.
-- Using the label for allocation does not expose it to the agent; the
-  agent sees only the `Alert` records.
+### Case-level scores (deterministic, no LLM)
 
-Consequences that must be reported with results: the sample's attack share
-equals the source's (to rounding), so a low-precision source yields very
-few attack alerts per scenario (dev: fused gives 6/20 in russellmitchell and
-2/20 in shaw). `class_balance_changed` is recorded as `false` in every
-sample manifest. A balanced design, if ever wanted, must be a separate,
-named option that sets it to `true`.
+- Attack-step coverage by time (primary for cases, because a case is
+  defined by its phase interval): the phase is covered if at least one
+  cited alert of the case lies inside the phase interval.
+- The same with `event_label` (sensitivity): only cited alerts with an
+  attack event_label count.
+- Unsupported-claim rate: `Claim(record_id=alert_id, field, value)`
+  checked by exact (stripped) string match against the case's own alert
+  records: canonical fields, `raw_alert.*`, and whole raw log lines
+  (`evidence.log_lines.<i>`). Claims about alerts outside the case are
+  unsupported.
+- Investigation load: number of alerts in the case after the cap.
+
+**Coverage ceilings** score each case as if the agent cited every alert it
+was given. They bound what any agent can reach from a source and are
+reported as ceilings, not agent results.
 
 ## Labels and features
 

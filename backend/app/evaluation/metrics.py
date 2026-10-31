@@ -65,33 +65,50 @@ def triage_scores(
 
 
 def attack_step_coverage(
-    steps: Mapping[str, Collection[str]], cited_event_ids: Iterable[str]
+    steps: Mapping[str, Collection[str]], cited_ids: Iterable[str]
 ) -> float | None:
-    """Fraction of attack steps with at least one cited event id.
+    """Fraction of attack steps with at least one cited id.
 
-    ``steps`` maps a step name to the labelled event ids that belong to it.
-    Returns ``None`` when there are no steps (nothing to cover).
+    ``steps`` maps a step name to the labelled ids (event ids, or alert ids
+    in the AIT-ADS study) that belong to it. Returns ``None`` when there are
+    no steps (nothing to cover).
     """
     if not steps:
         return None
-    cited = set(cited_event_ids)
+    cited = set(cited_ids)
     covered = sum(1 for ids in steps.values() if cited & set(ids))
     return covered / len(steps)
 
 
 @dataclass(frozen=True)
 class Claim:
-    """A claim an agent made about the logs: ``event_id`` has ``field == value``."""
+    """A claim an agent made: record ``record_id`` has ``field == value``.
 
-    event_id: str
+    The record is a log event or, in the AIT-ADS study (which has no
+    log-event IDs), an alert: ``record_id`` is then the ``alert_id`` and the
+    fields are the alert record's own (see app.evaluation.case_scoring).
+    ``event_id`` is kept as an alias for existing callers.
+    """
+
+    record_id: str
     field: str
     value: str
+
+    @property
+    def event_id(self) -> str:
+        return self.record_id
+
+    @classmethod
+    def about_alert(cls, alert_id: str, field: str, value: str) -> Claim:
+        return cls(alert_id, field, value)
 
 
 def unsupported_claim_rate(
     claims: Iterable[Claim], log_index: Mapping[str, Mapping[str, str]]
 ) -> float | None:
-    """Fraction of claims whose event id or field value is absent from the logs.
+    """Fraction of claims whose record id or field value is absent from the index.
+
+    ``log_index`` maps a record id (event id or alert id) to its fields.
 
     Values are compared as stripped strings; no fuzzy matching, so a claim
     is supported only if the log says exactly that. ``None`` for no claims.
@@ -99,7 +116,7 @@ def unsupported_claim_rate(
     total = unsupported = 0
     for c in claims:
         total += 1
-        record = log_index.get(c.event_id)
+        record = log_index.get(c.record_id)
         if record is None or c.field not in record:
             unsupported += 1
         elif str(record[c.field]).strip() != c.value.strip():

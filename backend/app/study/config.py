@@ -1,11 +1,14 @@
-"""Study configuration: the frozen dev/held-out split and sampling defaults.
+"""Study configuration: the frozen dev/held-out split, variants and cases.
 
-The split lives in ``experiments/config/study.json`` so it is versioned with
-the code and cannot drift between scripts. Held-out scenarios are frozen:
-any function meant for development (looking at scores, tuning, debugging
-the sampler) must call :meth:`ScenarioSplit.require_dev` first, which
-raises :class:`HeldOutScenarioError` for a held-out scenario. Building
-alert variants is not itself dev-only; looking at their scores is.
+The configuration lives in ``experiments/config/study.json`` so it is
+versioned with the code and cannot drift between scripts. Held-out
+scenarios are frozen: any function meant for development (looking at
+scores or ceilings, tuning, debugging) must call
+:meth:`ScenarioSplit.require_dev` first, which raises
+:class:`HeldOutScenarioError` for a held-out scenario.
+
+History: the M3 per-variant 20-alert study sample was retired in M4 in
+favour of case-based units (``cases``); see docs/research-methodology.md.
 """
 
 from __future__ import annotations
@@ -17,9 +20,9 @@ from typing import Any
 
 DEFAULT_STUDY_CONFIG = Path(__file__).resolve().parents[3] / "experiments" / "config" / "study.json"
 
-STRATIFY_CHOICES = ("proportional", "none")
 # Variants a random control can be matched to (see app.study.variants).
 RANDOM_REFERENCE_CHOICES = ("wazuh", "suricata", "aminer", "fused", "oracle")
+TRUNCATION_CHOICES = ("earliest",)
 
 
 class HeldOutScenarioError(Exception):
@@ -44,18 +47,23 @@ class ScenarioSplit:
 
 
 @dataclass(frozen=True)
-class SamplingConfig:
+class CaseConfig:
+    """How cases are built (see app.study.cases)."""
+
     seed: int
-    sample_size: int
-    variant: str
-    stratify: str
+    padding_seconds: int
+    max_alerts: int
+    truncation: str
+    benign_per_attack: int
 
 
 @dataclass(frozen=True)
 class StudyConfig:
     split: ScenarioSplit
-    sampling: SamplingConfig
+    variant_seed: int
     random_reference: tuple[str, ...]
+    manifest_only_random_reference: tuple[str, ...]
+    cases: CaseConfig
     source: str
 
 
@@ -75,10 +83,18 @@ def _int(value: Any, field: str, minimum: int) -> int:
     return value
 
 
+def _references(value: Any, field: str) -> tuple[str, ...]:
+    references = _names(value, field, allow_empty=True)
+    unknown = [r for r in references if r not in RANDOM_REFERENCE_CHOICES]
+    if unknown:
+        raise ValueError(f"{field}: unknown variant(s) {', '.join(unknown)}")
+    return references
+
+
 def load_study_config(path: str | Path = DEFAULT_STUDY_CONFIG) -> StudyConfig:
     config_path = Path(path)
     data = json.loads(config_path.read_text(encoding="utf-8"))
-    split_data, sampling_data, variants_data = data["split"], data["sampling"], data["variants"]
+    split_data, variants_data, cases_data = data["split"], data["variants"], data["cases"]
 
     dev = _names(split_data["dev"], "split.dev")
     held_out = _names(split_data["held_out"], "split.held_out", allow_empty=True)
@@ -89,27 +105,30 @@ def load_study_config(path: str | Path = DEFAULT_STUDY_CONFIG) -> StudyConfig:
     if not isinstance(frozen, bool):
         raise ValueError("split.frozen must be true or false")
 
-    stratify = sampling_data["stratify"]
-    if stratify not in STRATIFY_CHOICES:
-        raise ValueError(f"sampling.stratify must be one of {', '.join(STRATIFY_CHOICES)}")
-    references = _names(variants_data["random_reference"], "variants.random_reference")
-    unknown = [r for r in references if r not in RANDOM_REFERENCE_CHOICES]
-    if unknown:
-        raise ValueError(f"variants.random_reference: unknown variant(s) {', '.join(unknown)}")
     if variants_data.get("selection") != "investigation":
         raise ValueError("variants.selection must be 'investigation'")
-    variant = sampling_data["variant"]
-    if variant not in RANDOM_REFERENCE_CHOICES:
-        raise ValueError(f"sampling.variant: unknown variant {variant!r}")
+    references = _references(variants_data["random_reference"], "variants.random_reference")
+    manifest_only = _references(variants_data.get("manifest_only_random_reference", []),
+                                "variants.manifest_only_random_reference")
+    overlap = set(references) & set(manifest_only)
+    if overlap:
+        raise ValueError(f"random references in both lists: {', '.join(sorted(overlap))}")
+
+    truncation = cases_data["truncation"]
+    if truncation not in TRUNCATION_CHOICES:
+        raise ValueError(f"cases.truncation must be one of {', '.join(TRUNCATION_CHOICES)}")
 
     return StudyConfig(
         split=ScenarioSplit(dev, held_out, frozen, split_data.get("frozen_on")),
-        sampling=SamplingConfig(
-            seed=_int(sampling_data["seed"], "sampling.seed", 0),
-            sample_size=_int(sampling_data["sample_size"], "sampling.sample_size", 1),
-            variant=variant,
-            stratify=stratify,
-        ),
+        variant_seed=_int(variants_data["seed"], "variants.seed", 0),
         random_reference=references,
+        manifest_only_random_reference=manifest_only,
+        cases=CaseConfig(
+            seed=_int(cases_data["seed"], "cases.seed", 0),
+            padding_seconds=_int(cases_data["padding_seconds"], "cases.padding_seconds", 0),
+            max_alerts=_int(cases_data["max_alerts"], "cases.max_alerts", 1),
+            truncation=truncation,
+            benign_per_attack=_int(cases_data["benign_per_attack"], "cases.benign_per_attack", 1),
+        ),
         source=config_path.name,
     )
