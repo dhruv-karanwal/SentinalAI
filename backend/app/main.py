@@ -2,6 +2,7 @@
 
     python -m app.main ingest ../data/samples/synthetic_cicids2017_format.csv \
         --mapping cicids2017 --dataset-name synthetic-cicids2017-format
+    python -m app.main ingest-alerts --data-dir ../data/raw/ait_ads --scenario russellmitchell
 
 This is a local research tool: it reads whatever path it is given. Do not
 expose it behind a network API without validating paths against an
@@ -19,7 +20,8 @@ from datetime import timedelta, timezone, tzinfo
 from pathlib import Path
 from typing import Any
 
-from app.ingestion.mappings import MAPPINGS, get_mapping
+from app.alert_pipeline import AitAdsInputs, run_alert_ingest
+from app.ingestion.mappings import AIT_ADS_DATASET_NAME, MAPPINGS, get_mapping
 from app.ingestion.records import IngestionError
 from app.pipeline import FORMATS, run_pipeline
 
@@ -76,6 +78,24 @@ def build_parser() -> argparse.ArgumentParser:
                         help=f"where to write outputs (default: {DEFAULT_OUTPUT_DIR})")
     ingest.add_argument("--no-output", action="store_true",
                         help="only print the summary; write no files")
+
+    alerts = sub.add_parser("ingest-alerts", help="ingest one AIT-ADS scenario (alerts + ground truth)")
+    alerts.add_argument("--data-dir", type=Path, required=True,
+                        help="directory holding <scenario>_wazuh.json, <scenario>_aminer.json, labels.csv")
+    alerts.add_argument("--scenario", required=True, help="scenario name, e.g. russellmitchell")
+    alerts.add_argument("--labels", type=Path, default=None,
+                        help="attack-interval labels CSV (default: <data-dir>/labels.csv)")
+    alerts.add_argument("--event-labels", type=Path, default=None,
+                        help="alerts_csv file with event labels (default: "
+                        "<data-dir>/alerts_csv/alerts_csv/<scenario>_alerts.txt if present)")
+    alerts.add_argument("--dataset-name", default=AIT_ADS_DATASET_NAME,
+                        help=f"dataset name recorded on alerts (default: {AIT_ADS_DATASET_NAME})")
+    alerts.add_argument("--limit", type=_positive_int, default=None,
+                        help="read at most N input records (Wazuh first, then AMiner)")
+    alerts.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR,
+                        help=f"where to write outputs (default: {DEFAULT_OUTPUT_DIR})")
+    alerts.add_argument("--no-output", action="store_true",
+                        help="only print the summary; write no files")
     return parser
 
 
@@ -103,11 +123,65 @@ def _print_summary(report: dict[str, Any], output_paths: dict[str, Path]) -> Non
         print("WARNING: no records were normalized", file=sys.stderr)
 
 
+def _print_alert_summary(report: dict[str, Any], output_paths: dict[str, Path]) -> None:
+    counts = report["record_counts"]
+    print(f"Scenario:   {report['scenario']} (dataset={report['dataset_name']})")
+    print(f"Records:    {counts['total_input']} input, {counts['normalized']} normalized, "
+          f"{counts['rejected']} rejected")
+    for reason, count in report["rejections"]["by_reason"].items():
+        print(f"  rejected  {reason}: {count}")
+    for detector, info in report["detectors"].items():
+        print(f"  {detector:9s} {info['alerts']} alerts, {info['training_mode']} training, "
+              f"{info['aggregate']} aggregate, {info['duplicate_of_suricata']} fast.log duplicates, "
+              f"{info['investigation_eligible']} investigation-eligible")
+    dup = report["suricata_duplicates"]
+    print(f"fast.log:   {dup['fast_log_matched_to_eve']}/{dup['fast_log_records']} matched to "
+          f"eve.json, {dup['fast_log_unmatched']} unmatched")
+    truth = report["ground_truth"]
+    print(f"Intervals:  {truth['attack_intervals_within_alert_range']}/"
+          f"{len(truth['attack_intervals'])} inside the alert time range")
+    events = truth["event_labels"]
+    print(f"Event labels: {events['link_status']}, {events['available']} available, "
+          f"{events['unavailable']} unavailable")
+    for kind, path in output_paths.items():
+        print(f"Wrote {kind}: {path}")
+
+
+def _ingest_alerts(args: argparse.Namespace) -> int:
+    try:
+        inputs = AitAdsInputs.from_layout(args.data_dir, args.scenario)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    overrides: dict[str, Any] = {}
+    if args.labels is not None:
+        overrides["labels"] = args.labels
+    if args.event_labels is not None:
+        overrides["event_labels"] = args.event_labels
+    if overrides:
+        inputs = dataclasses.replace(inputs, **overrides)
+    try:
+        result = run_alert_ingest(
+            inputs,
+            dataset_name=args.dataset_name,
+            limit=args.limit,
+            output_dir=None if args.no_output else args.output_dir,
+            collect=False,
+        )
+    except IngestionError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    _print_alert_summary(result.report, result.output_paths)
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     # Labels may contain non-ASCII characters; never crash on a narrow console.
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(errors="replace")
+    if args.command == "ingest-alerts":
+        return _ingest_alerts(args)
     mapping = get_mapping(args.mapping)
     overrides: dict[str, Any] = {}
     if args.dataset_name is not None:

@@ -15,6 +15,37 @@ respect.
 - Every normalized event keeps its `raw_event`, source file name and
   position, so any result can be traced to the original row.
 
+## AIT Alert Data Set (AIT-ADS)
+
+- Source: Landauer, Skopik, Wurzenberger, *AIT Alert Data Set*, version 1,
+  2023-08-18, Zenodo, DOI 10.5281/zenodo.8263181 (open access).
+  **Licence as shown on the Zenodo record page: "Creative Commons
+  Attribution 4.0 International" (`cc-by-4.0`).** Results built on it must
+  cite the dataset.
+- Event labels: `alerts_csv/alerts_csv.zip` from the GitHub repository
+  `ait-aecid/alert-data-set` (commit `5459b57`, 3,429,496 bytes; git blob
+  SHA-1 `052151d3c05b2dc69da93290d56d97e29f572c39` verified; SHA-256
+  `2bf1a81527a3fe15d92079a7834c9d77c5305546e15569657d2097d6294825c3`).
+  **Repository licence: GNU General Public License v3.0 (`GPL-3.0`).** Only
+  its data file is used; none of its code is copied into this repository.
+- Detector types: Wazuh rule-based, Suricata signature-based (its alerts are
+  collected inside the Wazuh files), AMiner anomaly-based (the dataset
+  README: "we utilize these logs for anomaly detection with AMiner").
+- Ground truth is a separate layer joined by alert id and never an agent or
+  model input:
+  - `time_label`: the attack phase from `labels.csv` whose half-open
+    interval `[start, end)` contains the alert time, else `false_positive`.
+    It labels *time*, not causation: a benign alert inside an attack window
+    still gets the phase name.
+  - `event_label`: the dataset authors' per-event label, linked to alerts by
+    file position and verified per row; unavailable where the link fails.
+- Excluded from evaluation variants by default (kept in the data, counted
+  in the quality report): AMiner training-mode alerts, Wazuh `fast.log`
+  copies of Suricata alerts, and (for investigation) AMiner aggregate
+  alerts. Any variant that includes them must say so.
+- The alerts carry no log-event IDs. Event-ID metrics need a log dataset
+  with real IDs (AIT-LDSv2); IDs are never derived from alert content.
+
 ## Labels and features
 
 - `label` holds the dataset's original ground-truth string, unchanged apart
