@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from app.ingestion.alert_normalizer import normalize_ait_ads_record
+from app.ingestion.alert_normalizer import SuricataTwinIndex, normalize_ait_ads_record
 from app.ingestion.mappings import AitAdsFile
 from app.ingestion.normalizer import Rejection
 from app.ingestion.records import MALFORMED_RECORD, RawRecord
@@ -91,9 +91,32 @@ def test_eve_record_is_suricata() -> None:
 
 
 def test_fast_log_record_is_flagged_duplicate() -> None:
+    # Without a twin index the twin status is unknown: treated as a duplicate.
     alert = ok(FAST, AitAdsFile.WAZUH)
     assert alert.detector is Detector.WAZUH
-    assert alert.duplicate_of_suricata
+    assert alert.duplicate_of_suricata and not alert.fast_log_unmatched
+
+
+def test_twin_index_claims_each_eve_record_once() -> None:
+    twins = SuricataTwinIndex.from_records([RawRecord("w.json", 1, EVE), RawRecord("w.json", 2, WAZUH)])
+    assert twins.eve_records == 1
+
+    def norm(position: int) -> Alert:
+        outcome = normalize_ait_ads_record(RawRecord("w.json", position, FAST), AitAdsFile.WAZUH,
+                                           scenario="synthetic", twins=twins)
+        assert isinstance(outcome, Alert)
+        return outcome
+
+    twinned, unmatched = norm(3), norm(4)
+    assert twinned.detector is Detector.WAZUH and twinned.duplicate_of_suricata
+    assert not twinned.fast_log_unmatched
+    # The only eve.json twin is taken: the second copy is a Suricata alert of its own.
+    assert unmatched.detector is Detector.SURICATA and unmatched.fast_log_unmatched
+    assert not unmatched.duplicate_of_suricata
+    assert unmatched.detector_type is DetectorType.SIGNATURE_BASED
+    assert unmatched.rule_id == "1:2000001:2"  # same gid:sid:rev form as eve.json
+    assert unmatched.rule_name is None and unmatched.severity is None  # not in the record's fields
+    assert unmatched.evidence.log_lines == [FAST["full_log"]]
 
 
 def test_aminer_record_gets_derived_deterministic_id() -> None:

@@ -28,7 +28,7 @@ invented. Pass `--dataset-name synthetic-ait-ads-format` when ingesting them.
 
 | File | Mimics | Content |
 |------|--------|---------|
-| `synthetic_wazuh.json` | `<scenario>_wazuh.json` | 8 lines: Wazuh syslog alert, Suricata `eve.json` alert, its `fast.log` twin, a `fast.log` record without twin, Wazuh web alert whose description contains a comma, and 3 invalid (bad timestamp, bad agent IP, truncated JSON). |
+| `synthetic_wazuh.json` | `<scenario>_wazuh.json` | 8 lines: Wazuh syslog alert, Suricata `eve.json` alert, its `fast.log` twin (a duplicate), a `fast.log` record without twin (becomes a Suricata alert, `fast_log_unmatched`), Wazuh web alert whose description contains a comma, and 3 invalid (bad timestamp, bad agent IP, truncated JSON). |
 | `synthetic_aminer.json` | `<scenario>_aminer.json` | 5 lines: training-mode alert, normal alert, `CountData` aggregate, `FrequencyData` aggregate, 1 invalid (non-boolean `TrainingMode`). |
 | `synthetic_labels.csv` | `labels.csv` | 4 rows, deliberately not in time order, one for another scenario, two phases sharing a boundary second. |
 | `synthetic_alerts.txt` | `alerts_csv/<scenario>_alerts.txt` | Header + 13 rows, one per input line (Wazuh then AMiner), unquoted name with a comma. |

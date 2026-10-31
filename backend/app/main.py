@@ -3,6 +3,7 @@
     python -m app.main ingest ../data/samples/synthetic_cicids2017_format.csv \
         --mapping cicids2017 --dataset-name synthetic-cicids2017-format
     python -m app.main ingest-alerts --data-dir ../data/raw/ait_ads --scenario russellmitchell
+    python -m app.main variants --scenario russellmitchell      # dev scenarios only
 
 This is a local research tool: it reads whatever path it is given. Do not
 expose it behind a network API without validating paths against an
@@ -24,6 +25,13 @@ from app.alert_pipeline import AitAdsInputs, run_alert_ingest
 from app.ingestion.mappings import AIT_ADS_DATASET_NAME, MAPPINGS, get_mapping
 from app.ingestion.records import IngestionError
 from app.pipeline import FORMATS, run_pipeline
+from app.study.config import (
+    DEFAULT_STUDY_CONFIG,
+    RANDOM_REFERENCE_CHOICES,
+    HeldOutScenarioError,
+    load_study_config,
+)
+from app.study.variants import dev_triage_report
 
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parents[2] / "data" / "processed"
 
@@ -96,6 +104,21 @@ def build_parser() -> argparse.ArgumentParser:
                         help=f"where to write outputs (default: {DEFAULT_OUTPUT_DIR})")
     alerts.add_argument("--no-output", action="store_true",
                         help="only print the summary; write no files")
+
+    variants = sub.add_parser(
+        "variants", help="build alert-source variants + study sample and print dev triage scores")
+    variants.add_argument("--scenario", required=True, help="a dev scenario (held-out ones are refused)")
+    variants.add_argument("--processed-dir", type=Path, default=DEFAULT_OUTPUT_DIR,
+                          help=f"where ingest-alerts wrote its outputs (default: {DEFAULT_OUTPUT_DIR})")
+    variants.add_argument("--study-config", type=Path, default=DEFAULT_STUDY_CONFIG,
+                          help=f"study config (default: {DEFAULT_STUDY_CONFIG})")
+    variants.add_argument("--random-reference", action="append", choices=RANDOM_REFERENCE_CHOICES,
+                          default=None, help="variant a random control is size-matched to; "
+                          "repeatable (default: from the study config)")
+    variants.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR / "variants",
+                          help="where to write variants, manifests and the dev report "
+                          f"(default: {DEFAULT_OUTPUT_DIR / 'variants'})")
+    variants.add_argument("--no-output", action="store_true", help="only print; write no files")
     return parser
 
 
@@ -175,6 +198,50 @@ def _ingest_alerts(args: argparse.Namespace) -> int:
     return 0
 
 
+def _fmt(value: float | None) -> str:
+    return "  n/a" if value is None else f"{value:.4f}"
+
+
+def _variants(args: argparse.Namespace) -> int:
+    try:
+        config = load_study_config(args.study_config)
+        report = dev_triage_report(
+            args.processed_dir, args.scenario, config,
+            output_dir=None if args.no_output else args.output_dir,
+            random_references=args.random_reference)
+    except (HeldOutScenarioError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except IngestionError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    pool = report["pool"]
+    print(f"DEV-SCENARIO NUMBERS - scenario {report['scenario']} (dev split; not held-out results)")
+    print(f"Pool: {pool['alerts']} investigation-eligible alerts "
+          f"({pool['excluded_by_selection']} excluded by selection); verdict = alert in variant")
+    for truth in ("event_label", "time_label"):
+        role = "primary" if truth == report["truth"]["primary"] else "sensitivity"
+        print(f"\nTruth: {truth} ({role})")
+        print(f"{'variant':16s} {'alerts':>7s} {'share':>7s} {'TP':>6s} {'FP':>6s} {'FN':>6s} "
+              f"{'TN':>6s} {'prec':>7s} {'recall':>7s} {'F1':>7s} {'FNR':>7s}")
+        for name, info in report["variants"].items():
+            s = info["triage"][truth]
+            share = info["manifest"]["attack_share"][truth]["share"]
+            flag = "  (degenerate: = pool)" if info["manifest"]["degenerate"] else ""
+            print(f"{name:16s} {info['manifest']['alerts']:7d} {_fmt(share):>7s} {s['tp']:6d} "
+                  f"{s['fp']:6d} {s['fn']:6d} {s['tn']:6d} {_fmt(s['precision']):>7s} "
+                  f"{_fmt(s['recall']):>7s} {_fmt(s['f1']):>7s} {_fmt(s['fnr']):>7s}{flag}")
+    sample = report["sample"]["manifest"]
+    shares = sample["attack_share"]
+    print(f"\nStudy sample: {sample['variant']} - {sample['rule']}; seed {sample['seed']}; "
+          f"event_label attack {shares['event_label']['attack']}/{sample['alerts']}, "
+          f"time_label attack {shares['time_label']['attack']}/{sample['alerts']}")
+    if not args.no_output:
+        print(f"Wrote variants, manifests and {report['scenario']}.dev_triage.json to "
+              f"{Path(args.output_dir) / report['scenario']}")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     # Labels may contain non-ASCII characters; never crash on a narrow console.
@@ -182,6 +249,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         sys.stdout.reconfigure(errors="replace")
     if args.command == "ingest-alerts":
         return _ingest_alerts(args)
+    if args.command == "variants":
+        return _variants(args)
     mapping = get_mapping(args.mapping)
     overrides: dict[str, Any] = {}
     if args.dataset_name is not None:

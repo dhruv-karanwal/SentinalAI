@@ -1,0 +1,20 @@
+{
+  "dataset": "AIT-ADS",
+  "split": {
+    "dev": ["russellmitchell", "shaw"],
+    "held_out": ["fox", "harrison", "santos", "wardbeck", "wheeler", "wilson"],
+    "frozen": true,
+    "frozen_on": "2026-10-31",
+    "note": "Decided by the user before any test run. Held-out scenarios must not be used for development, tuning or dev-only scoring."
+  },
+  "variants": {
+    "selection": "investigation",
+    "random_reference": ["fused"]
+  },
+  "sampling": {
+    "seed": 20261031,
+    "sample_size": 20,
+    "variant": "fused",
+    "stratify": "proportional"
+  }
+}

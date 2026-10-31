@@ -1,7 +1,7 @@
 """Ingest one AIT-ADS scenario: alerts, ground truth and a quality report.
 
-Reads ``<scenario>_wazuh.json`` and then ``<scenario>_aminer.json`` line by
-line (the Wazuh files reach ~650 MB, so nothing is loaded whole), in the
+Reads ``<scenario>_wazuh.json`` once to index Suricata eve.json twins, then
+``<scenario>_wazuh.json`` and ``<scenario>_aminer.json`` line by line (the Wazuh files reach ~650 MB, so nothing is loaded whole), in the
 same order the dataset authors used for alerts_csv, so the positional
 event-label link holds. Outputs (when ``output_dir`` is given):
 
@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, Any
 
-from app.ingestion.alert_normalizer import normalize_ait_ads_record
+from app.ingestion.alert_normalizer import SuricataTwinIndex, normalize_ait_ads_record
 from app.ingestion.ground_truth import AttackTimeline, EventLabelLinker, iter_event_label_rows
 from app.ingestion.json_loader import iter_jsonl_records
 from app.ingestion.mappings import (
@@ -101,6 +101,9 @@ def run_alert_ingest(
     for path in (inputs.wazuh, inputs.aminer, inputs.labels):
         resolve_input_file(path)
     timeline = AttackTimeline.from_labels_csv(inputs.labels, inputs.scenario)
+    # First pass over the whole Wazuh file (even with ``limit``): a fast.log
+    # record's twin can appear anywhere in it.
+    twins = SuricataTwinIndex.from_records(iter_jsonl_records(inputs.wazuh))
     linker = (EventLabelLinker(iter_event_label_rows(inputs.event_labels))
               if inputs.event_labels is not None else None)
     label_source = inputs.event_labels.name if inputs.event_labels is not None else None
@@ -125,7 +128,7 @@ def run_alert_ingest(
 
         for kind, record in _records(inputs, limit):
             outcome = normalize_ait_ads_record(
-                record, kind, scenario=inputs.scenario, dataset_name=dataset_name)
+                record, kind, scenario=inputs.scenario, dataset_name=dataset_name, twins=twins)
             if isinstance(outcome, Rejection):
                 if linker is not None:
                     linker.link(None)

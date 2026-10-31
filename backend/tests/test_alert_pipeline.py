@@ -42,12 +42,12 @@ def test_sample_ingest(sample_dir: Path, tmp_path: Path) -> None:
         "invalid_ip": 1, "invalid_timestamp": 1, "invalid_value": 1, "malformed_record": 1}
     assert report["rejections"]["by_file"] == {"synthetic_aminer.json": 1, "synthetic_wazuh.json": 3}
     assert report["detectors"] == {
-        "wazuh": {"alerts": 4, "training_mode": 0, "aggregate": 0, "duplicate_of_suricata": 2,
-                  "evaluation_eligible": 2, "investigation_eligible": 2},
-        "suricata": {"alerts": 1, "training_mode": 0, "aggregate": 0, "duplicate_of_suricata": 0,
-                     "evaluation_eligible": 1, "investigation_eligible": 1},
+        "wazuh": {"alerts": 3, "training_mode": 0, "aggregate": 0, "duplicate_of_suricata": 1,
+                  "fast_log_unmatched": 0, "evaluation_eligible": 2, "investigation_eligible": 2},
+        "suricata": {"alerts": 2, "training_mode": 0, "aggregate": 0, "duplicate_of_suricata": 0,
+                     "fast_log_unmatched": 1, "evaluation_eligible": 2, "investigation_eligible": 2},
         "aminer": {"alerts": 4, "training_mode": 1, "aggregate": 2, "duplicate_of_suricata": 0,
-                   "evaluation_eligible": 3, "investigation_eligible": 1},
+                   "fast_log_unmatched": 0, "evaluation_eligible": 3, "investigation_eligible": 1},
     }
     assert report["suricata_duplicates"] == {
         "fast_log_records": 2, "fast_log_matched_to_eve": 1, "fast_log_unmatched": 1,
@@ -63,7 +63,7 @@ def test_sample_ingest(sample_dir: Path, tmp_path: Path) -> None:
     assert truth["time_label_distribution"] == {
         "dirb": 4, "dnsteal": 2, "false_positive": 2, "network_scans": 1}
     assert truth["investigation_time_labels_by_detector"] == {
-        "aminer": {"dirb": 1}, "suricata": {"dirb": 1},
+        "aminer": {"dirb": 1}, "suricata": {"dirb": 2},
         "wazuh": {"false_positive": 1, "network_scans": 1},
     }
     assert truth["attack_phases_with_investigation_alert"] == {
@@ -93,8 +93,9 @@ def test_sample_ingest(sample_dir: Path, tmp_path: Path) -> None:
     assert '"time_label"' not in alerts_text and '"event_label"' not in alerts_text
 
     eligible = list(iter_alert_file(paths["alerts"], INVESTIGATION_SELECTION))
-    assert [a.detector.value for a in eligible] == ["wazuh", "suricata", "wazuh", "aminer"]
-    assert len(list(iter_alert_file(paths["alerts"], DEFAULT_EVALUATION_SELECTION))) == 6
+    assert [a.detector.value for a in eligible] == ["wazuh", "suricata", "suricata", "wazuh", "aminer"]
+    assert [a.fast_log_unmatched for a in eligible] == [False, False, True, False, False]
+    assert len(list(iter_alert_file(paths["alerts"], DEFAULT_EVALUATION_SELECTION))) == 7
     assert len(list(iter_alert_file(paths["alerts"]))) == 9
 
 

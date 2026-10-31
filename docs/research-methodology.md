@@ -41,10 +41,91 @@ respect.
     file position and verified per row; unavailable where the link fails.
 - Excluded from evaluation variants by default (kept in the data, counted
   in the quality report): AMiner training-mode alerts, Wazuh `fast.log`
-  copies of Suricata alerts, and (for investigation) AMiner aggregate
-  alerts. Any variant that includes them must say so.
-- The alerts carry no log-event IDs. Event-ID metrics need a log dataset
-  with real IDs (AIT-LDSv2); IDs are never derived from alert content.
+  records that have an `eve.json` twin (copies of a Suricata alert), and
+  (for investigation) AMiner aggregate alerts (`CountData`/`FrequencyData`).
+  Any variant that includes them must say so. A `fast.log` record *without*
+  an `eve.json` twin is the only copy of that Suricata detection; it is a
+  Suricata alert flagged `fast_log_unmatched` (16 in shaw, 0 in
+  russellmitchell). AMiner `MatchValueAverageChangeDetector` alerts
+  summarize a window but carry no aggregate data block; they are treated as
+  ordinary event alerts.
+- The alerts carry no log-event IDs and AIT-LDSv2 is deliberately not used
+  (decision of 2026-10-31): `event_ids` stay empty, and the investigation
+  verifier checks claims against fields of the alert record and the raw log
+  lines it carries. IDs are never derived from alert content.
+
+## Scenario split (frozen 2026-10-31)
+
+| Split | Scenarios | Use |
+|-------|-----------|-----|
+| dev | russellmitchell, shaw | development, debugging, dev-only scoring |
+| held-out | fox, harrison, santos, wardbeck, wheeler, wilson | final test runs only |
+
+The split is decided before any test run and is stored in
+`experiments/config/study.json`. Dev-only code (currently the `variants`
+command and `dev_triage_report`) calls `ScenarioSplit.require_dev` and
+refuses a held-out scenario; a test enforces this for every held-out
+scenario. The dev scenarios were inspected during M2 for file structure and
+label alignment only.
+
+## Truth labels
+
+- **Primary:** `event_label`. An alert is an attack when the dataset assigns
+  it an event label (any value); benign when the label is `-`.
+- **Sensitivity analysis:** `time_label` (attack when the alert falls inside
+  an attack-phase interval). Every output (ground truth file, variant
+  manifests, dev reports) carries both, so either can be computed.
+
+## Alert-source variants
+
+All variants are subsets of one pool per scenario: the investigation-
+eligible alerts (no training-mode, duplicate or aggregate alerts).
+
+- `wazuh`, `suricata`, `aminer`: one detector.
+- `fused`: union of the three (the whole pool), time-ordered, each alert once.
+- `oracle`: pool alerts with an attack `event_label` — a perfect detector
+  restricted to what the detectors already raised.
+- `random-<ref>`: seeded uniform draw from the pool with the count of
+  variant `<ref>`. **Limitation:** because the pool is the union of the
+  detectors, `random-fused` is the whole pool (flagged `degenerate` in its
+  manifest). Size-matched random controls for each single detector
+  (`random-wazuh`, ...) are the informative ones; a random control at the
+  fused volume would need a population larger than the alert pool (e.g.
+  raw log events), which is out of scope without AIT-LDSv2.
+
+Detector-level triage (verdict = "alert is in the variant", over the pool)
+uses `app/evaluation/metrics.py`. These scores describe the alert sources,
+not the agent.
+
+## Study sample and stratification (decision)
+
+The study sample is drawn per scenario from a variant (default `fused`,
+N = 20, seed 20261031, all in `experiments/config/study.json`) by
+`study_sample`. Each manifest records the base seed, the derived seed, the
+rule and the stratum sizes.
+
+**Decision: proportional stratification on `event_label`, no
+rebalancing.** The N alerts are allocated to the attack and benign strata
+in proportion to their share in the source variant (largest-remainder
+rounding), then drawn uniformly within each stratum. Justification:
+
+- The study varies the alert source, and a source's attack share
+  (precision) is the property under test. Rebalancing to, say, 50/50 would
+  give every source the same attack share and erase that difference, and
+  would overstate how often analysts see real attacks.
+- With N = 20, a simple random draw can easily miss the few attack alerts
+  of a low-precision source by chance; proportional allocation fixes the
+  count to the expected value and removes that variance without changing
+  the proportion.
+- Using the label for allocation does not expose it to the agent; the
+  agent sees only the `Alert` records.
+
+Consequences that must be reported with results: the sample's attack share
+equals the source's (to rounding), so a low-precision source yields very
+few attack alerts per scenario (dev: fused gives 6/20 in russellmitchell and
+2/20 in shaw). `class_balance_changed` is recorded as `false` in every
+sample manifest. A balanced design, if ever wanted, must be a separate,
+named option that sets it to `true`.
 
 ## Labels and features
 

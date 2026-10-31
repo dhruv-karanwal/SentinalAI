@@ -15,6 +15,11 @@ Transformations applied (and only these):
 - AMiner alerts get ``alert_id = "aminer-" + sha256(scenario, file, line,
   canonical JSON content)[:32]`` and ``alert_id_derived=True``, because the
   records carry no id of their own
+
+Suricata fast.log twins: whether a fast.log record repeats an eve.json alert
+is only known after seeing the whole Wazuh file, so the pipeline first
+builds a :class:`SuricataTwinIndex` (one pass, digests only) and each
+fast.log record then claims one eve.json twin, greedily in file order.
 """
 
 from __future__ import annotations
@@ -23,12 +28,21 @@ import hashlib
 import ipaddress
 import json
 import math
+from collections import Counter
+from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import ValidationError
 
-from app.ingestion.mappings import AitAdsFile, AlertMapping, route_ait_ads_record
+from app.ingestion.mappings import (
+    SURICATA_EVE_LOCATION,
+    AitAdsFile,
+    AlertMapping,
+    is_fast_log,
+    route_ait_ads_record,
+    suricata_twin_key,
+)
 from app.ingestion.normalizer import (
     INVALID_IP,
     INVALID_SEVERITY,
@@ -84,20 +98,66 @@ def derive_alert_id(scenario: str, record: RawRecord, data: dict[str, Any]) -> s
     return f"aminer-{digest[:32]}"
 
 
+def digest16(*parts: str) -> bytes:
+    """Compact, collision-resistant key for bounded-memory counting."""
+    return hashlib.blake2b("\x1f".join(parts).encode("utf-8"), digest_size=16).digest()
+
+
+class SuricataTwinIndex:
+    """Remaining eve.json alerts that a fast.log record can claim as its twin.
+
+    Built from raw records, so an eve.json record counts even if it is later
+    rejected (none were in the dev scenarios).
+    """
+
+    def __init__(self) -> None:
+        self._remaining: Counter[bytes] = Counter()
+        self.eve_records = 0
+
+    @classmethod
+    def from_records(cls, records: Iterable[RawRecord]) -> SuricataTwinIndex:
+        index = cls()
+        for record in records:
+            data = record.data
+            if data is not None and data.get("location") == SURICATA_EVE_LOCATION:
+                key = suricata_twin_key(data)
+                if key is not None:
+                    index._remaining[digest16(*key)] += 1
+                    index.eve_records += 1
+        return index
+
+    def claim(self, data: Mapping[str, Any]) -> bool:
+        """Take one eve.json twin for this fast.log record; False if none is left."""
+        key = suricata_twin_key(data)
+        if key is None:
+            return False
+        digest = digest16(*key)
+        if self._remaining[digest] > 0:
+            self._remaining[digest] -= 1
+            return True
+        return False
+
+
 def normalize_ait_ads_record(
     record: RawRecord,
     kind: AitAdsFile,
     *,
     scenario: str,
     dataset_name: str | None = None,
+    twins: SuricataTwinIndex | None = None,
 ) -> Alert | Rejection:
     if record.data is None or record.error is not None:
         error = FieldError("record", record.error_category or MALFORMED_RECORD,
                            record.error or "malformed record")
         return Rejection(record.source, record.position, (error,), record.data, record.raw_text)
-    mapping, duplicate = route_ait_ads_record(kind, record.data)
-    return _AlertNormalizer(record, record.data, mapping, scenario).run(
-        duplicate_of_suricata=duplicate, dataset_name=dataset_name)
+    has_twin = True
+    if twins is not None and kind is AitAdsFile.WAZUH and is_fast_log(record.data):
+        has_twin = twins.claim(record.data)
+    route = route_ait_ads_record(kind, record.data, fast_log_has_twin=has_twin)
+    return _AlertNormalizer(record, record.data, route.mapping, scenario).run(
+        duplicate_of_suricata=route.duplicate_of_suricata,
+        fast_log_unmatched=route.fast_log_unmatched,
+        dataset_name=dataset_name)
 
 
 class _AlertNormalizer:
@@ -137,7 +197,8 @@ class _AlertNormalizer:
             return []
         return list(items)
 
-    def run(self, *, duplicate_of_suricata: bool, dataset_name: str | None) -> Alert | Rejection:
+    def run(self, *, duplicate_of_suricata: bool, fast_log_unmatched: bool,
+            dataset_name: str | None) -> Alert | Rejection:
         m = self.mapping
         timestamp = self._timestamp()
         rule_id = self._rule_id()
@@ -180,6 +241,7 @@ class _AlertNormalizer:
                 ),
                 training_mode=training_mode,
                 duplicate_of_suricata=duplicate_of_suricata,
+                fast_log_unmatched=fast_log_unmatched,
                 raw_alert=self.data,
                 dataset_name=dataset_name,
                 source_file=self.record.source,
