@@ -11,11 +11,14 @@ built in phases.
 | Phase | Scope | Status |
 |-------|-------|--------|
 | 1 — Data foundation | Load CSV/JSON/JSONL, validate, normalize to a canonical schema, data-quality report | **Done** |
-| 2 — Detection baselines & ML dataset prep | Feature matrices, leakage-safe splits, baseline classifiers | Not started |
-| Later | AI agents, LLM integration, RAG, frontend | Not started |
+| 2 — Study foundation | Deterministic evaluation metrics, AIT-ADS alert schema and loader, detector baselines (ML dataset prep for CICIDS2017 baselines) | **In progress** (user approved start; metrics done) |
+| 3 — Investigation agents | Single tool-using agent, multi-agent + event-ID verifier, local 7-9B model | Not started |
+| Later | Demo UI, RAG over ATT&CK polish | Not started |
 
-Do not start a later phase, or add agents, LLMs, RAG, model training, Kafka,
-vector databases, LangGraph or a frontend, unless the user asks for it.
+Do not start a later phase, or add agents, LLMs, RAG, Kafka, vector databases,
+LangGraph or a frontend, unless the user asks for it. The paper's scope is the
+detector-conditioned study in `docs/` and the Google Doc draft; build only
+what that study needs.
 
 ## Commands
 
@@ -46,11 +49,12 @@ backend/app/
   ingestion/mappings.py   DatasetMapping registry: cicids2017, generic
   ingestion/normalizer.py mapping + parsing → SecurityEvent | Rejection
   services/data_quality.py streaming DataQualityAccumulator
+  evaluation/metrics.py   judge-free metrics: triage P/R/F1/FNR, attack-step coverage, unsupported-claim rate
 backend/tests/            pytest, one file per module + test_pipeline.py (end to end)
 data/samples/             committed SYNTHETIC samples (see its README)
 data/raw/, data/processed/ git-ignored: local datasets and pipeline outputs
 docs/                     architecture.md, research-methodology.md
-experiments/              reserved for Phase 2
+experiments/              Phase 2 experiment scripts (none yet)
 ```
 
 ## Design rules (keep these)
@@ -111,3 +115,27 @@ experiments/              reserved for Phase 2
 Python 3.11+, type hints everywhere (mypy strict passes), PEP 8 naming,
 `from __future__ import annotations`, module docstrings that explain the
 "why". Tests are deterministic and use `tmp_path` for files.
+
+## Build loop (standing rule: how we work)
+
+Nested loops. Do not skip a level.
+
+1. **Outer loop, per milestone** (one milestone = one small, testable slice of
+   the study, on its own `phase2/<name>` branch):
+   plan -> inner loop until done -> update this file -> commit -> report.
+2. **Inner loop, per component:** write the test first -> implement ->
+   `pytest` -> `mypy` -> fix -> repeat until both are clean. Never report a
+   component done on a red run; report real command output.
+3. **Innermost loop, per failure:** read the actual error, change one thing,
+   re-run. After 3 failed attempts on the same error, stop and ask.
+4. **Close of every milestone:** update CLAUDE.md (status table, layout,
+   gotchas, any new rule) in the same commit as the code. If code and this
+   file disagree, the code wins and this file gets fixed.
+5. **When the user asks for a CLAUDE.md prompt:** give a copy-pasteable prompt
+   that regenerates/updates this file from the current repo state, and keep
+   this file updated on every change thereafter.
+
+Rules for the study code: metrics are computed from event IDs and field
+values only (no LLM judge); real datasets are downloaded by the user into
+`data/raw/` (the cloud sandbox cannot reach Zenodo); format knowledge about a
+real dataset is never guessed, only encoded after inspecting actual files.
