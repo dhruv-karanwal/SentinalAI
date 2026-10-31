@@ -5,8 +5,8 @@ answers the questions the study depends on:
 
 - how many alerts each detector contributes, and how many survive the
   default exclusions (training mode, Suricata duplicates, aggregates);
-- whether every fast.log record really has an eve.json twin, recomputed on
-  every run instead of trusted from a one-off check;
+- how many fast.log records have an eve.json twin (excluded duplicates)
+  and how many do not (kept as Suricata alerts), per run;
 - whether the label clock agrees with the alert clock (attack intervals
   that fall inside the alert time range);
 - label coverage: which attack phases have at least one eligible alert per
@@ -18,11 +18,11 @@ not by the size of the input.
 
 from __future__ import annotations
 
-import hashlib
 from collections import Counter, defaultdict
 from datetime import datetime
 from typing import Any
 
+from app.ingestion.alert_normalizer import digest16
 from app.ingestion.ground_truth import AttackTimeline, EventLabelLinker, LinkStatus
 from app.ingestion.mappings import (
     AIT_ADS_BENIGN_TIME_LABEL,
@@ -38,10 +38,6 @@ from app.schemas.alert import (
     Detector,
     GroundTruth,
 )
-
-
-def _digest(*parts: str) -> bytes:
-    return hashlib.blake2b("\x1f".join(parts).encode("utf-8"), digest_size=16).digest()
 
 
 class AlertQualityAccumulator:
@@ -78,6 +74,7 @@ class AlertQualityAccumulator:
         counts["training_mode"] += alert.training_mode
         counts["aggregate"] += alert.kind is AlertKind.AGGREGATE
         counts["duplicate_of_suricata"] += alert.duplicate_of_suricata
+        counts["fast_log_unmatched"] += alert.fast_log_unmatched
         counts["evaluation_eligible"] += DEFAULT_EVALUATION_SELECTION.accepts(alert)
         investigation = INVESTIGATION_SELECTION.accepts(alert)
         counts["investigation_eligible"] += investigation
@@ -85,9 +82,9 @@ class AlertQualityAccumulator:
         twin = suricata_twin_key(alert.raw_alert)
         if twin is not None:
             target = self.eve_keys if alert.raw_alert.get("location") == SURICATA_EVE_LOCATION else self.fast_keys
-            target[_digest(*twin)] += 1
+            target[digest16(*twin)] += 1
 
-        key = _digest(alert.detector.value, alert.alert_id)
+        key = digest16(alert.detector.value, alert.alert_id)
         if key in self.alert_ids:
             self.duplicate_alert_ids += 1
         self.alert_ids.add(key)
@@ -116,9 +113,10 @@ class AlertQualityAccumulator:
     def report(self, linker: EventLabelLinker | None, event_label_file: str | None) -> dict[str, Any]:
         normalized = sum(c["alerts"] for c in self.detectors.values())
         fields = ("alerts", "training_mode", "aggregate", "duplicate_of_suricata",
-                  "evaluation_eligible", "investigation_eligible")
+                  "fast_log_unmatched", "evaluation_eligible", "investigation_eligible")
         fast_total = sum(self.fast_keys.values())
-        fast_matched = sum(min(n, self.eve_keys[k]) for k, n in self.fast_keys.items())
+        fast_matched = sum(c["duplicate_of_suricata"] for c in self.detectors.values())
+        fast_unmatched = sum(c["fast_log_unmatched"] for c in self.detectors.values())
         eve_total = sum(self.eve_keys.values())
         eve_unmatched = sum(max(n - self.fast_keys[k], 0) for k, n in self.eve_keys.items())
         intervals = self.timeline.intervals
@@ -143,7 +141,7 @@ class AlertQualityAccumulator:
             "suricata_duplicates": {
                 "fast_log_records": fast_total,
                 "fast_log_matched_to_eve": fast_matched,
-                "fast_log_unmatched": fast_total - fast_matched,
+                "fast_log_unmatched": fast_unmatched,
                 "eve_records": eve_total,
                 "eve_without_fast_log_twin": eve_unmatched,
             },

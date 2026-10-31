@@ -26,8 +26,11 @@ selected for an experiment, so nothing is dropped silently:
 - ``training_mode``: AMiner alerts raised while the detector was still
   learning its baseline. Excluded from all evaluation variants by default.
 - ``duplicate_of_suricata``: Wazuh records decoded from Suricata's
-  ``fast.log``; they repeat Suricata ``eve.json`` alerts and would count the
-  same detection twice. Excluded by default.
+  ``fast.log`` that have an ``eve.json`` twin; they repeat that Suricata
+  alert and would count the same detection twice. Excluded by default.
+  A ``fast.log`` record *without* a twin is the only trace of a Suricata
+  detection, so it becomes a Suricata alert flagged ``fast_log_unmatched``
+  and is not excluded.
 - ``kind == "aggregate"``: AMiner count/frequency anomalies about a time
   window rather than one log line. Kept for detector-level scoring,
   excluded from the investigation variants by default.
@@ -120,6 +123,7 @@ class Alert(BaseModel):
     evidence: AlertEvidence = Field(default_factory=AlertEvidence)
     training_mode: bool = False
     duplicate_of_suricata: bool = False
+    fast_log_unmatched: bool = False
     raw_alert: dict[str, Any]
     dataset_name: str | None = Field(default=None, min_length=1)
     source_file: str = Field(min_length=1)
@@ -147,6 +151,9 @@ class Alert(BaseModel):
             )
         if self.rule_id is None and self.rule_name is None:
             raise ValueError("an alert needs a rule_id or rule_name")
+        if self.fast_log_unmatched and (
+                self.detector is not Detector.SURICATA or self.duplicate_of_suricata):
+            raise ValueError("fast_log_unmatched applies only to non-duplicate suricata alerts")
         return self
 
 

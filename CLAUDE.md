@@ -11,7 +11,7 @@ built in phases.
 | Phase | Scope | Status |
 |-------|-------|--------|
 | 1 — Data foundation | Load CSV/JSON/JSONL, validate, normalize to a canonical schema, data-quality report | **Done** |
-| 2 — Study foundation | Deterministic evaluation metrics, AIT-ADS alert schema and loader, detector baselines (ML dataset prep for CICIDS2017 baselines) | **In progress**: metrics done; M2 alert schema + AIT-ADS loader done; next M3 alert-source variants |
+| 2 — Study foundation | Deterministic evaluation metrics, AIT-ADS alert schema and loader, detector baselines (ML dataset prep for CICIDS2017 baselines) | **In progress**: metrics done; M2 alert schema + AIT-ADS loader done; M3 alert-source variants, study sampler, frozen split done; next M4 detector-level triage + CICIDS2017 baseline |
 | 3 — Investigation agents | Single tool-using agent, multi-agent + event-ID verifier, local 7-9B model | Not started |
 | Later | Demo UI, RAG over ATT&CK polish | Not started |
 
@@ -39,10 +39,16 @@ S=../data/samples/synthetic_ait_ads
 ../.venv/Scripts/python.exe -m app.main ingest-alerts --data-dir $S --scenario synthetic \
     --labels $S/synthetic_labels.csv --event-labels $S/synthetic_alerts.txt \
     --dataset-name synthetic-ait-ads-format --no-output
+
+# M3: variants + study sample + dev triage table (DEV scenarios only; reads
+# data/processed/<scenario>.{alerts,ground_truth}.jsonl written by ingest-alerts,
+# writes data/processed/variants/<scenario>/)
+../.venv/Scripts/python.exe -m app.main variants --scenario russellmitchell \
+    --random-reference fused --random-reference wazuh --random-reference suricata --random-reference aminer
 ```
 
 `tests/test_ait_ads_real.py` runs on the real russellmitchell files when
-`data/raw/ait_ads/` holds them and skips otherwise (~2 s).
+`data/raw/ait_ads/` holds them and skips otherwise (~8 s).
 
 Setup: `python -m venv .venv` then `pip install -r backend/requirements-dev.txt`.
 Test and mypy configuration lives in `backend/pyproject.toml` (`pythonpath = ["."]`,
@@ -52,7 +58,8 @@ so imports are `from app...`). There is no linter configured.
 
 ```
 backend/app/
-  main.py                 CLI: `ingest PATH [options]`, `ingest-alerts --data-dir D --scenario S`
+  main.py                 CLI: `ingest PATH`, `ingest-alerts --data-dir D --scenario S`,
+                          `variants --scenario S` (dev only)
   pipeline.py             load → normalize → quality report; writes outputs
   alert_pipeline.py       AIT-ADS scenario: Wazuh then AMiner lines → Alert + GroundTruth + report;
                           AitAdsInputs.from_layout, iter_alert_file(path, selection)
@@ -69,12 +76,15 @@ backend/app/
   ingestion/normalizer.py mapping + parsing → SecurityEvent | Rejection
   services/data_quality.py streaming DataQualityAccumulator
   evaluation/metrics.py   judge-free metrics: triage P/R/F1/FNR, attack-step coverage, unsupported-claim rate
+  study/config.py         StudyConfig from experiments/config/study.json; ScenarioSplit.require_dev
+  study/variants.py       AlertPool (offset index), build_variants, study_sample, variant_manifest,
+                          triage_by_truth, write_variant, dev_triage_report (dev only)
 backend/tests/            pytest, one file per module + test_pipeline.py (end to end)
 data/samples/             committed SYNTHETIC samples (see its README)
 data/raw/, data/processed/ git-ignored: local datasets and pipeline outputs
 data/samples/synthetic_ait_ads/ SYNTHETIC files in the AIT-ADS shapes (scenario "synthetic")
 docs/                     architecture.md, research-methodology.md, session-notes.md
-experiments/              Phase 2 experiment scripts (none yet)
+experiments/config/study.json  frozen dev/held-out split, sampling seed/N/stratify, random references
 ```
 
 ## Design rules (keep these)
@@ -100,16 +110,21 @@ experiments/              Phase 2 experiment scripts (none yet)
   underscores collapsed — see `normalize_column_name`).
 - **Streaming:** CSV and JSONL are read row by row; outputs are written
   incrementally. Don't load whole files (no pandas in Phase 1).
-- **Minimal dependencies:** runtime is `pydantic` only (M2 added none).
+- **Minimal dependencies:** runtime is `pydantic` only (M2, M3 added none).
 
-## AIT-ADS alerts (M2 policies, decided by the user)
+## AIT-ADS alerts (M2/M3 policies, decided by the user)
 
 - **Detectors.** Suricata alerts live inside `<scenario>_wazuh.json`:
   `location == /var/log/suricata/eve.json` → `suricata` (signature-based);
-  `location == /var/log/suricata/fast.log` → `wazuh` record flagged
-  `duplicate_of_suricata=True`; every other Wazuh record → `wazuh`
-  (rule-based). `<scenario>_aminer.json` → `aminer` (anomaly-based). The
-  detector→type map is `DETECTOR_TYPES` in `schemas/alert.py`.
+  `location == /var/log/suricata/fast.log` **with** an eve.json twin →
+  `wazuh` record flagged `duplicate_of_suricata=True`; fast.log **without**
+  a twin → `suricata` alert flagged `fast_log_unmatched=True` (kept, not
+  excluded; rule_id = `data.id`, no rule_name/severity). Twins are found by
+  a first pass over the Wazuh file (`SuricataTwinIndex`, greedy in file
+  order). Every other Wazuh record → `wazuh` (rule-based).
+  `<scenario>_aminer.json` → `aminer` (anomaly-based); its
+  `MatchValueAverageChangeDetector` alerts are ordinary `kind="event"`.
+  The detector→type map is `DETECTOR_TYPES` in `schemas/alert.py`.
 - **Default exclusions, never drops.** Everything is written to
   `alerts.jsonl`; `AlertSelection` excludes at selection time.
   `DEFAULT_EVALUATION_SELECTION` drops `training_mode` and
@@ -120,8 +135,9 @@ experiments/              Phase 2 experiment scripts (none yet)
 - **IDs.** Wazuh/Suricata `alert_id` = the record's own `id`. AMiner has none:
   `alert_id = "aminer-" + sha256(scenario, file, line, canonical JSON)[:32]`
   with `alert_id_derived=True`. `event_ids` stays empty: the alerts carry no
-  log-event IDs, and IDs are never invented (AIT-LDSv2 would be needed;
-  user decides before M6).
+  log-event IDs, and IDs are never invented. AIT-LDSv2 is **not** used
+  (user decision): the M6 verifier checks claims against fields of the alert
+  record and the raw log lines in its evidence.
 - **Evidence** = what the alert carries: `source_alert_id`, `log_lines`
   (`full_log` / AMiner `RawLogData`; empty for aggregates, whose raw line
   only closed the window and stays in `raw_alert`), `log_paths`,
@@ -142,6 +158,35 @@ experiments/              Phase 2 experiment scripts (none yet)
   inside the alert time range and labels.csv-derived `time_label` equals the
   authors' alerts_csv `time_label` for 100% of alerts. Other scenarios: the
   quality report's `attack_intervals_within_alert_range` shows it per run.
+
+## Study design (M3 policies)
+
+- **Frozen split** (`experiments/config/study.json`, frozen 2026-10-31):
+  dev = russellmitchell, shaw; held-out = fox, harrison, santos, wardbeck,
+  wheeler, wilson. Any dev-only function (scores, tuning, debugging) must
+  call `config.split.require_dev(scenario)` first; `test_study_config.py`
+  fails if a held-out scenario gets through. Never edit the split.
+- **Truth:** `event_label` is primary (attack = any event label, benign =
+  `-`); `time_label` (attack = inside an attack interval) is a reported
+  sensitivity analysis. Every output keeps both.
+- **Variants** are subsets of the pool = investigation-eligible alerts:
+  `wazuh`, `suricata`, `aminer`, `fused` (= whole pool), `oracle` (attack
+  event_label), `random-<ref>` (seeded, size of `<ref>`). `random-fused` is
+  degenerate (= pool) and its manifest says so; single-detector random
+  controls are the informative ones.
+- **Study sample:** `study_sample`, default N=20 from `fused`, seed
+  20261031, proportional stratification on event_label (largest remainder),
+  never rebalanced (`class_balance_changed=false`); see methodology doc.
+- **Determinism:** seeds derive via SHA-256 from (base seed, purpose,
+  scenario, variant); populations are time-ordered with (source_file,
+  source_line) tiebreak.
+- **Manifests** (`<scenario>.variant.<name>.manifest.json`, sample:
+  `<scenario>.sample-<variant>.manifest.json`) record rule, seeds, counts,
+  by-detector counts, attack share by both labels, selection, and the
+  sha256 of the alerts file. Variant alert files are byte-identical lines of
+  `alerts.jsonl`.
+- Detector-level triage numbers are **dev-scenario numbers** and are
+  labelled so wherever printed or written.
 
 ## Research integrity
 
@@ -178,8 +223,14 @@ experiments/              Phase 2 experiment scripts (none yet)
 - alerts_csv's `name` column is unquoted and can contain commas: parse with
   `iter_event_label_rows` (splits from both ends), never with `csv`.
 - Shaw has 16 fast.log records with no eve.json twin (TLS decoder SIDs
-  2230003/2230010, 2022-01-26 12:13:36). They are still flagged duplicates;
-  the report counts them as `fast_log_unmatched`.
+  2230003/2230010, 2022-01-26 12:13:36); they are Suricata alerts with
+  `fast_log_unmatched=True` (russellmitchell: 0).
+- After changing ingest logic, re-run `ingest-alerts` for the dev
+  scenarios before `variants`: the pool is read from `data/processed/`.
+- Suricata `event_label`s were produced by the dataset authors from AIT-NDS
+  netflow matching, and very few Suricata alerts carry one (dev: 44/9,186
+  and 0/16,708); see docs/session-notes.md before interpreting Suricata
+  results.
 - AMiner `training_mode` and `aggregate` overlap (a record can be both), so
   eligible counts are not simple subtractions.
 - `test_alert_pipeline.py` asserts exact counts for `data/samples/synthetic_ait_ads/`;

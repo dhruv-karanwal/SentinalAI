@@ -14,6 +14,8 @@ import pytest
 from app.alert_pipeline import AitAdsInputs, run_alert_ingest
 from app.ingestion.ground_truth import AttackTimeline
 from app.ingestion.mappings import AIT_ADS_SCENARIOS
+from app.study.config import load_study_config
+from app.study.variants import AlertPool, build_variants, study_sample
 
 RAW_DIR = Path(__file__).resolve().parents[2] / "data" / "raw" / "ait_ads"
 SCENARIO = "russellmitchell"  # the smallest scenario
@@ -47,3 +49,23 @@ def test_real_scenario_ingest() -> None:
         events = truth["event_labels"]
         assert events["link_status"] == "linked", events
         assert events["rows_consumed"] == counts["total_input"]
+    dup = report["suricata_duplicates"]
+    assert dup["fast_log_matched_to_eve"] + dup["fast_log_unmatched"] == dup["fast_log_records"]
+
+
+def test_real_variants_invariants(tmp_path: Path) -> None:
+    config = load_study_config()
+    assert SCENARIO in config.split.dev  # real-data checks run on a dev scenario only
+    run_alert_ingest(AitAdsInputs.from_layout(RAW_DIR, SCENARIO), output_dir=tmp_path, collect=False)
+    pool = AlertPool.from_processed(tmp_path, SCENARIO)
+    variants = build_variants(pool, seed=config.sampling.seed,
+                              random_references=("fused", "wazuh", "suricata", "aminer"))
+    singles = [variants[d] for d in ("wazuh", "suricata", "aminer")]
+    assert sum(len(v.entries) for v in singles) == len(variants["fused"].entries) == len(pool.entries)
+    assert set(variants["oracle"].alert_ids) <= set(variants["fused"].alert_ids)
+    assert variants["random-fused"].degenerate
+    for d in ("wazuh", "suricata", "aminer"):
+        assert len(variants[f"random-{d}"].entries) == len(variants[d].entries)
+    sample = study_sample(variants["fused"], size=config.sampling.sample_size,
+                          seed=config.sampling.seed, stratify=config.sampling.stratify)
+    assert len(sample.entries) == config.sampling.sample_size

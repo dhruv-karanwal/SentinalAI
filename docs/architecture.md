@@ -123,3 +123,26 @@ Design decisions specific to alerts:
   are part of the quality report.
 - **Bounded memory.** Duplicate-id and twin matching keep 16-byte digests;
   the 650 MB Wazuh files are never loaded whole.
+
+# Phase 2 — Alert-source variants (M3)
+
+```
+data/processed/<scenario>.alerts.jsonl ─┐
+data/processed/<scenario>.ground_truth.jsonl ┘
+        │  AlertPool.from_processed (INVESTIGATION_SELECTION; index of byte offsets)
+        ▼
+ build_variants ── wazuh | suricata | aminer | fused | oracle | random-<ref>
+        │                                   │
+        │ study_sample (seeded, stratified) │ triage_by_truth (event_label, time_label)
+        ▼                                   ▼
+ data/processed/variants/<scenario>/
+   <scenario>.variant.<name>.{alerts.jsonl,manifest.json}
+   <scenario>.sample-<variant>.{alerts.jsonl,manifest.json}
+   <scenario>.dev_triage.json               (dev scenarios only)
+```
+
+- `app/study/config.py` reads `experiments/config/study.json`; dev-only
+  code calls `ScenarioSplit.require_dev`.
+- The pool keeps only a small index per alert; variant alerts are re-read
+  from `alerts.jsonl` by byte offset, so variant files are byte-identical
+  copies of ingested records and memory stays small.

@@ -157,14 +157,20 @@ def get_mapping(name: str) -> DatasetMapping:
 # - Suricata has no file of its own: Wazuh collected its alerts. Records with
 #   location /var/log/suricata/eve.json are Suricata alerts (full Suricata
 #   ``data.alert``); records with location /var/log/suricata/fast.log are
-#   Wazuh IDS rules (e.g. 20100) decoded from the same Suricata events, so
-#   they are flagged ``duplicate_of_suricata``.
+#   Wazuh IDS rules (e.g. 20100) decoded from the same Suricata events. A
+#   fast.log record with an eve.json twin is a Wazuh record flagged
+#   ``duplicate_of_suricata``; one without a twin (16 in shaw, TLS decoder
+#   events) is the only copy of that detection and becomes a Suricata alert
+#   flagged ``fast_log_unmatched`` (user decision, M3).
 # - Wazuh ``@timestamp`` is ISO 8601 with "Z". AMiner and labels.csv use Unix
 #   epoch seconds. AMiner's alert time is ``LogData.DetectionTimestamp[-1]``
 #   (the value the dataset authors' analyze.py uses).
 # - AMiner records with a ``CountData`` or ``FrequencyData`` object are
 #   window-level aggregates. Their ``RawLogData`` holds the line that closed
 #   the window, which is not evidence of the anomaly; it stays in raw_alert.
+#   MatchValueAverageChangeDetector ("Statistical data report") also
+#   summarizes a window but has neither key; by user decision it stays an
+#   ordinary ``kind="event"`` alert.
 # - alerts_csv/<scenario>_alerts.txt (GitHub ait-aecid/alert-data-set) has
 #   one row per Wazuh line, then one per AMiner line, in file order. The
 #   name field is written unquoted and may contain commas.
@@ -217,7 +223,7 @@ class AlertMapping:
     detector: Detector
     timestamp_path: str
     rule_id_paths: tuple[str, ...]
-    rule_name_path: str
+    rule_name_path: str | None
     host_ip_path: str
     alert_id_path: str | None = None
     timestamp_epoch: bool = False
@@ -256,6 +262,22 @@ AIT_ADS_SURICATA = AlertMapping(
     log_paths_path="location",
 )
 
+# A fast.log record without an eve.json twin, read as a Suricata alert. Its
+# fields hold gid:sid:rev (``data.id``) but no signature or Suricata severity
+# (those exist only inside the free-text ``full_log``, which is kept as
+# evidence and not parsed). ``rule.level`` is the Wazuh level, not Suricata's.
+AIT_ADS_SURICATA_FAST = AlertMapping(
+    name="ait-ads-suricata-fast",
+    detector=Detector.SURICATA,
+    alert_id_path="id",
+    timestamp_path="@timestamp",
+    rule_id_paths=("data.id",),
+    rule_name_path=None,
+    host_ip_path="agent.ip",
+    log_lines_path="full_log",
+    log_paths_path="location",
+)
+
 AIT_ADS_AMINER = AlertMapping(
     name="ait-ads-aminer",
     detector=Detector.AMINER,
@@ -273,14 +295,34 @@ AIT_ADS_AMINER = AlertMapping(
 )
 
 
-def route_ait_ads_record(kind: AitAdsFile, data: Mapping[str, Any]) -> tuple[AlertMapping, bool]:
-    """Pick the detector mapping for a record; return ``(mapping, duplicate_of_suricata)``."""
+@dataclass(frozen=True)
+class AlertRoute:
+    mapping: AlertMapping
+    duplicate_of_suricata: bool = False
+    fast_log_unmatched: bool = False
+
+
+def is_fast_log(data: Mapping[str, Any]) -> bool:
+    return data.get("location") == SURICATA_FAST_LOG_LOCATION
+
+
+def route_ait_ads_record(
+    kind: AitAdsFile, data: Mapping[str, Any], *, fast_log_has_twin: bool = True
+) -> AlertRoute:
+    """Pick the detector mapping and flags for one record.
+
+    ``fast_log_has_twin`` matters only for fast.log records; callers that
+    cannot know it get the conservative default (treated as a duplicate).
+    """
     if kind is AitAdsFile.AMINER:
-        return AIT_ADS_AMINER, False
-    location = data.get("location")
-    if location == SURICATA_EVE_LOCATION:
-        return AIT_ADS_SURICATA, False
-    return AIT_ADS_WAZUH, location == SURICATA_FAST_LOG_LOCATION
+        return AlertRoute(AIT_ADS_AMINER)
+    if data.get("location") == SURICATA_EVE_LOCATION:
+        return AlertRoute(AIT_ADS_SURICATA)
+    if is_fast_log(data):
+        if fast_log_has_twin:
+            return AlertRoute(AIT_ADS_WAZUH, duplicate_of_suricata=True)
+        return AlertRoute(AIT_ADS_SURICATA_FAST, fast_log_unmatched=True)
+    return AlertRoute(AIT_ADS_WAZUH)
 
 
 def suricata_twin_key(raw: Mapping[str, Any]) -> tuple[str, str, str] | None:

@@ -79,6 +79,16 @@ def test_alert_needs_a_rule_id_or_name() -> None:
         make_alert(rule_id=None, rule_name=None)
 
 
+def test_fast_log_unmatched_only_on_suricata() -> None:
+    assert make_alert(detector=Detector.SURICATA, detector_type=DetectorType.SIGNATURE_BASED,
+                      fast_log_unmatched=True).fast_log_unmatched
+    with pytest.raises(ValidationError, match="fast_log_unmatched"):
+        make_alert(fast_log_unmatched=True)
+    with pytest.raises(ValidationError, match="fast_log_unmatched"):
+        make_alert(detector=Detector.SURICATA, detector_type=DetectorType.SIGNATURE_BASED,
+                   fast_log_unmatched=True, duplicate_of_suricata=True)
+
+
 def test_empty_event_id_is_rejected() -> None:
     with pytest.raises(ValidationError):
         make_alert(event_ids=[""])
@@ -99,6 +109,9 @@ def test_selections_exclude_by_default() -> None:
     plain = make_alert()
     training = make_alert(training_mode=True)
     duplicate = make_alert(duplicate_of_suricata=True)
+    unmatched = make_alert(detector=Detector.SURICATA, detector_type=DetectorType.SIGNATURE_BASED,
+                           fast_log_unmatched=True)
+    assert INVESTIGATION_SELECTION.accepts(unmatched) and DEFAULT_EVALUATION_SELECTION.accepts(unmatched)
     aggregate = make_alert(detector=Detector.AMINER, detector_type=DetectorType.ANOMALY_BASED,
                            kind=AlertKind.AGGREGATE)
     assert DEFAULT_EVALUATION_SELECTION.accepts(plain)
