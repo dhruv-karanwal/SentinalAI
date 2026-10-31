@@ -5,6 +5,335 @@ are estimates.
 
 ---
 
+# M4b: noise controls, spread truncation, claim kinds, deterministic baselines
+
+Date: 2026-10-31. Branch `phase2/baselines` (from `phase2/cases` at
+`b7f929d`). Code commit: `c55881d`. No LLM code. No new dependency.
+
+## What was done
+
+1. **Decisions applied.**
+   - **Noise control.** `noise-<det>` draws event_label-benign alerts,
+     count-matched to the detector. In cases it is rebuilt per case: benign
+     alerts from the same window first, then the scenario pool, with
+     `from_window`, `from_fallback` and `shortfall` recorded per case and
+     summed per variant. The old `random-<det>` rows are kept as
+     `shuffled-<det>` with identical draws (the seed purpose string is
+     unchanged).
+   - **Truncation.** The default is now `spread` (evenly spaced time ranks);
+     `earliest` remains an option. The rule and the drops are recorded.
+   - **Time of day.** Every case records its UTC start and end time of day.
+     Benign windows are not matched on it.
+   - **Claim kinds.** `field_value` is the default, so positional
+     `Claim(...)` calls are unchanged. `quote` requires an exact,
+     case-sensitive substring of a raw log line, at least 8 characters, with
+     no normalization. `unsupported_claims` returns the counts.
+   - **Pilot.** `pilot.scenarios` in `study.json` must be dev scenarios; this
+     is validated and tested.
+2. **Case scoring.**
+   - Citation precision by event_label and by time. Cited ids that are not
+     alerts of the case count as wrong.
+   - Coverage over all 10 phases and over the alert-reachable phases. The
+     unreachable phases are listed in every report.
+3. **Baselines** (`app/study/baselines.py`):
+   - `cite-all`
+   - `cite-none`
+   - `cite-top-k-wazuh-level`: Wazuh alerts by `rule.level` descending, then
+     the rest in time order.
+   - `cite-top-k-detector-order`: aminer, wazuh, suricata, chosen from the
+     M3 dev triage precision.
+   - `cite-aminer-only`
+
+   k = 5. Each cited alert gets one field-value claim and one quote claim,
+   both copied from its record. All are scored on every variant.
+
+## Final test and type-check output
+
+```
+$ ../.venv/Scripts/python.exe -m pytest
+...
+tests\test_ait_ads_real.py ...                                           [  1%]
+tests\test_alert_normalizer.py ........................                  [ 10%]
+tests\test_alert_pipeline.py ......                                      [ 13%]
+tests\test_alert_schema.py ............                                  [ 18%]
+tests\test_baselines.py ...                                              [ 19%]
+tests\test_case_scoring.py ......                                        [ 21%]
+tests\test_cases.py ...........                                          [ 26%]
+tests\test_data_quality.py ........                                      [ 29%]
+tests\test_event_schema.py .................                             [ 36%]
+tests\test_ground_truth.py ................                              [ 42%]
+tests\test_ingestion.py .................................                [ 55%]
+tests\test_metrics.py ........                                           [ 59%]
+tests\test_normalizer.py ............................................... [ 77%]
+............                                                             [ 82%]
+tests\test_pipeline.py .......                                           [ 85%]
+tests\test_study_config.py .........................                     [ 95%]
+tests\test_variants.py ...........                                       [100%]
+
+============================ 249 passed in 11.44s =============================
+
+$ ../.venv/Scripts/python.exe -m mypy
+Success: no issues found in 26 source files
+```
+
+## DEV-SCENARIO NUMBERS: ceilings and baselines (not agent results)
+
+Config: committed `study.json` (padding 0 s, cap 100 `spread`, 1 benign case
+per attack case, case seed 20261031, variant seed 20261031, top_k 5, detector
+order aminer, wazuh, suricata, quote 60 chars). Command:
+`python -m app.main cases --scenario <s>`. Output copied verbatim.
+
+How to read the tables:
+- `ceil` columns count attack cases covered after the cap; `pre-cap t/e`
+  gives the same counts before the cap.
+- Baseline `cov` columns give phases covered, by time and by event_label,
+  over all 10 phases and over the 7 reachable ones.
+- `prec e/t` = citation precision, pooled over all 20 cases (attack and
+  benign).
+- `unsup` = unsupported-claim rate.
+
+### russellmitchell
+
+```
+$ python -m app.main cases --scenario russellmitchell
+DEV-SCENARIO CEILINGS - scenario russellmitchell (dev split; ceilings, not agent results)
+Cases: 10 attack, 10 benign (0 benign unavailable); padding 0 s, cap 100 (spread), seed 20261031
+variant           ceil time ceil event  pre-cap t/e  mean att  mean ben  trunc  dropped  drop atk e/t ben w/ atk
+wazuh               7/10       4/10        7/4        40.1000   21.5000      5     8136      2/3               0
+suricata            5/10       1/10        5/1        14.9000   16.0000      1       64      0/1               0
+aminer              8/10       6/10        8/6        28.8000    0.0000      2     3185      1/2               0
+fused              10/10       7/10       10/7        45.0000   24.7000      6    11901      3/4               0
+oracle              7/10       7/10        7/7        28.0000    0.0000      2    10677      2/2               0
+shuffled-wazuh     10/10       7/10       10/7        43.5000   22.8000      6     7433      3/4               0
+shuffled-suricata    8/10       5/10        8/5        38.8000   17.4000      4     2653      2/3               0
+shuffled-aminer     6/10       5/10        6/5        28.2000    7.2000      2      953      2/2               0
+noise-wazuh         4/10       0/10        5/0        40.1000   21.5000      5     8136      0/3               0
+noise-suricata      5/10       0/10        5/0        14.9000   16.0000      1       64      0/1               0
+noise-aminer        4/10       0/10        5/0        28.8000    0.0000      2     3185      0/2               0
+Phases: 10 attack phases, 7 alert-reachable; unreachable: network_scans, reverse_shell, dnsteal
+  noise-wazuh: 8752 alerts matched, 1121 from the same window, 7631 from the scenario pool, 0 short
+  noise-suricata: 373 alerts matched, 373 from the same window, 0 from the scenario pool, 0 short
+  noise-aminer: 3473 alerts matched, 205 from the same window, 3268 from the scenario pool, 0 short
+
+DEV-SCENARIO BASELINES - deterministic non-LLM citers, not agent results (top_k 5, detector order aminer, wazuh, suricata)
+cov = phases covered (time / event_label) over all phases | over reachable phases; prec = citation precision (event_label / time); unsup = unsupported-claim rate
+variant          baseline                   cov t all cov e all cov t rch cov e rch  prec e  prec t   unsup  cited  per case
+wazuh            cite-all                        7/10      4/10       5/7       4/7  0.3442  0.6510  0.0000    616   30.8000
+wazuh            cite-none                       0/10      0/10       0/7       0/7     n/a     n/a     n/a      0    0.0000
+wazuh            cite-top-k-wazuh-level          7/10      3/10       5/7       3/7  0.2679  0.6250  0.0000     56    2.8000
+wazuh            cite-top-k-detector-order       7/10      3/10       5/7       3/7  0.2679  0.6250  0.0000     56    2.8000
+wazuh            cite-aminer-only                0/10      0/10       0/7       0/7     n/a     n/a     n/a      0    0.0000
+suricata         cite-all                        5/10      1/10       4/7       1/7  0.1424  0.4822  0.0000    309   15.4500
+suricata         cite-none                       0/10      0/10       0/7       0/7     n/a     n/a     n/a      0    0.0000
+suricata         cite-top-k-wazuh-level          5/10      1/10       4/7       1/7  0.1667  0.5000  0.0000     30    1.5000
+suricata         cite-top-k-detector-order       5/10      1/10       4/7       1/7  0.1667  0.5000  0.0000     30    1.5000
+suricata         cite-aminer-only                0/10      0/10       0/7       0/7     n/a     n/a     n/a      0    0.0000
+aminer           cite-all                        8/10      6/10       7/7       6/7  0.6493  1.0000  0.0000    288   14.4000
+aminer           cite-none                       0/10      0/10       0/7       0/7     n/a     n/a     n/a      0    0.0000
+aminer           cite-top-k-wazuh-level          8/10      6/10       7/7       6/7  0.7778  1.0000  0.0000     27    1.3500
+aminer           cite-top-k-detector-order       8/10      6/10       7/7       6/7  0.7778  1.0000  0.0000     27    1.3500
+aminer           cite-aminer-only                8/10      6/10       7/7       6/7  0.6493  1.0000  0.0000    288   14.4000
+fused            cite-all                       10/10      7/10       7/7       7/7  0.3544  0.6456  0.0000    697   34.8500
+fused            cite-none                       0/10      0/10       0/7       0/7     n/a     n/a     n/a      0    0.0000
+fused            cite-top-k-wazuh-level         10/10      5/10       7/7       5/7  0.2903  0.6613  0.0000     62    3.1000
+fused            cite-top-k-detector-order      10/10      6/10       7/7       6/7  0.3387  0.6613  0.0000     62    3.1000
+fused            cite-aminer-only                8/10      6/10       7/7       6/7  0.5683  1.0000  0.0000    139    6.9500
+oracle           cite-all                        7/10      7/10       7/7       7/7  1.0000  1.0000  0.0000    280   14.0000
+oracle           cite-none                       0/10      0/10       0/7       0/7     n/a     n/a     n/a      0    0.0000
+oracle           cite-top-k-wazuh-level          7/10      7/10       7/7       7/7  1.0000  1.0000  0.0000     26    1.3000
+oracle           cite-top-k-detector-order       7/10      7/10       7/7       7/7  1.0000  1.0000  0.0000     26    1.3000
+oracle           cite-aminer-only                6/10      6/10       6/7       6/7  1.0000  1.0000  0.0000     79    3.9500
+shuffled-wazuh   cite-all                       10/10      7/10       7/7       7/7  0.3605  0.6561  0.0000    663   33.1500
+shuffled-wazuh   cite-none                       0/10      0/10       0/7       0/7     n/a     n/a     n/a      0    0.0000
+shuffled-wazuh   cite-top-k-wazuh-level         10/10      5/10       7/7       5/7  0.3103  0.6897  0.0000     58    2.9000
+shuffled-wazuh   cite-top-k-detector-order      10/10      6/10       7/7       6/7  0.3448  0.6897  0.0000     58    2.9000
+shuffled-wazuh   cite-aminer-only                8/10      6/10       7/7       6/7  0.5312  1.0000  0.0000    128    6.4000
+shuffled-suricata cite-all                        8/10      5/10       6/7       5/7  0.3932  0.6904  0.0000    562   28.1000
+shuffled-suricata cite-none                       0/10      0/10       0/7       0/7     n/a     n/a     n/a      0    0.0000
+shuffled-suricata cite-top-k-wazuh-level          8/10      5/10       6/7       5/7  0.3636  0.6364  0.0000     44    2.2000
+shuffled-suricata cite-top-k-detector-order       8/10      4/10       6/7       4/7  0.3182  0.6364  0.0000     44    2.2000
+shuffled-suricata cite-aminer-only                5/10      4/10       5/7       4/7  0.5182  1.0000  0.0000    110    5.5000
+shuffled-aminer  cite-all                        6/10      5/10       5/7       5/7  0.5876  0.7966  0.0000    354   17.7000
+shuffled-aminer  cite-none                       0/10      0/10       0/7       0/7     n/a     n/a     n/a      0    0.0000
+shuffled-aminer  cite-top-k-wazuh-level          6/10      5/10       5/7       5/7  0.4000  0.6571  0.0000     35    1.7500
+shuffled-aminer  cite-top-k-detector-order       6/10      4/10       5/7       4/7  0.3714  0.6571  0.0000     35    1.7500
+shuffled-aminer  cite-aminer-only                5/10      4/10       5/7       4/7  0.7703  1.0000  0.0000     74    3.7000
+noise-wazuh      cite-all                        4/10      0/10       2/7       0/7  0.0000  0.3166  0.0000    616   30.8000
+noise-wazuh      cite-none                       0/10      0/10       0/7       0/7     n/a     n/a     n/a      0    0.0000
+noise-wazuh      cite-top-k-wazuh-level          4/10      0/10       2/7       0/7  0.0000  0.3571  0.0000     56    2.8000
+noise-wazuh      cite-top-k-detector-order       4/10      0/10       2/7       0/7  0.0000  0.3571  0.0000     56    2.8000
+noise-wazuh      cite-aminer-only                1/10      0/10       1/7       0/7  0.0000  0.9464  0.0000     56    2.8000
+noise-suricata   cite-all                        5/10      0/10       4/7       0/7  0.0000  0.4822  0.0000    309   15.4500
+noise-suricata   cite-none                       0/10      0/10       0/7       0/7     n/a     n/a     n/a      0    0.0000
+noise-suricata   cite-top-k-wazuh-level          5/10      0/10       4/7       0/7  0.0000  0.5000  0.0000     30    1.5000
+noise-suricata   cite-top-k-detector-order       5/10      0/10       4/7       0/7  0.0000  0.5000  0.0000     30    1.5000
+noise-suricata   cite-aminer-only                1/10      0/10       1/7       0/7  0.0000  1.0000  0.0000     32    1.6000
+noise-aminer     cite-all                        4/10      0/10       3/7       0/7  0.0000  0.3646  0.0000    288   14.4000
+noise-aminer     cite-none                       0/10      0/10       0/7       0/7     n/a     n/a     n/a      0    0.0000
+noise-aminer     cite-top-k-wazuh-level          4/10      0/10       3/7       0/7  0.0000  0.3704  0.0000     27    1.3500
+noise-aminer     cite-top-k-detector-order       4/10      0/10       3/7       0/7  0.0000  0.3704  0.0000     27    1.3500
+noise-aminer     cite-aminer-only                2/10      0/10       1/7       0/7  0.0000  0.9487  0.0000     78    3.9000
+```
+
+### shaw
+
+```
+$ python -m app.main cases --scenario shaw
+DEV-SCENARIO CEILINGS - scenario shaw (dev split; ceilings, not agent results)
+Cases: 10 attack, 10 benign (0 benign unavailable); padding 0 s, cap 100 (spread), seed 20261031
+variant           ceil time ceil event  pre-cap t/e  mean att  mean ben  trunc  dropped  drop atk e/t ben w/ atk
+wazuh               8/10       3/10        8/3        42.6000   12.5000      5     5171      2/4               0
+suricata            1/10       0/10        1/0        10.0000   10.0000      2      232      0/1               0
+aminer              9/10       7/10        9/7        31.3000    0.0000      2      653      1/2               0
+fused              10/10       6/10       10/7        47.6000   12.5000      5     6519      3/4               0
+oracle              7/10       7/10        7/7        26.0000    0.0000      2     5800      2/2               0
+shuffled-wazuh      9/10       6/10        9/6        42.5000   11.6000      4     4178      3/3               0
+shuffled-suricata    9/10       5/10        9/5        35.7000   10.7000      4     1751      2/3               0
+shuffled-aminer     5/10       3/10        5/3        16.6000    1.7000      1       43      1/1               0
+noise-wazuh         6/10       0/10        6/0        42.6000   12.5000      5     5171      0/4               0
+noise-suricata      1/10       0/10        1/0        10.0000   10.0000      2      232      0/1               0
+noise-aminer        5/10       0/10        5/0        31.3000    0.0000      2      653      0/2               0
+Phases: 10 attack phases, 7 alert-reachable; unreachable: dnsteal, service_scans, reverse_shell
+  noise-wazuh: 5722 alerts matched, 524 from the same window, 5198 from the scenario pool, 0 short
+  noise-suricata: 432 alerts matched, 432 from the same window, 0 from the scenario pool, 0 short
+  noise-aminer: 966 alerts matched, 119 from the same window, 847 from the scenario pool, 0 short
+
+DEV-SCENARIO BASELINES - deterministic non-LLM citers, not agent results (top_k 5, detector order aminer, wazuh, suricata)
+cov = phases covered (time / event_label) over all phases | over reachable phases; prec = citation precision (event_label / time); unsup = unsupported-claim rate
+variant          baseline                   cov t all cov e all cov t rch cov e rch  prec e  prec t   unsup  cited  per case
+wazuh            cite-all                        8/10      3/10       5/7       3/7  0.3811  0.7731  0.0000    551   27.5500
+wazuh            cite-none                       0/10      0/10       0/7       0/7     n/a     n/a     n/a      0    0.0000
+wazuh            cite-top-k-wazuh-level          8/10      3/10       5/7       3/7  0.2593  0.5926  0.0000     54    2.7000
+wazuh            cite-top-k-detector-order       8/10      3/10       5/7       3/7  0.2407  0.5926  0.0000     54    2.7000
+wazuh            cite-aminer-only                0/10      0/10       0/7       0/7     n/a     n/a     n/a      0    0.0000
+suricata         cite-all                        1/10      0/10       1/7       0/7  0.0000  0.5000  0.0000    200   10.0000
+suricata         cite-none                       0/10      0/10       0/7       0/7     n/a     n/a     n/a      0    0.0000
+suricata         cite-top-k-wazuh-level          1/10      0/10       1/7       0/7  0.0000  0.5000  0.0000     10    0.5000
+suricata         cite-top-k-detector-order       1/10      0/10       1/7       0/7  0.0000  0.5000  0.0000     10    0.5000
+suricata         cite-aminer-only                0/10      0/10       0/7       0/7     n/a     n/a     n/a      0    0.0000
+aminer           cite-all                        9/10      7/10       7/7       7/7  0.6805  1.0000  0.0000    313   15.6500
+aminer           cite-none                       0/10      0/10       0/7       0/7     n/a     n/a     n/a      0    0.0000
+aminer           cite-top-k-wazuh-level          9/10      7/10       7/7       7/7  0.8387  1.0000  0.0000     31    1.5500
+aminer           cite-top-k-detector-order       9/10      7/10       7/7       7/7  0.8387  1.0000  0.0000     31    1.5500
+aminer           cite-aminer-only                9/10      7/10       7/7       7/7  0.6805  1.0000  0.0000    313   15.6500
+fused            cite-all                       10/10      6/10       7/7       6/7  0.4276  0.7920  0.0000    601   30.0500
+fused            cite-none                       0/10      0/10       0/7       0/7     n/a     n/a     n/a      0    0.0000
+fused            cite-top-k-wazuh-level         10/10      6/10       7/7       6/7  0.3065  0.6452  0.0000     62    3.1000
+fused            cite-top-k-detector-order      10/10      6/10       7/7       6/7  0.3710  0.6452  0.0000     62    3.1000
+fused            cite-aminer-only                9/10      6/10       7/7       6/7  0.8226  1.0000  0.0000    124    6.2000
+oracle           cite-all                        7/10      7/10       7/7       7/7  1.0000  1.0000  0.0000    260   13.0000
+oracle           cite-none                       0/10      0/10       0/7       0/7     n/a     n/a     n/a      0    0.0000
+oracle           cite-top-k-wazuh-level          7/10      7/10       7/7       7/7  1.0000  1.0000  0.0000     26    1.3000
+oracle           cite-top-k-detector-order       7/10      7/10       7/7       7/7  1.0000  1.0000  0.0000     26    1.3000
+oracle           cite-aminer-only                7/10      7/10       7/7       7/7  1.0000  1.0000  0.0000    105    5.2500
+shuffled-wazuh   cite-all                        9/10      6/10       6/7       6/7  0.4455  0.7856  0.0000    541   27.0500
+shuffled-wazuh   cite-none                       0/10      0/10       0/7       0/7     n/a     n/a     n/a      0    0.0000
+shuffled-wazuh   cite-top-k-wazuh-level          9/10      5/10       6/7       5/7  0.3393  0.6429  0.0000     56    2.8000
+shuffled-wazuh   cite-top-k-detector-order       9/10      6/10       6/7       6/7  0.3929  0.6429  0.0000     56    2.8000
+shuffled-wazuh   cite-aminer-only                8/10      6/10       6/7       6/7  0.8000  1.0000  0.0000    110    5.5000
+shuffled-suricata cite-all                        9/10      5/10       6/7       5/7  0.4763  0.7694  0.0000    464   23.2000
+shuffled-suricata cite-none                       0/10      0/10       0/7       0/7     n/a     n/a     n/a      0    0.0000
+shuffled-suricata cite-top-k-wazuh-level          9/10      5/10       6/7       5/7  0.4000  0.7333  0.0000     45    2.2500
+shuffled-suricata cite-top-k-detector-order       9/10      5/10       6/7       5/7  0.4000  0.7333  0.0000     45    2.2500
+shuffled-suricata cite-aminer-only                7/10      5/10       6/7       5/7  0.8023  1.0000  0.0000     86    4.3000
+shuffled-aminer  cite-all                        5/10      3/10       4/7       3/7  0.8033  0.9071  0.0000    183    9.1500
+shuffled-aminer  cite-none                       0/10      0/10       0/7       0/7     n/a     n/a     n/a      0    0.0000
+shuffled-aminer  cite-top-k-wazuh-level          5/10      3/10       4/7       3/7  0.4231  0.8077  0.0000     26    1.3000
+shuffled-aminer  cite-top-k-detector-order       5/10      3/10       4/7       3/7  0.4231  0.8077  0.0000     26    1.3000
+shuffled-aminer  cite-aminer-only                3/10      3/10       3/7       3/7  1.0000  1.0000  0.0000     26    1.3000
+noise-wazuh      cite-all                        6/10      0/10       3/7       0/7  0.0000  0.3920  0.0000    551   27.5500
+noise-wazuh      cite-none                       0/10      0/10       0/7       0/7     n/a     n/a     n/a      0    0.0000
+noise-wazuh      cite-top-k-wazuh-level          6/10      0/10       3/7       0/7  0.0000  0.3333  0.0000     54    2.7000
+noise-wazuh      cite-top-k-detector-order       6/10      0/10       3/7       0/7  0.0000  0.3333  0.0000     54    2.7000
+noise-wazuh      cite-aminer-only                3/10      0/10       1/7       0/7  0.0000  0.8261  0.0000     23    1.1500
+noise-suricata   cite-all                        1/10      0/10       1/7       0/7  0.0000  0.5000  0.0000    200   10.0000
+noise-suricata   cite-none                       0/10      0/10       0/7       0/7     n/a     n/a     n/a      0    0.0000
+noise-suricata   cite-top-k-wazuh-level          1/10      0/10       1/7       0/7  0.0000  0.5000  0.0000     10    0.5000
+noise-suricata   cite-top-k-detector-order       1/10      0/10       1/7       0/7  0.0000  0.5000  0.0000     10    0.5000
+noise-suricata   cite-aminer-only                1/10      0/10       1/7       0/7  0.0000  1.0000  0.0000     18    0.9000
+noise-aminer     cite-all                        5/10      0/10       3/7       0/7  0.0000  0.3674  0.0000    313   15.6500
+noise-aminer     cite-none                       0/10      0/10       0/7       0/7     n/a     n/a     n/a      0    0.0000
+noise-aminer     cite-top-k-wazuh-level          4/10      0/10       2/7       0/7  0.0000  0.3226  0.0000     31    1.5500
+noise-aminer     cite-top-k-detector-order       4/10      0/10       2/7       0/7  0.0000  0.3226  0.0000     31    1.5500
+noise-aminer     cite-aminer-only                3/10      0/10       1/7       0/7  0.0000  0.7200  0.0000     25    1.2500
+```
+
+Triage tables with the new rows (`python -m app.main variants --scenario
+<s>`): the `shuffled-*` rows reproduce M3's `random-*` rows exactly.
+
+- `noise-*` has precision 0 under event_label in both scenarios, by
+  construction.
+- Under time_label, noise precision is 0.0334, 0.0334 and 0.0344
+  (wazuh/suricata/aminer, russellmitchell) and 0.0141, 0.0144 and 0.0089
+  (shaw).
+
+Unsupported claims: `cite-all` on `fused` made 1,280 (russellmitchell) and
+1,104 (shaw) record-copied claims, field-value and quote. Every baseline row
+reports an unsupported-claim rate of 0.0000, so the claim machinery accepts
+every copied field and quote on the real records.
+
+Benign-window times of day (UTC start), from `<scenario>.cases.json`:
+- russellmitchell: 20:29:56, 23:59:25, 13:22:34, 08:29:01, 13:44:48,
+  06:38:17, 21:52:35, 07:23:57, 15:40:04, 07:08:25.
+- shaw: 18:27:27, 09:14:52, 14:33:00, 14:59:19, 11:23:27, 15:23:44,
+  05:59:16, 21:26:21, 05:01:21, 12:13:35.
+
+## Surprises
+
+1. **Noise reaches time coverage, not event-label coverage.** With purely
+   event-benign alerts, noise controls cover up to 5/10 phases by time in
+   russellmitchell (`noise-suricata`) and 6/10 in shaw (`noise-wazuh`), and
+   0/10 by event_label everywhere. Time-based coverage counts any alert
+   inside the window, so it can be gamed by volume. Event-label coverage on
+   the reachable phases is the measure noise cannot inflate.
+2. **Noise mostly comes from outside the window for high-volume sources.**
+   The attack windows of the web-scan phases hold almost no event-benign
+   alerts. In russellmitchell, `noise-wazuh` took 7,631 of 8,752 alerts from
+   the scenario pool and `noise-aminer` 3,268 of 3,473. `noise-suricata`
+   found all 373 in the same windows. Shaw shows the same pattern (5,198 of
+   5,722; 847 of 966; 0 of 432). So "noise" alerts are often visibly
+   out-of-window: an agent could reject them on time alone.
+3. **`spread` truncation cost one event-label ceiling.** Shaw's fused
+   `cracking` case has 547 alerts in its window, 3 of them event-labelled;
+   the spread cap kept 100 and dropped all 3. The fused event ceiling is
+   6/10 after the cap vs 7/10 before (with `earliest` in M4 it was 7/10).
+   All other ceilings are unchanged from M4.
+4. **Top-k baselines nearly match cite-all on coverage at about a tenth of
+   the citations.** On `fused`, cite-top-k-detector-order covers 10/10 by
+   time and 6/10 by event_label in both scenarios with 62 citations (3.1
+   per case), against cite-all's 697 and 601 citations. On `aminer`,
+   top-k is more precise than cite-all (event precision 0.78 vs 0.65 in
+   russellmitchell; 0.84 vs 0.68 in shaw).
+5. **On `fused`, `cite-aminer-only` is the most precise baseline:** event
+   precision 0.57 (russellmitchell) and 0.82 (shaw), vs 0.29-0.43 for the
+   other fused baselines, while still covering 6/10 phases by event_label.
+   It cites 6.95 and 6.2 alerts per case.
+6. **Unreachable phases are the same as in M4:** network_scans,
+   reverse_shell and dnsteal in russellmitchell; dnsteal, service_scans and
+   reverse_shell in shaw. 7 phases per scenario are reachable.
+
+## Open questions for the user
+
+1. **Noise fallback visibility.** Fallback noise alerts lie outside the case
+   window (surprise 2). Should fallback draw from the *nearest* time outside
+   the window rather than uniformly from the scenario pool? Or should cases
+   hide absolute timestamps from the agent? The latter is an agent-design
+   choice for M5.
+2. **Headline coverage measure.** Given surprise 1, should the paper's
+   headline be event_label coverage on reachable phases, with time coverage
+   as the sensitivity analysis (the reverse of the M4 framing)?
+3. **Truncation.** `spread` dropped the only event-labelled alerts of one
+   case (surprise 3). Keep `spread` as the default, or report both rules
+   side by side for the pilot?
+4. **Baseline k.** k = 5 is a fixed choice, not tuned. Should the pilot also
+   report k = 10 (or a k equal to an LLM agent's mean citation count) so the
+   comparison is at matched citation volume?
+5. **Detector order** for `cite-top-k-detector-order` was set from dev
+   triage precision. This is a dev-derived choice, so it is legitimate for
+   the pilot, but it should be frozen before held-out runs. Freeze it now?
+
+---
+
 # M4: cases and deterministic case-level scoring
 
 Date: 2026-10-31. Branch `phase2/cases` (from `phase2/alert-sources` at
