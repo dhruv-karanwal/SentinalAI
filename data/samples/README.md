@@ -19,3 +19,19 @@ mapping can be tested; they do not describe real traffic.
 When running the pipeline on the CSV sample, pass
 `--dataset-name synthetic-cicids2017-format` so outputs are not attributed to
 the real CICIDS2017 dataset.
+
+## `synthetic_ait_ads/` — AIT-ADS shapes, scenario name `synthetic`
+
+Hand-written records that copy the *shape* of the AIT Alert Data Set files
+(field names and nesting observed in the real files); all values are
+invented. Pass `--dataset-name synthetic-ait-ads-format` when ingesting them.
+
+| File | Mimics | Content |
+|------|--------|---------|
+| `synthetic_wazuh.json` | `<scenario>_wazuh.json` | 8 lines: Wazuh syslog alert, Suricata `eve.json` alert, its `fast.log` twin, a `fast.log` record without twin, Wazuh web alert whose description contains a comma, and 3 invalid (bad timestamp, bad agent IP, truncated JSON). |
+| `synthetic_aminer.json` | `<scenario>_aminer.json` | 5 lines: training-mode alert, normal alert, `CountData` aggregate, `FrequencyData` aggregate, 1 invalid (non-boolean `TrainingMode`). |
+| `synthetic_labels.csv` | `labels.csv` | 4 rows, deliberately not in time order, one for another scenario, two phases sharing a boundary second. |
+| `synthetic_alerts.txt` | `alerts_csv/<scenario>_alerts.txt` | Header + 13 rows, one per input line (Wazuh then AMiner), unquoted name with a comma. |
+
+Expected ingest: 13 input, 9 normalized, 4 rejected (asserted in
+`backend/tests/test_alert_pipeline.py`).

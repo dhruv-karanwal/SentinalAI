@@ -76,3 +76,50 @@ Input CSV / JSON / JSONL
   data directory.
 - Reports and events store the input file's base name, not its full path.
 - No secrets or credentials are read or stored by Phase 1.
+
+# Phase 2 — Alert ingest (AIT-ADS)
+
+```
+<scenario>_wazuh.json ─┐  (line by line, Wazuh first, then AMiner)
+<scenario>_aminer.json ┘
+        │  RawRecord
+        ▼
+ route_ait_ads_record (mappings.py) ── eve.json → suricata; fast.log → wazuh + duplicate flag
+        │  AlertMapping
+        ▼
+ alert_normalizer ─────────────── record-level problem ─► Rejection
+        │  Alert                                              │
+        ├── AttackTimeline.label_at(timestamp) ─► time_label  │
+        ├── EventLabelLinker (alerts_csv row N) ─► event_label│
+        ▼                                                     ▼
+ AlertQualityAccumulator ◄────────────────────────────────────┘
+        │
+        ▼
+ data/processed/<scenario>.alerts.jsonl           Alert records (no labels)
+ data/processed/<scenario>.ground_truth.jsonl     GroundTruth, joined by alert_id
+ data/processed/<scenario>.alerts.rejected.jsonl  rejected records with reasons
+ data/processed/<scenario>.alerts.quality.json    per-detector counts, duplicates, coverage
+```
+
+| Module | Responsibility |
+|--------|----------------|
+| `app/schemas/alert.py` | `Alert`, `AlertEvidence`, `GroundTruth`, `AlertSelection` |
+| `app/ingestion/mappings.py` | AIT-ADS `AlertMapping`s, routing, layout, CSV conventions |
+| `app/ingestion/alert_normalizer.py` | Mapping-driven parsing/validation → `Alert` or `Rejection` |
+| `app/ingestion/ground_truth.py` | `labels.csv` timeline; alerts_csv reader; positional linker |
+| `app/services/alert_quality.py` | Streaming per-scenario report |
+| `app/alert_pipeline.py` | Wires the stages; `iter_alert_file` reads alerts back with a selection |
+
+Design decisions specific to alerts:
+
+- **Exclude at selection, never at ingest.** Training-mode, duplicate and
+  aggregate alerts are flagged and written; `AlertSelection` decides what an
+  experiment variant sees.
+- **Verified positional link.** alerts_csv has no alert id. Rows are paired
+  with input records by position and every pair is checked on (time, name,
+  ip); linking stops at the first mismatch instead of guessing.
+- **Checks run on every ingest**, not once: fast.log↔eve.json twin matching
+  and the label-clock check (attack intervals inside the alert time range)
+  are part of the quality report.
+- **Bounded memory.** Duplicate-id and twin matching keep 16-byte digests;
+  the 650 MB Wazuh files are never loaded whole.
