@@ -21,7 +21,6 @@ from app.study.variants import (
     AlertPool,
     build_variants,
     dev_triage_report,
-    study_sample,
     triage_by_truth,
     variant_manifest,
     write_variant,
@@ -137,36 +136,6 @@ def test_manifest(pool: AlertPool) -> None:
     assert isinstance(r["derived_seed"], int) and r["degenerate"] is False
 
 
-def test_study_sample_proportional(pool: AlertPool) -> None:
-    fused = build_variants(pool, seed=SEED)["fused"]
-    two = study_sample(fused, size=2, seed=SEED, stratify="proportional")
-    three = study_sample(fused, size=3, seed=SEED, stratify="proportional")
-    attack = {e.alert_id for e in pool.entries if e.event_attack}
-    assert len(set(two.alert_ids) & attack) == 1 and len(two.alert_ids) == 2   # 1.2 / 0.8
-    assert len(set(three.alert_ids) & attack) == 2 and len(three.alert_ids) == 3  # 1.8 / 1.2
-    assert two.alert_ids == study_sample(fused, size=2, seed=SEED, stratify="proportional").alert_ids
-    assert two.name == "sample-fused"
-    m = variant_manifest(two, pool)
-    sampling = m["sampling"]
-    assert sampling["stratify"] == "proportional" and sampling["stratified_on"] == "event_label"
-    assert sampling["strata"] == {"attack": {"available": 3, "taken": 1},
-                                  "benign": {"available": 2, "taken": 1}}
-    assert sampling["source_variant"] == "fused" and sampling["requested_size"] == 2
-    assert sampling["class_balance_changed"] is False
-
-
-def test_study_sample_edge_cases(pool: AlertPool) -> None:
-    fused = build_variants(pool, seed=SEED)["fused"]
-    everything = study_sample(fused, size=10, seed=SEED, stratify="proportional")
-    assert everything.alert_ids == fused.alert_ids
-    assert variant_manifest(everything, pool)["sampling"]["took_all"] is True
-    plain = study_sample(fused, size=3, seed=SEED, stratify="none")
-    assert len(plain.alert_ids) == 3
-    assert variant_manifest(plain, pool)["sampling"]["strata"] is None
-    with pytest.raises(ValueError, match="stratify"):
-        study_sample(fused, size=3, seed=SEED, stratify="balanced")
-
-
 def test_write_variant(pool: AlertPool, processed: Path, tmp_path: Path) -> None:
     oracle = build_variants(pool, seed=SEED)["oracle"]
     alerts_path, manifest_path = write_variant(oracle, pool, tmp_path / "v")
@@ -187,8 +156,7 @@ def test_pool_requires_ground_truth_for_every_alert(processed: Path) -> None:
 def synthetic_config(tmp_path: Path) -> Path:
     data = json.loads(DEFAULT_STUDY_CONFIG.read_text(encoding="utf-8"))
     data["split"]["dev"] = ["synthetic"]
-    data["sampling"]["sample_size"] = 2
-    data["variants"]["random_reference"] = ["fused", "aminer"]
+    data["variants"]["random_reference"] = ["aminer"]
     path = tmp_path / "study.json"
     path.write_text(json.dumps(data), encoding="utf-8")
     return path
@@ -200,12 +168,16 @@ def test_dev_triage_report(processed: Path, tmp_path: Path) -> None:
     assert report["scenario_split"] == "dev"
     assert report["truth"] == {"primary": "event_label", "sensitivity": "time_label"}
     assert list(report["variants"]) == [
-        "wazuh", "suricata", "aminer", "fused", "oracle", "random-fused", "random-aminer"]
+        "wazuh", "suricata", "aminer", "fused", "oracle", "random-aminer"]
     assert report["variants"]["oracle"]["triage"]["event_label"]["f1"] == 1.0
-    assert report["sample"]["manifest"]["alerts"] == 2
+    # random-fused survives only as a manifest, marked degenerate, never as a variant.
+    only = report["manifest_only"]["random-fused"]
+    assert only["degenerate"] is True and only["experiment_variant"] is False
+    assert "sample" not in report
     out = tmp_path / "out" / "synthetic"
     assert (out / "synthetic.variant.fused.manifest.json").exists()
-    assert (out / "synthetic.sample-fused.alerts.jsonl").exists()
+    assert (out / "synthetic.variant.random-fused.manifest.json").exists()
+    assert not (out / "synthetic.variant.random-fused.alerts.jsonl").exists()
     assert json.loads((out / "synthetic.dev_triage.json").read_text("utf-8")) == report
 
 

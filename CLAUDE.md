@@ -11,7 +11,8 @@ built in phases.
 | Phase | Scope | Status |
 |-------|-------|--------|
 | 1 — Data foundation | Load CSV/JSON/JSONL, validate, normalize to a canonical schema, data-quality report | **Done** |
-| 2 — Study foundation | Deterministic evaluation metrics, AIT-ADS alert schema and loader, detector baselines (ML dataset prep for CICIDS2017 baselines) | **In progress**: metrics done; M2 alert schema + AIT-ADS loader done; M3 alert-source variants, study sampler, frozen split done; next M4 detector-level triage + CICIDS2017 baseline |
+| 2 — Study foundation | Deterministic metrics, AIT-ADS alert schema and loader, alert-source variants, case units and case-level scoring | **In progress**: metrics, M2 loader, M3 variants + frozen split, M4 cases + case scoring + dev ceilings done; next M5 single tool-using agent |
+| 2b — CICIDS2017 detection baselines | Feature matrices, leakage-safe splits, baseline classifier | **Optional, off the critical path** (only after the pilot, if the user asks) |
 | 3 — Investigation agents | Single tool-using agent, multi-agent + event-ID verifier, local 7-9B model | Not started |
 | Later | Demo UI, RAG over ATT&CK polish | Not started |
 
@@ -40,11 +41,13 @@ S=../data/samples/synthetic_ait_ads
     --labels $S/synthetic_labels.csv --event-labels $S/synthetic_alerts.txt \
     --dataset-name synthetic-ait-ads-format --no-output
 
-# M3: variants + study sample + dev triage table (DEV scenarios only; reads
+# M3: variants + dev triage table (DEV scenarios only; reads
 # data/processed/<scenario>.{alerts,ground_truth}.jsonl written by ingest-alerts,
-# writes data/processed/variants/<scenario>/)
-../.venv/Scripts/python.exe -m app.main variants --scenario russellmitchell \
-    --random-reference fused --random-reference wazuh --random-reference suricata --random-reference aminer
+# writes data/processed/variants/<scenario>/). Random controls come from study.json.
+../.venv/Scripts/python.exe -m app.main variants --scenario russellmitchell
+# M4: cases + per-variant coverage ceilings (DEV scenarios only; also reads
+# ../data/raw/ait_ads/labels.csv, writes data/processed/cases/<scenario>/)
+../.venv/Scripts/python.exe -m app.main cases --scenario russellmitchell
 ```
 
 `tests/test_ait_ads_real.py` runs on the real russellmitchell files when
@@ -59,7 +62,7 @@ so imports are `from app...`). There is no linter configured.
 ```
 backend/app/
   main.py                 CLI: `ingest PATH`, `ingest-alerts --data-dir D --scenario S`,
-                          `variants --scenario S` (dev only)
+                          `variants --scenario S`, `cases --scenario S` (both dev only)
   pipeline.py             load → normalize → quality report; writes outputs
   alert_pipeline.py       AIT-ADS scenario: Wazuh then AMiner lines → Alert + GroundTruth + report;
                           AitAdsInputs.from_layout, iter_alert_file(path, selection)
@@ -75,16 +78,21 @@ backend/app/
                           (wazuh, suricata, aminer), routing, file layout, CSV conventions
   ingestion/normalizer.py mapping + parsing → SecurityEvent | Rejection
   services/data_quality.py streaming DataQualityAccumulator
-  evaluation/metrics.py   judge-free metrics: triage P/R/F1/FNR, attack-step coverage, unsupported-claim rate
+  evaluation/metrics.py   judge-free metrics: triage P/R/F1/FNR, attack-step coverage, unsupported-claim
+                          rate; Claim(record_id, field, value), .event_id alias, Claim.about_alert
+  evaluation/case_scoring.py score_case (coverage by time/event_label, unsupported claims, load),
+                          flatten_record, alert_claim_index
   study/config.py         StudyConfig from experiments/config/study.json; ScenarioSplit.require_dev
-  study/variants.py       AlertPool (offset index), build_variants, study_sample, variant_manifest,
+  study/variants.py       AlertPool (offset index), build_variants, experiment_variants, variant_manifest,
                           triage_by_truth, write_variant, dev_triage_report (dev only)
+  study/cases.py          Case, build_cases (attack + matched benign windows), case_alerts (cap),
+                          dev_case_report (dev only; ceilings)
 backend/tests/            pytest, one file per module + test_pipeline.py (end to end)
 data/samples/             committed SYNTHETIC samples (see its README)
 data/raw/, data/processed/ git-ignored: local datasets and pipeline outputs
 data/samples/synthetic_ait_ads/ SYNTHETIC files in the AIT-ADS shapes (scenario "synthetic")
 docs/                     architecture.md, research-methodology.md, session-notes.md
-experiments/config/study.json  frozen dev/held-out split, sampling seed/N/stratify, random references
+experiments/config/study.json  frozen dev/held-out split, variant seed + random references, case config
 ```
 
 ## Design rules (keep these)
@@ -110,7 +118,7 @@ experiments/config/study.json  frozen dev/held-out split, sampling seed/N/strati
   underscores collapsed — see `normalize_column_name`).
 - **Streaming:** CSV and JSONL are read row by row; outputs are written
   incrementally. Don't load whole files (no pandas in Phase 1).
-- **Minimal dependencies:** runtime is `pydantic` only (M2, M3 added none).
+- **Minimal dependencies:** runtime is `pydantic` only (M2-M4 added none).
 
 ## AIT-ADS alerts (M2/M3 policies, decided by the user)
 
@@ -159,34 +167,53 @@ experiments/config/study.json  frozen dev/held-out split, sampling seed/N/strati
   authors' alerts_csv `time_label` for 100% of alerts. Other scenarios: the
   quality report's `attack_intervals_within_alert_range` shows it per run.
 
-## Study design (M3 policies)
+## Study design (M3/M4 policies)
 
 - **Frozen split** (`experiments/config/study.json`, frozen 2026-10-31):
   dev = russellmitchell, shaw; held-out = fox, harrison, santos, wardbeck,
-  wheeler, wilson. Any dev-only function (scores, tuning, debugging) must
-  call `config.split.require_dev(scenario)` first; `test_study_config.py`
-  fails if a held-out scenario gets through. Never edit the split.
-- **Truth:** `event_label` is primary (attack = any event label, benign =
-  `-`); `time_label` (attack = inside an attack interval) is a reported
-  sensitivity analysis. Every output keeps both.
+  wheeler, wilson. Any dev-only function (scores, ceilings, tuning,
+  debugging) must call `config.split.require_dev(scenario)` first;
+  `test_study_config.py` fails if a held-out scenario gets through
+  `dev_triage_report` or `dev_case_report`. Never edit the split.
+- **Truth:** `event_label` is primary for alert-level triage (attack = any
+  event label, benign = `-`); `time_label` is the sensitivity analysis.
+  Every output keeps both and every variant is reported under both. For
+  cases, coverage by time is the headline and event_label coverage the
+  sensitivity (the case is defined by its phase interval).
+- **Suricata labelling limitation** (methodology doc): Suricata event labels
+  come from AIT-NDS netflow matching, so almost none carry one. Report
+  Suricata under both labels with the caveat; its base rate is accepted.
 - **Variants** are subsets of the pool = investigation-eligible alerts:
   `wazuh`, `suricata`, `aminer`, `fused` (= whole pool), `oracle` (attack
-  event_label), `random-<ref>` (seeded, size of `<ref>`). `random-fused` is
-  degenerate (= pool) and its manifest says so; single-detector random
-  controls are the informative ones.
-- **Study sample:** `study_sample`, default N=20 from `fused`, seed
-  20261031, proportional stratification on event_label (largest remainder),
-  never rebalanced (`class_balance_changed=false`); see methodology doc.
+  event_label), and the default random controls `random-wazuh`,
+  `random-suricata`, `random-aminer` (seeded, size-matched). `random-fused`
+  (= pool) is written **only as a manifest** with `degenerate: true`,
+  `experiment_variant: false`; never use it as a variant.
+  `experiment_variants(pool, config)` is the one entry point.
+- **Study unit = case** (`app/study/cases.py`); the M3 20-alert study sample
+  is retired. Attack case per labels.csv phase; matched benign windows of
+  equal length, seeded, inside the observation range, outside attack
+  intervals (+padding), mutually disjoint; unfit ones listed `unavailable`.
+  Case alerts: `[window_start, window_end)`, time-ordered, cap
+  `max_alerts`=100 by `earliest`. Every truncation is recorded per case and
+  variant (dropped, dropped attack-labelled by both labels, rule).
+- **Case scoring** (`app/evaluation/case_scoring.py`, no LLM): coverage by
+  time / by event_label via `attack_step_coverage` with alert ids;
+  unsupported claims via `Claim(record_id=alert_id, ...)` against the case's
+  own alert records (canonical fields, `raw_alert.*`,
+  `evidence.log_lines.<i>`, exact stripped match); load = alerts after cap.
+  Ceilings (cite every alert) are **ceilings, not agent results**.
 - **Determinism:** seeds derive via SHA-256 from (base seed, purpose,
   scenario, variant); populations are time-ordered with (source_file,
   source_line) tiebreak.
-- **Manifests** (`<scenario>.variant.<name>.manifest.json`, sample:
-  `<scenario>.sample-<variant>.manifest.json`) record rule, seeds, counts,
-  by-detector counts, attack share by both labels, selection, and the
-  sha256 of the alerts file. Variant alert files are byte-identical lines of
-  `alerts.jsonl`.
-- Detector-level triage numbers are **dev-scenario numbers** and are
-  labelled so wherever printed or written.
+- **Manifests**: `<scenario>.variant.<name>.manifest.json` (rule, seeds,
+  counts, by-detector counts, attack share by both labels, selection,
+  sha256 of the alerts file; variant alert files are byte-identical lines
+  of `alerts.jsonl`); `<scenario>.cases.json` (case windows, benign
+  sampling log, per-variant alert ids and truncation);
+  `<scenario>.case_ceilings.json`.
+- Detector-level triage numbers and case ceilings are **dev-scenario
+  numbers** and are labelled so wherever printed or written.
 
 ## Research integrity
 
@@ -231,6 +258,12 @@ experiments/config/study.json  frozen dev/held-out split, sampling seed/N/strati
   netflow matching, and very few Suricata alerts carry one (dev: 44/9,186
   and 0/16,708); see docs/session-notes.md before interpreting Suricata
   results.
+- Case manifests can be large-ish (ids for up to 100 alerts x variants x
+  cases); they live in git-ignored `data/processed/cases/`.
+- The earliest-100 cap drops thousands of attack-labelled alerts in the
+  dirb/wpscan cases (dev); ceilings after the cap equal those before it on
+  the dev scenarios, but check `coverage_ceiling_before_cap` whenever the cap
+  or padding changes.
 - AMiner `training_mode` and `aggregate` overlap (a record can be both), so
   eligible counts are not simple subtractions.
 - `test_alert_pipeline.py` asserts exact counts for `data/samples/synthetic_ait_ads/`;

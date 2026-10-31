@@ -1,4 +1,4 @@
-"""Alert-source variants, the study sampler and detector-level triage scores.
+"""Alert-source variants and detector-level triage scores.
 
 The study holds the investigation agent fixed and varies where its alerts
 come from. Every variant is a subset of one *pool*: a scenario's
@@ -14,19 +14,14 @@ Variants
 - ``oracle``: the alerts whose ``event_label`` is an attack, i.e. a perfect
   detector restricted to the existing alert pool.
 - ``random-<ref>``: a seeded uniform draw from the pool with the same count
-  as variant ``<ref>``. Drawn from the alert pool, a random control at the
-  ``fused`` volume is the whole pool; the manifest flags that as
-  ``degenerate`` rather than hiding it.
+  as variant ``<ref>``. The experiment controls are ``random-wazuh``,
+  ``random-suricata`` and ``random-aminer``. Drawn from the alert pool, a
+  random control at the ``fused`` volume is the whole pool, so
+  ``random-fused`` is written only as a manifest, flagged ``degenerate``
+  and ``experiment_variant: false``, and is never used as a variant.
 
-Study sample
-------------
-:func:`study_sample` draws N alerts from a variant. The default,
-``proportional``, stratifies on event_label (attack / benign) and allocates
-N by largest remainder, so the sample keeps the variant's own attack share
-(to rounding) while removing the luck of a small draw. It never rebalances
-classes: a detector's precision is what the study varies, so changing the
-attack share would erase the effect under test. See
-docs/research-methodology.md.
+The study unit is the case (app.study.cases); the M3 per-variant 20-alert
+study sample was retired in M4.
 
 Scores
 ------
@@ -59,7 +54,7 @@ from app.evaluation.metrics import TriageScores, triage_scores
 from app.ingestion.mappings import AIT_ADS_BENIGN_TIME_LABEL
 from app.ingestion.records import IngestionError, resolve_input_file
 from app.schemas.alert import INVESTIGATION_SELECTION, Alert, AlertSelection, Detector, GroundTruth
-from app.study.config import RANDOM_REFERENCE_CHOICES, STRATIFY_CHOICES, StudyConfig
+from app.study.config import RANDOM_REFERENCE_CHOICES, StudyConfig
 
 BASE_VARIANTS = RANDOM_REFERENCE_CHOICES  # wazuh, suricata, aminer, fused, oracle
 
@@ -98,7 +93,6 @@ class Variant:
     reference: str | None = None
     reference_size: int | None = None
     degenerate: bool = False
-    sampling: dict[str, Any] | None = None
 
     @property
     def alert_ids(self) -> tuple[str, ...]:
@@ -239,73 +233,12 @@ def _stratum(entry: PoolEntry) -> str:
     return "unavailable" if attack is None else ("attack" if attack else "benign")
 
 
-def _largest_remainder(sizes: dict[str, int], total: int) -> dict[str, int]:
-    population = sum(sizes.values())
-    exact = {k: total * n / population for k, n in sizes.items()}
-    taken = {k: int(v) for k, v in exact.items()}
-    left = total - sum(taken.values())
-    order = sorted(sizes, key=lambda k: (-(exact[k] - taken[k]), list(sizes).index(k)))
-    for key in order[:left]:
-        taken[key] += 1
-    return taken
-
-
-def study_sample(variant: Variant, *, size: int, seed: int, stratify: str) -> Variant:
-    """Draw the study sample of ``size`` alerts from ``variant`` (see module docstring)."""
-    if stratify not in STRATIFY_CHOICES:
-        raise ValueError(f"stratify must be one of {', '.join(STRATIFY_CHOICES)}")
-    if size < 1:
-        raise ValueError("size must be positive")
-    entries = variant.entries
-    derived = derive_seed(seed, "sample", variant.scenario, variant.name)
-    took_all = size >= len(entries)
-    strata: dict[str, dict[str, int]] | None = None
-
-    if stratify == "proportional":
-        groups: dict[str, list[int]] = {}
-        for index, entry in enumerate(entries):
-            groups.setdefault(_stratum(entry), []).append(index)
-        ordered = {k: groups[k] for k in ("attack", "benign", "unavailable") if k in groups}
-        quota = ({k: len(v) for k, v in ordered.items()} if took_all
-                 else _largest_remainder({k: len(v) for k, v in ordered.items()}, size))
-        picked: list[int] = []
-        for key, members in ordered.items():
-            rng = random.Random(derive_seed(seed, "sample", variant.scenario, variant.name, key))
-            picked.extend(rng.sample(members, quota[key]))
-        strata = {k: {"available": len(v), "taken": quota[k]} for k, v in ordered.items()}
-    elif took_all:
-        picked = list(range(len(entries)))
-    else:
-        picked = random.Random(derived).sample(range(len(entries)), size)
-
-    rule = (f"{min(size, len(entries))} of {len(entries)} '{variant.name}' alerts, "
-            + ("stratified on event_label with largest-remainder proportional allocation"
-               if stratify == "proportional" else "simple random sample without replacement"))
-    return Variant(
-        name=f"sample-{variant.name}",
-        scenario=variant.scenario,
-        rule=rule,
-        entries=tuple(entries[i] for i in sorted(picked)),
-        seed=seed,
-        derived_seed=derived,
-        sampling={
-            "source_variant": variant.name,
-            "requested_size": size,
-            "stratify": stratify,
-            "stratified_on": "event_label" if stratify == "proportional" else None,
-            "allocation": "largest_remainder" if stratify == "proportional" else None,
-            "strata": strata,
-            "took_all": took_all,
-            "class_balance_changed": False,
-        },
-    )
-
-
 def _share(attack: int, other: int) -> float | None:
     return attack / (attack + other) if attack + other else None
 
 
-def variant_manifest(variant: Variant, pool: AlertPool) -> dict[str, Any]:
+def variant_manifest(variant: Variant, pool: AlertPool, *,
+                     experiment_variant: bool = True) -> dict[str, Any]:
     ev = Counter(_stratum(e) for e in variant.entries)
     time_attack = sum(e.time_attack for e in variant.entries)
     time_benign = len(variant.entries) - time_attack
@@ -322,7 +255,7 @@ def variant_manifest(variant: Variant, pool: AlertPool) -> dict[str, Any]:
         "reference_variant": variant.reference,
         "reference_size": variant.reference_size,
         "degenerate": variant.degenerate,
-        "sampling": variant.sampling,
+        "experiment_variant": experiment_variant,
         "attack_share": {
             "event_label": {"attack": ev["attack"], "benign": ev["benign"],
                             "unavailable": ev["unavailable"],
@@ -366,8 +299,7 @@ def write_variant(variant: Variant, pool: AlertPool, out_dir: str | Path) -> tup
     """Write the variant's alerts (byte-identical ingested lines) and its manifest."""
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    stem = (f"{variant.scenario}.{variant.name}" if variant.sampling is not None
-            else f"{variant.scenario}.variant.{variant.name}")
+    stem = f"{variant.scenario}.variant.{variant.name}"
     alerts_path, manifest_path = out / f"{stem}.alerts.jsonl", out / f"{stem}.manifest.json"
     with alerts_path.open("wb") as handle:
         for line in pool._lines(variant):
@@ -376,17 +308,28 @@ def write_variant(variant: Variant, pool: AlertPool, out_dir: str | Path) -> tup
     return alerts_path, manifest_path
 
 
+def experiment_variants(pool: AlertPool, config: StudyConfig,
+                        random_references: Sequence[str] | None = None) -> dict[str, Variant]:
+    """The variants experiments use: base variants plus the configured random controls."""
+    return build_variants(pool, seed=config.variant_seed,
+                          random_references=(config.random_reference if random_references is None
+                                             else random_references))
+
+
 def dev_triage_report(processed_dir: str | Path, scenario: str, config: StudyConfig, *,
                       output_dir: str | Path | None = None,
                       random_references: Sequence[str] | None = None) -> dict[str, Any]:
-    """Build all variants and the study sample, and score them. Dev scenarios only."""
+    """Build all variants and score them. Dev scenarios only."""
     config.split.require_dev(scenario)
     pool = AlertPool.from_processed(processed_dir, scenario)
-    sampling = config.sampling
-    variants = build_variants(pool, seed=sampling.seed,
-                              random_references=random_references or config.random_reference)
-    sample = study_sample(variants[sampling.variant], size=sampling.sample_size,
-                          seed=sampling.seed, stratify=sampling.stratify)
+    variants = experiment_variants(pool, config, random_references)
+    manifest_only = {
+        name: variant
+        for name, variant in build_variants(
+            pool, seed=config.variant_seed,
+            random_references=config.manifest_only_random_reference).items()
+        if name.startswith("random-") and name not in variants
+    }
     report: dict[str, Any] = {
         "scenario": scenario,
         "scenario_split": "dev",
@@ -396,7 +339,8 @@ def dev_triage_report(processed_dir: str | Path, scenario: str, config: StudyCon
         "pool": {"alerts": len(pool.entries), "excluded_by_selection": pool.excluded,
                  "event_label_available": sum(e.event_attack is not None for e in pool.entries)},
         "variants": {},
-        "sample": {"manifest": variant_manifest(sample, pool), "alert_ids": list(sample.alert_ids)},
+        "manifest_only": {name: variant_manifest(v, pool, experiment_variant=False)
+                          for name, v in manifest_only.items()},
     }
     for name, variant in variants.items():
         report["variants"][name] = {
@@ -405,7 +349,9 @@ def dev_triage_report(processed_dir: str | Path, scenario: str, config: StudyCon
         }
     if output_dir is not None:
         out = Path(output_dir) / scenario
-        for variant in (*variants.values(), sample):
+        for variant in variants.values():
             write_variant(variant, pool, out)
+        for name, manifest in report["manifest_only"].items():
+            _dump(out / f"{scenario}.variant.{name}.manifest.json", manifest)
         _dump(out / f"{scenario}.dev_triage.json", report)
     return report
