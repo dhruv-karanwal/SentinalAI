@@ -131,7 +131,7 @@ data/processed/<scenario>.alerts.jsonl ─┐
 data/processed/<scenario>.ground_truth.jsonl ┘
         │  AlertPool.from_processed (INVESTIGATION_SELECTION; index of byte offsets)
         ▼
- build_variants ── wazuh | suricata | aminer | fused | oracle | random-<ref>
+ build_variants ── wazuh | suricata | aminer | fused | oracle | shuffled-<det> | noise-<det>
         │                                   │
         │ study_sample (seeded, stratified) │ triage_by_truth (event_label, time_label)
         ▼                                   ▼
@@ -169,3 +169,10 @@ AlertPool + labels.csv (AttackTimeline)
 
 `app.evaluation.case_scoring` imports `app.study.cases` for types only, so
 the evaluation layer has no runtime dependency on the study layer.
+
+M4b additions: noise controls are rebuilt per case by
+`noise_case_alerts` (event-benign alerts, same window first, scenario pool
+as fallback); `app/study/baselines.py` holds the deterministic citers that
+`dev_case_report` scores on every variant (`baselines` section of
+`<scenario>.case_ceilings.json`); `app.study.baselines` imports
+`app.study.cases` for types only.

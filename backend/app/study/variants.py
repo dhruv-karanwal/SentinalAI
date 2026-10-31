@@ -13,12 +13,18 @@ Variants
   detection is counted twice.
 - ``oracle``: the alerts whose ``event_label`` is an attack, i.e. a perfect
   detector restricted to the existing alert pool.
-- ``random-<ref>``: a seeded uniform draw from the pool with the same count
-  as variant ``<ref>``. The experiment controls are ``random-wazuh``,
-  ``random-suricata`` and ``random-aminer``. Drawn from the alert pool, a
-  random control at the ``fused`` volume is the whole pool, so
-  ``random-fused`` is written only as a manifest, flagged ``degenerate``
-  and ``experiment_variant: false``, and is never used as a variant.
+- ``noise-<det>`` (the random control, M4b): alerts whose event_label is
+  *benign*, count-matched to detector ``<det>``. At scenario level it is a
+  seeded draw of ``len(<det>)`` alerts from the pool's event-benign alerts.
+  In cases it is rebuilt per case (app.study.cases.noise_case_alerts): the
+  same number of alerts as ``<det>`` has in the case window, taken from
+  event-benign alerts in the same window first, then from the scenario
+  pool, with the split recorded. It measures what an agent does when the
+  alert source is pure noise at a real detector's volume.
+- ``shuffled-<ref>`` (the M3 random control, kept as "shuffled-pool" rows):
+  a seeded uniform draw from the whole pool with the same count as variant
+  ``<ref>``. ``shuffled-fused`` is the whole pool, so it is written only as
+  a manifest, flagged ``degenerate`` and ``experiment_variant: false``.
 
 The study unit is the case (app.study.cases); the M3 per-variant 20-alert
 study sample was retired in M4.
@@ -54,9 +60,9 @@ from app.evaluation.metrics import TriageScores, triage_scores
 from app.ingestion.mappings import AIT_ADS_BENIGN_TIME_LABEL
 from app.ingestion.records import IngestionError, resolve_input_file
 from app.schemas.alert import INVESTIGATION_SELECTION, Alert, AlertSelection, Detector, GroundTruth
-from app.study.config import RANDOM_REFERENCE_CHOICES, StudyConfig
+from app.study.config import NOISE_REFERENCE_CHOICES, SHUFFLED_REFERENCE_CHOICES, StudyConfig
 
-BASE_VARIANTS = RANDOM_REFERENCE_CHOICES  # wazuh, suricata, aminer, fused, oracle
+BASE_VARIANTS = SHUFFLED_REFERENCE_CHOICES  # wazuh, suricata, aminer, fused, oracle
 
 
 @dataclass(frozen=True)
@@ -72,6 +78,7 @@ class PoolEntry:
     time_label: str
     event_label: str | None
     event_label_available: bool
+    severity: int | None = None  # detector-native (Wazuh rule.level, Suricata alert.severity)
 
     @property
     def event_attack(self) -> bool | None:
@@ -93,6 +100,7 @@ class Variant:
     reference: str | None = None
     reference_size: int | None = None
     degenerate: bool = False
+    family: str = "detector"  # detector | fused | oracle | shuffled | noise
 
     @property
     def alert_ids(self) -> tuple[str, ...]:
@@ -116,6 +124,7 @@ class AlertPool:
         self.excluded = excluded
         self.alerts_sha256 = alerts_sha256
         self.selection = selection
+        self._cache: dict[int, Alert] = {}
 
     @classmethod
     def from_processed(cls, processed_dir: str | Path, scenario: str,
@@ -165,7 +174,7 @@ class AlertPool:
                     alert_id=alert.alert_id, detector=alert.detector, timestamp=alert.timestamp,
                     source_file=alert.source_file, source_line=alert.source_line, offset=start,
                     time_label=gt.time_label, event_label=gt.event_label,
-                    event_label_available=gt.event_label_available,
+                    event_label_available=gt.event_label_available, severity=alert.severity,
                 ))
         entries.sort(key=lambda e: (e.timestamp, e.source_file, e.source_line))
         return cls(scenario, alerts_path, ground_truth_path, tuple(entries), excluded,
@@ -182,18 +191,32 @@ class AlertPool:
         for line in self._lines(variant):
             yield Alert.model_validate_json(line)
 
+    def alert(self, entry: PoolEntry) -> Alert:
+        """One alert record by its index entry (cached: cases reuse alerts)."""
+        cached = self._cache.get(entry.offset)
+        if cached is None:
+            with self.alerts_path.open("rb") as handle:
+                handle.seek(entry.offset)
+                cached = Alert.model_validate_json(handle.readline())
+            self._cache[entry.offset] = cached
+        return cached
+
+    def event_benign(self) -> tuple[PoolEntry, ...]:
+        """Pool alerts whose event_label is benign (available and ``-``), time-ordered."""
+        return tuple(e for e in self.entries if e.event_attack is False)
+
 
 def derive_seed(seed: int, *parts: str) -> int:
     text = "|".join((str(seed), *parts))
     return int.from_bytes(hashlib.sha256(text.encode("utf-8")).digest()[:8], "big")
 
 
-def _random_variant(pool: AlertPool, reference: Variant, seed: int) -> Variant:
+def _shuffled_variant(pool: AlertPool, reference: Variant, seed: int) -> Variant:
     derived = derive_seed(seed, "random", pool.scenario, reference.name)
     size = len(reference.entries)
     picked = sorted(random.Random(derived).sample(range(len(pool.entries)), size))
     return Variant(
-        name=f"random-{reference.name}",
+        name=f"shuffled-{reference.name}",
         scenario=pool.scenario,
         rule=(f"uniform draw without replacement from the pool, same count as "
               f"'{reference.name}' ({size})"),
@@ -203,14 +226,39 @@ def _random_variant(pool: AlertPool, reference: Variant, seed: int) -> Variant:
         reference=reference.name,
         reference_size=size,
         degenerate=size == len(pool.entries),
+        family="shuffled",
+    )
+
+
+def _noise_variant(pool: AlertPool, reference: Variant, seed: int) -> Variant:
+    benign = pool.event_benign()
+    derived = derive_seed(seed, "noise", pool.scenario, reference.name)
+    size = min(len(reference.entries), len(benign))
+    picked = sorted(random.Random(derived).sample(range(len(benign)), size))
+    return Variant(
+        name=f"noise-{reference.name}",
+        scenario=pool.scenario,
+        rule=(f"uniform draw without replacement from the pool's event-benign alerts, same "
+              f"count as '{reference.name}' ({len(reference.entries)}); in cases rebuilt per "
+              "window (same window first, scenario pool as fallback)"),
+        entries=tuple(benign[i] for i in picked),
+        seed=seed,
+        derived_seed=derived,
+        reference=reference.name,
+        reference_size=len(reference.entries),
+        family="noise",
     )
 
 
 def build_variants(pool: AlertPool, *, seed: int,
-                   random_references: Sequence[str] = ("fused",)) -> dict[str, Variant]:
-    unknown = [r for r in random_references if r not in BASE_VARIANTS]
+                   shuffled_references: Sequence[str] = ("fused",),
+                   noise_references: Sequence[str] = ()) -> dict[str, Variant]:
+    unknown = [r for r in shuffled_references if r not in BASE_VARIANTS]
     if unknown:
-        raise ValueError(f"unknown random reference variant(s): {', '.join(unknown)}")
+        raise ValueError(f"unknown shuffled reference variant(s): {', '.join(unknown)}")
+    unknown = [r for r in noise_references if r not in NOISE_REFERENCE_CHOICES]
+    if unknown:
+        raise ValueError(f"unknown noise reference detector(s): {', '.join(unknown)}")
     variants: dict[str, Variant] = {}
     for detector in Detector:
         variants[detector.value] = Variant(
@@ -218,13 +266,15 @@ def build_variants(pool: AlertPool, *, seed: int,
             tuple(e for e in pool.entries if e.detector is detector))
     variants["fused"] = Variant(
         "fused", pool.scenario, "union of the wazuh, suricata and aminer variants (the whole pool)",
-        pool.entries)
+        pool.entries, family="fused")
     variants["oracle"] = Variant(
         "oracle", pool.scenario,
         "pool alerts whose event_label is an attack; alerts without an available event label "
-        "are left out", tuple(e for e in pool.entries if e.event_attack))
-    for reference in random_references:
-        variants[f"random-{reference}"] = _random_variant(pool, variants[reference], seed)
+        "are left out", tuple(e for e in pool.entries if e.event_attack), family="oracle")
+    for reference in shuffled_references:
+        variants[f"shuffled-{reference}"] = _shuffled_variant(pool, variants[reference], seed)
+    for reference in noise_references:
+        variants[f"noise-{reference}"] = _noise_variant(pool, variants[reference], seed)
     return variants
 
 
@@ -244,6 +294,7 @@ def variant_manifest(variant: Variant, pool: AlertPool, *,
     time_benign = len(variant.entries) - time_attack
     return {
         "variant": variant.name,
+        "family": variant.family,
         "scenario": variant.scenario,
         "rule": variant.rule,
         "selection": dataclasses.asdict(pool.selection),
@@ -309,26 +360,27 @@ def write_variant(variant: Variant, pool: AlertPool, out_dir: str | Path) -> tup
 
 
 def experiment_variants(pool: AlertPool, config: StudyConfig,
-                        random_references: Sequence[str] | None = None) -> dict[str, Variant]:
-    """The variants experiments use: base variants plus the configured random controls."""
+                        shuffled_references: Sequence[str] | None = None) -> dict[str, Variant]:
+    """The variants experiments use: base variants plus the configured shuffled and noise controls."""
     return build_variants(pool, seed=config.variant_seed,
-                          random_references=(config.random_reference if random_references is None
-                                             else random_references))
+                          shuffled_references=(config.shuffled_reference if shuffled_references is None
+                                               else shuffled_references),
+                          noise_references=config.noise_reference)
 
 
 def dev_triage_report(processed_dir: str | Path, scenario: str, config: StudyConfig, *,
                       output_dir: str | Path | None = None,
-                      random_references: Sequence[str] | None = None) -> dict[str, Any]:
+                      shuffled_references: Sequence[str] | None = None) -> dict[str, Any]:
     """Build all variants and score them. Dev scenarios only."""
     config.split.require_dev(scenario)
     pool = AlertPool.from_processed(processed_dir, scenario)
-    variants = experiment_variants(pool, config, random_references)
+    variants = experiment_variants(pool, config, shuffled_references)
     manifest_only = {
         name: variant
         for name, variant in build_variants(
             pool, seed=config.variant_seed,
-            random_references=config.manifest_only_random_reference).items()
-        if name.startswith("random-") and name not in variants
+            shuffled_references=config.manifest_only_shuffled_reference).items()
+        if name.startswith("shuffled-") and name not in variants
     }
     report: dict[str, Any] = {
         "scenario": scenario,

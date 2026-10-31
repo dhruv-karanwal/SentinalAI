@@ -6,7 +6,7 @@ ground truth, so each one is computed from event IDs and field values only.
 
 from __future__ import annotations
 
-from collections.abc import Collection, Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 
@@ -80,19 +80,40 @@ def attack_step_coverage(
     return covered / len(steps)
 
 
+CLAIM_FIELD_VALUE = "field_value"
+CLAIM_QUOTE = "quote"
+CLAIM_KINDS = (CLAIM_FIELD_VALUE, CLAIM_QUOTE)
+QUOTE_MIN_CHARS = 8
+
+
 @dataclass(frozen=True)
 class Claim:
-    """A claim an agent made: record ``record_id`` has ``field == value``.
+    """A claim an agent made about record ``record_id``.
+
+    Two kinds:
+
+    - ``field_value`` (default): the record's ``field`` equals ``value``,
+      compared as stripped strings.
+    - ``quote``: ``value`` occurs verbatim in one of the record's raw log
+      lines: exact, case-sensitive substring, at least ``QUOTE_MIN_CHARS``
+      characters, no whitespace or case normalization. ``field`` is
+      informational for quotes.
 
     The record is a log event or, in the AIT-ADS study (which has no
-    log-event IDs), an alert: ``record_id`` is then the ``alert_id`` and the
-    fields are the alert record's own (see app.evaluation.case_scoring).
-    ``event_id`` is kept as an alias for existing callers.
+    log-event IDs), an alert: ``record_id`` is then the ``alert_id`` (see
+    app.evaluation.case_scoring). ``event_id`` is kept as an alias for
+    existing callers, and positional ``Claim(id, field, value)`` still makes
+    a field-value claim.
     """
 
     record_id: str
     field: str
     value: str
+    kind: str = CLAIM_FIELD_VALUE
+
+    def __post_init__(self) -> None:
+        if self.kind not in CLAIM_KINDS:
+            raise ValueError(f"claim kind must be one of {', '.join(CLAIM_KINDS)}, got {self.kind!r}")
 
     @property
     def event_id(self) -> str:
@@ -102,23 +123,48 @@ class Claim:
     def about_alert(cls, alert_id: str, field: str, value: str) -> Claim:
         return cls(alert_id, field, value)
 
+    @classmethod
+    def quote(cls, record_id: str, text: str) -> Claim:
+        return cls(record_id, "raw_log_line", text, kind=CLAIM_QUOTE)
+
+
+def _supported(claim: Claim, log_index: Mapping[str, Mapping[str, str]],
+               quote_index: Mapping[str, Sequence[str]] | None) -> bool:
+    if claim.kind == CLAIM_QUOTE:
+        lines = (quote_index or {}).get(claim.record_id)
+        return (lines is not None and len(claim.value) >= QUOTE_MIN_CHARS
+                and any(claim.value in line for line in lines))
+    record = log_index.get(claim.record_id)
+    return (record is not None and claim.field in record
+            and str(record[claim.field]).strip() == claim.value.strip())
+
+
+def unsupported_claims(
+    claims: Iterable[Claim],
+    log_index: Mapping[str, Mapping[str, str]],
+    *,
+    quote_index: Mapping[str, Sequence[str]] | None = None,
+) -> tuple[int, int]:
+    """``(unsupported, total)`` claims; see :func:`unsupported_claim_rate`."""
+    total = unsupported = 0
+    for claim in claims:
+        total += 1
+        unsupported += not _supported(claim, log_index, quote_index)
+    return unsupported, total
+
 
 def unsupported_claim_rate(
-    claims: Iterable[Claim], log_index: Mapping[str, Mapping[str, str]]
+    claims: Iterable[Claim],
+    log_index: Mapping[str, Mapping[str, str]],
+    *,
+    quote_index: Mapping[str, Sequence[str]] | None = None,
 ) -> float | None:
-    """Fraction of claims whose record id or field value is absent from the index.
+    """Fraction of claims not supported by the records. ``None`` for no claims.
 
-    ``log_index`` maps a record id (event id or alert id) to its fields.
-
-    Values are compared as stripped strings; no fuzzy matching, so a claim
-    is supported only if the log says exactly that. ``None`` for no claims.
+    ``log_index`` maps a record id (event id or alert id) to its fields;
+    ``quote_index`` maps it to its raw log lines (needed for quote claims;
+    without it every quote is unsupported). No fuzzy matching: a claim is
+    supported only if the record says exactly that.
     """
-    total = unsupported = 0
-    for c in claims:
-        total += 1
-        record = log_index.get(c.record_id)
-        if record is None or c.field not in record:
-            unsupported += 1
-        elif str(record[c.field]).strip() != c.value.strip():
-            unsupported += 1
+    unsupported, total = unsupported_claims(claims, log_index, quote_index=quote_index)
     return unsupported / total if total else None

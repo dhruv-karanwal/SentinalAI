@@ -5,6 +5,7 @@ from app.evaluation.metrics import (
     attack_step_coverage,
     triage_scores,
     unsupported_claim_rate,
+    unsupported_claims,
 )
 
 
@@ -50,3 +51,28 @@ def test_claim_record_id_is_generic_and_backward_compatible() -> None:
     assert claim.record_id == "alert-1" and claim.event_id == "alert-1"
     assert Claim.about_alert("alert-1", "rule.id", "52507") == claim
     assert unsupported_claim_rate([claim], {"alert-1": {"rule.id": "52507"}}) == 0.0
+
+
+def test_claim_kinds() -> None:
+    assert Claim("a1", "f", "v").kind == "field_value"
+    assert Claim.quote("a1", "Failed password").kind == "quote"
+    with pytest.raises(ValueError, match="kind"):
+        Claim("a1", "f", "v", kind="fuzzy")
+
+
+def test_quote_claims_are_exact_case_sensitive_substrings() -> None:
+    lines = {"a1": ["Jan 1 sshd[1]: Failed password for root from 10.0.0.1"]}
+    claims = [
+        Claim.quote("a1", "Failed password for root"),   # supported
+        Claim.quote("a1", " Failed password"),           # supported: the space is in the line
+        Claim.quote("a1", "failed password for root"),   # case differs
+        Claim.quote("a1", "Failed  password"),           # no whitespace normalization
+        Claim.quote("a1", "root fr"),                    # shorter than 8 characters
+        Claim.quote("a9", "Failed password for root"),   # unknown record
+    ]
+    assert unsupported_claims(claims, {}, quote_index=lines) == (4, 6)
+    assert unsupported_claim_rate(claims, {}, quote_index=lines) == pytest.approx(4 / 6)
+    # Without a quote index every quote is unsupported; field claims are unaffected.
+    assert unsupported_claim_rate([Claim.quote("a1", "Failed password")], {}) == 1.0
+    mixed = [Claim("a1", "rule.id", "5"), Claim.quote("a1", "Failed password")]
+    assert unsupported_claim_rate(mixed, {"a1": {"rule.id": "5"}}, quote_index=lines) == 0.0

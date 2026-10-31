@@ -28,7 +28,7 @@ from app.ingestion.records import IngestionError
 from app.pipeline import FORMATS, run_pipeline
 from app.study.config import (
     DEFAULT_STUDY_CONFIG,
-    RANDOM_REFERENCE_CHOICES,
+    SHUFFLED_REFERENCE_CHOICES,
     HeldOutScenarioError,
     load_study_config,
 )
@@ -116,8 +116,8 @@ def build_parser() -> argparse.ArgumentParser:
                           help=f"where ingest-alerts wrote its outputs (default: {DEFAULT_OUTPUT_DIR})")
     variants.add_argument("--study-config", type=Path, default=DEFAULT_STUDY_CONFIG,
                           help=f"study config (default: {DEFAULT_STUDY_CONFIG})")
-    variants.add_argument("--random-reference", action="append", choices=RANDOM_REFERENCE_CHOICES,
-                          default=None, help="variant a random control is size-matched to; "
+    variants.add_argument("--shuffled-reference", action="append", choices=SHUFFLED_REFERENCE_CHOICES,
+                          default=None, help="variant a shuffled-pool control is size-matched to; "
                           "repeatable (default: from the study config)")
     variants.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR / "variants",
                           help="where to write variants, manifests and the dev report "
@@ -225,7 +225,7 @@ def _variants(args: argparse.Namespace) -> int:
         report = dev_triage_report(
             args.processed_dir, args.scenario, config,
             output_dir=None if args.no_output else args.output_dir,
-            random_references=args.random_reference)
+            shuffled_references=args.shuffled_reference)
     except (HeldOutScenarioError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -255,6 +255,10 @@ def _variants(args: argparse.Namespace) -> int:
         print(f"Wrote variants, manifests and {report['scenario']}.dev_triage.json to "
               f"{Path(args.output_dir) / report['scenario']}")
     return 0
+
+
+def _frac(rate: dict[str, Any]) -> str:
+    return f"{rate['covered']}/{rate['cases']}"
 
 
 def _cases(args: argparse.Namespace) -> int:
@@ -287,6 +291,29 @@ def _cases(args: argparse.Namespace) -> int:
               f"{trunc['cases_truncated']:>6d} {trunc['alerts_dropped']:>8d} "
               f"{trunc['cases_cap_dropped_event_attack']:>6d}/{trunc['cases_cap_dropped_time_attack']:<6d} "
               f"{s['benign_cases_with_event_attack_alert']:>10d}")
+    phases = report["phases"]
+    print(f"Phases: {len(phases['all'])} attack phases, {len(phases['reachable'])} alert-reachable; "
+          f"unreachable: {', '.join(phases['unreachable']) or 'none'}")
+    noise_rows = [(n, s["noise"]) for n, s in report["variants"].items() if s["noise"] is not None]
+    for name, noise in noise_rows:
+        print(f"  {name}: {noise['reference_count']} alerts matched, {noise['from_window']} from the "
+              f"same window, {noise['from_fallback']} from the scenario pool, "
+              f"{noise['shortfall']} short")
+    b = report["baseline_config"]
+    print(f"\nDEV-SCENARIO BASELINES - deterministic non-LLM citers, not agent results "
+          f"(top_k {b['top_k']}, detector order {', '.join(b['detector_order'])})")
+    print("cov = phases covered (time / event_label) over all phases | over reachable phases; "
+          "prec = citation precision (event_label / time); unsup = unsupported-claim rate")
+    print(f"{'variant':16s} {'baseline':26s} {'cov t all':>9s} {'cov e all':>9s} {'cov t rch':>9s} "
+          f"{'cov e rch':>9s} {'prec e':>7s} {'prec t':>7s} {'unsup':>7s} {'cited':>6s} {'per case':>9s}")
+    for variant, rows in report["baselines"].items():
+        for name, r in rows.items():
+            cov, prec = r["coverage"], r["citation_precision"]
+            print(f"{variant:16s} {name:26s} {_frac(cov['time_label']['all']):>9s} "
+                  f"{_frac(cov['event_label']['all']):>9s} {_frac(cov['time_label']['reachable']):>9s} "
+                  f"{_frac(cov['event_label']['reachable']):>9s} {_fmt(prec['event_label']):>7s} "
+                  f"{_fmt(prec['time_label']):>7s} {_fmt(r['unsupported_claim_rate']):>7s} "
+                  f"{r['alerts_cited']['total']:>6d} {_fmt(r['alerts_cited']['mean_per_case']):>9s}")
     if not args.no_output:
         print(f"Wrote {report['scenario']}.cases.json and {report['scenario']}.case_ceilings.json to "
               f"{Path(args.output_dir) / report['scenario']}")
