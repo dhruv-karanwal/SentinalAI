@@ -5,6 +5,202 @@ are estimates.
 
 ---
 
+# M4: cases and deterministic case-level scoring
+
+Date: 2026-10-31. Branch `phase2/cases` (from `phase2/alert-sources` at
+`7ec4d3c`). Code commit: `e622661`. No LLM code. No new dependency.
+
+## What was done
+
+1. **Decisions applied.**
+   - Per-detector random controls (`random-wazuh`, `random-suricata`,
+     `random-aminer`) are the default. `random-fused` is written only as a
+     manifest with `degenerate: true` and `experiment_variant: false`.
+   - The M3 20-alert study sample is retired (code, config and tests
+     removed; the methodology doc says so).
+   - The Suricata labelling limitation is in the methodology doc.
+   - CICIDS2017 baselines are marked optional and off the critical path in
+     the CLAUDE.md status table.
+2. **Cases** (`app/study/cases.py`).
+   - One attack case per labels.csv phase.
+   - One matched benign window of equal length per attack case: seeded,
+     whole-second start, inside the observation range, outside attack
+     intervals plus padding, disjoint from other benign windows, and
+     logged in the case manifest.
+   - Per variant, the case's alerts are those in `[window_start, window_end)`,
+     time-ordered and capped at 100 (`earliest`). Each case manifest records
+     the truncation: alerts dropped, dropped alerts that are attack-labelled
+     by each label, and the rule.
+   - `dev_case_report` refuses held-out scenarios (tested for all six; the
+     CLI exits with code 2 for `harrison`).
+3. **Case scoring** (`app/evaluation/case_scoring.py`).
+   - Coverage by time (headline) and by event_label (sensitivity), using
+     `attack_step_coverage` with alert ids.
+   - Unsupported-claim rate using `Claim(record_id=alert_id, ...)` against
+     the case's own flattened alert records and raw log lines.
+   - Load = alerts in the case after the cap.
+   - `metrics.py` is backward compatible: positional `Claim(...)`,
+     `.event_id` and the existing tests are unchanged, and one new test
+     covers the change.
+
+## Final test and type-check output
+
+```
+$ ../.venv/Scripts/python.exe -m pytest
+...
+tests\test_ait_ads_real.py ...                                           [  1%]
+tests\test_alert_normalizer.py ........................                  [ 11%]
+tests\test_alert_pipeline.py ......                                      [ 14%]
+tests\test_alert_schema.py ............                                  [ 19%]
+tests\test_case_scoring.py ....                                          [ 21%]
+tests\test_cases.py ........                                             [ 24%]
+tests\test_data_quality.py ........                                      [ 27%]
+tests\test_event_schema.py .................                             [ 35%]
+tests\test_ground_truth.py ................                              [ 42%]
+tests\test_ingestion.py .................................                [ 56%]
+tests\test_metrics.py ......                                             [ 58%]
+tests\test_normalizer.py ............................................... [ 78%]
+............                                                             [ 84%]
+tests\test_pipeline.py .......                                           [ 87%]
+tests\test_study_config.py ...................                           [ 95%]
+tests\test_variants.py ...........                                       [100%]
+
+============================ 233 passed in 10.74s =============================
+
+$ ../.venv/Scripts/python.exe -m mypy
+Success: no issues found in 25 source files
+```
+
+## DEV-SCENARIO CEILINGS (not agent results)
+
+A ceiling scores each case as if the agent cited every alert it was given:
+the best any agent could do from that alert source. Config: committed
+`study.json` (padding 0 s, cap 100, `earliest`, 1 benign case per attack
+case, seed 20261031). Command: `python -m app.main cases --scenario <s>`.
+
+Columns:
+- `ceil time` / `ceil event`: attack cases covered, after the cap.
+- `pre-cap t/e`: the same two counts before the cap.
+- `mean att` / `mean ben`: mean alerts per case (after the cap) for attack
+  and benign cases.
+- `trunc`: cases truncated.
+- `dropped`: alerts dropped by the cap.
+- `drop atk e/t`: cases where the cap dropped an alert that is
+  attack-labelled by event_label / by time_label.
+- `ben w/ atk`: benign cases containing an event-labelled attack alert.
+
+```
+DEV-SCENARIO CEILINGS - scenario russellmitchell (dev split; ceilings, not agent results)
+Cases: 10 attack, 10 benign (0 benign unavailable); padding 0 s, cap 100 (earliest), seed 20261031
+variant           ceil time ceil event  pre-cap t/e  mean att  mean ben  trunc  dropped  drop atk e/t ben w/ atk
+wazuh               7/10       4/10        7/4        40.1000   21.5000      5     8136      2/3               0
+suricata            5/10       1/10        5/1        14.9000   16.0000      1       64      0/1               0
+aminer              8/10       6/10        8/6        28.8000    0.0000      2     3185      1/2               0
+fused              10/10       7/10       10/7        45.0000   24.7000      6    11901      3/4               0
+oracle              7/10       7/10        7/7        28.0000    0.0000      2    10677      2/2               0
+random-wazuh       10/10       7/10       10/7        43.5000   22.8000      6     7433      3/4               0
+random-suricata     8/10       5/10        8/5        38.8000   17.4000      4     2653      2/3               0
+random-aminer       6/10       5/10        6/5        28.2000    7.2000      2      953      2/2               0
+
+DEV-SCENARIO CEILINGS - scenario shaw (dev split; ceilings, not agent results)
+Cases: 10 attack, 10 benign (0 benign unavailable); padding 0 s, cap 100 (earliest), seed 20261031
+variant           ceil time ceil event  pre-cap t/e  mean att  mean ben  trunc  dropped  drop atk e/t ben w/ atk
+wazuh               8/10       3/10        8/3        42.6000   12.5000      5     5171      2/4               0
+suricata            1/10       0/10        1/0        10.0000   10.0000      2      232      0/1               0
+aminer              9/10       7/10        9/7        31.3000    0.0000      2      653      1/2               0
+fused              10/10       7/10       10/7        47.6000   12.5000      5     6519      3/4               0
+oracle              7/10       7/10        7/7        26.0000    0.0000      2     5800      2/2               0
+random-wazuh        9/10       6/10        9/6        42.5000   11.6000      4     4178      3/3               0
+random-suricata     9/10       5/10        9/5        35.7000   10.7000      4     1751      2/3               0
+random-aminer       5/10       3/10        5/3        16.6000    1.7000      1       43      1/1               0
+```
+
+Benign sampling:
+- russellmitchell: observation range 2022-01-21T00:02:27Z to
+  2022-01-24T23:39:13Z, 334,771 free seconds, derived seed
+  9459804069692567179.
+- shaw: 2022-01-25T00:06:19Z to 2022-01-30T23:31:06Z, 510,033 free
+  seconds, derived seed 2028203960259707288.
+- No benign case was unavailable in either scenario.
+
+Per attack phase, fused variant (from `<scenario>.cases.json`). "ev-labelled"
+is the count of event-labelled attack alerts in the phase before the cap,
+per detector:
+
+| scenario | phase | length (s) | alerts in window | kept | dropped (attack by event_label) | ev-labelled wazuh/suricata/aminer |
+|---|---|---|---|---|---|---|
+| russellmitchell | network_scans | 3346 | 8 | 8 | 0 | 0/0/0 |
+| | service_scans | 39 | 321 | 100 | 221 (46) | 6/44/0 |
+| | dirb | 23 | 4522 | 100 | 4422 (4422) | 4459/0/63 |
+| | wpscan | 31 | 6357 | 100 | 6257 (6255) | 3168/0/3187 |
+| | webshell | 63 | 3 | 3 | 0 | 0/0/1 |
+| | cracking | 2254 | 12 | 12 | 0 | 0/0/3 |
+| | reverse_shell | 43 | 1 | 1 | 0 | 0/0/0 |
+| | privilege_escalation | 34 | 24 | 24 | 0 | 6/0/18 |
+| | service_stop | 2 | 2 | 2 | 0 | 0/0/2 |
+| | dnsteal | 3600 | 547 | 100 | 447 (0) | 0/0/0 |
+| shaw | service_stop | 2 | 2 | 2 | 0 | 0/0/2 |
+| | dnsteal | 3600 | 105 | 100 | 5 (0) | 0/0/0 |
+| | network_scans | 97 | 12 | 12 | 0 | 0/0/9 |
+| | service_scans | 13 | 3 | 3 | 0 | 0/0/0 |
+| | wpscan | 24 | 1478 | 100 | 1378 (1378) | 729/0/749 |
+| | dirb | 26 | 4522 | 100 | 4422 (4422) | 4459/0/63 |
+| | webshell | 21 | 1 | 1 | 0 | 0/0/1 |
+| | cracking | 2409 | 547 | 100 | 447 (1) | 0/0/3 |
+| | reverse_shell | 40 | 4 | 4 | 0 | 0/0/0 |
+| | privilege_escalation | 22 | 54 | 54 | 0 | 10/0/35 |
+
+## Surprises
+
+1. **Random controls reach high case ceilings.** By time, `random-wazuh`
+   covers 10/10 phases in russellmitchell, more than `wazuh` (7/10).
+   `random-suricata` covers 9/10 in shaw against Suricata's 1/10. The
+   random draws come from the fused pool, which is densest exactly in the
+   attack phases and includes the other detectors' attack alerts. At the
+   case level, a random control mostly measures alert volume. The contrast
+   between sources shows up in precision, benign-case load and event-label
+   coverage, not in time coverage.
+2. **AMiner raises no alerts in any benign window** in either dev scenario
+   (mean benign load 0.0), while covering 8/10 and 9/10 phases by time.
+   Wazuh averages 21.5 and 12.5 alerts per benign case.
+3. **The event-label ceiling tops out at 7/10** in both scenarios. Three
+   phases per scenario contain no event-labelled alert from any detector:
+   network_scans, reverse_shell and dnsteal in russellmitchell; dnsteal,
+   service_scans and reverse_shell in shaw. dnsteal has 547 and 105 alerts
+   in its window, none of them event-labelled.
+4. **The cap is heavy but did not change any ceiling here.** The dirb and
+   wpscan cases hold 1,478 to 6,357 alerts; the earliest-100 rule drops
+   thousands of attack-labelled alerts. The kept 100 are still in-phase, so
+   coverage is the same before and after the cap. The cap does make
+   investigation load uniform (100) for exactly the cases with the most
+   evidence.
+5. **No benign case contains an event-labelled attack alert** in any
+   variant. Benign windows are clean by both labels.
+
+## Open questions for the user
+
+1. **What should the random control be at the case level?** Drawn from the
+   fused pool, it inherits the other detectors' attack alerts (surprise 1).
+   Is that the intended control? A detector-independent alternative would
+   need a population that isn't detector output, such as raw log lines,
+   which is out of scope.
+2. **Truncation rule.** `earliest` keeps the first 100 alerts. For long
+   phases (cracking ~2,300 s, dnsteal 3,600 s) a time-spread rule would show
+   more of the phase. Keep `earliest` (analyst-queue order) or add a
+   time-spread rule as an option?
+3. **Benign matching.** Benign windows match attack cases on length only.
+   Should they also match on time of day, since traffic volume differs by
+   hour?
+4. **Claim matching on raw log lines** is exact whole-line comparison.
+   Agents usually quote fragments. Before M6, should claims on
+   `evidence.log_lines` allow substring matching, or stay exact?
+5. **Pilot scenarios (M7).** The original plan was "6 scenarios × 20 alerts".
+   With cases and a frozen split, should the pilot run on the 2 dev
+   scenarios only (10 attack + 10 benign cases × 8 variants each), keeping
+   all six held-out scenarios for the final runs?
+
+---
+
 # M3: alert-source variants, study sampler, frozen split
 
 Date: 2026-10-31. Branch `phase2/alert-sources` (from `phase2/alert-schema`
