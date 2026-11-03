@@ -1,0 +1,34 @@
+{
+  "dataset": "AIT-ADS",
+  "split": {
+    "dev": ["russellmitchell", "shaw"],
+    "held_out": ["fox", "harrison", "santos", "wardbeck", "wheeler", "wilson"],
+    "frozen": true,
+    "frozen_on": "2026-10-31",
+    "note": "Decided by the user before any test run. Held-out scenarios must not be used for development, tuning or dev-only scoring."
+  },
+  "variants": {
+    "selection": "investigation",
+    "seed": 20261031,
+    "shuffled_reference": ["wazuh", "suricata", "aminer"],
+    "manifest_only_shuffled_reference": ["fused"],
+    "noise_reference": ["wazuh", "suricata", "aminer"]
+  },
+  "cases": {
+    "seed": 20261031,
+    "padding_seconds": 0,
+    "max_alerts": 100,
+    "truncation": "spread",
+    "benign_per_attack": 1
+  },
+  "baselines": {
+    "top_k": 5,
+    "detector_order": ["aminer", "wazuh", "suricata"],
+    "quote_chars": 60,
+    "note": "detector_order is set from the M3 dev triage precision (aminer > wazuh > suricata on both dev scenarios); it is a dev-derived, documented choice."
+  },
+  "pilot": {
+    "scenarios": ["russellmitchell", "shaw"],
+    "note": "The pilot runs on dev scenarios only; held-out scenarios stay untouched."
+  }
+}

@@ -76,3 +76,103 @@ Input CSV / JSON / JSONL
   data directory.
 - Reports and events store the input file's base name, not its full path.
 - No secrets or credentials are read or stored by Phase 1.
+
+# Phase 2 — Alert ingest (AIT-ADS)
+
+```
+<scenario>_wazuh.json ─┐  (line by line, Wazuh first, then AMiner)
+<scenario>_aminer.json ┘
+        │  RawRecord
+        ▼
+ route_ait_ads_record (mappings.py) ── eve.json → suricata; fast.log → wazuh + duplicate flag
+        │  AlertMapping
+        ▼
+ alert_normalizer ─────────────── record-level problem ─► Rejection
+        │  Alert                                              │
+        ├── AttackTimeline.label_at(timestamp) ─► time_label  │
+        ├── EventLabelLinker (alerts_csv row N) ─► event_label│
+        ▼                                                     ▼
+ AlertQualityAccumulator ◄────────────────────────────────────┘
+        │
+        ▼
+ data/processed/<scenario>.alerts.jsonl           Alert records (no labels)
+ data/processed/<scenario>.ground_truth.jsonl     GroundTruth, joined by alert_id
+ data/processed/<scenario>.alerts.rejected.jsonl  rejected records with reasons
+ data/processed/<scenario>.alerts.quality.json    per-detector counts, duplicates, coverage
+```
+
+| Module | Responsibility |
+|--------|----------------|
+| `app/schemas/alert.py` | `Alert`, `AlertEvidence`, `GroundTruth`, `AlertSelection` |
+| `app/ingestion/mappings.py` | AIT-ADS `AlertMapping`s, routing, layout, CSV conventions |
+| `app/ingestion/alert_normalizer.py` | Mapping-driven parsing/validation → `Alert` or `Rejection` |
+| `app/ingestion/ground_truth.py` | `labels.csv` timeline; alerts_csv reader; positional linker |
+| `app/services/alert_quality.py` | Streaming per-scenario report |
+| `app/alert_pipeline.py` | Wires the stages; `iter_alert_file` reads alerts back with a selection |
+
+Design decisions specific to alerts:
+
+- **Exclude at selection, never at ingest.** Training-mode, duplicate and
+  aggregate alerts are flagged and written; `AlertSelection` decides what an
+  experiment variant sees.
+- **Verified positional link.** alerts_csv has no alert id. Rows are paired
+  with input records by position and every pair is checked on (time, name,
+  ip); linking stops at the first mismatch instead of guessing.
+- **Checks run on every ingest**, not once: fast.log↔eve.json twin matching
+  and the label-clock check (attack intervals inside the alert time range)
+  are part of the quality report.
+- **Bounded memory.** Duplicate-id and twin matching keep 16-byte digests;
+  the 650 MB Wazuh files are never loaded whole.
+
+# Phase 2 — Alert-source variants (M3)
+
+```
+data/processed/<scenario>.alerts.jsonl ─┐
+data/processed/<scenario>.ground_truth.jsonl ┘
+        │  AlertPool.from_processed (INVESTIGATION_SELECTION; index of byte offsets)
+        ▼
+ build_variants ── wazuh | suricata | aminer | fused | oracle | shuffled-<det> | noise-<det>
+        │                                   │
+        │ study_sample (seeded, stratified) │ triage_by_truth (event_label, time_label)
+        ▼                                   ▼
+ data/processed/variants/<scenario>/
+   <scenario>.variant.<name>.{alerts.jsonl,manifest.json}
+   <scenario>.sample-<variant>.{alerts.jsonl,manifest.json}
+   <scenario>.dev_triage.json               (dev scenarios only)
+```
+
+- `app/study/config.py` reads `experiments/config/study.json`; dev-only
+  code calls `ScenarioSplit.require_dev`.
+- The pool keeps only a small index per alert; variant alerts are re-read
+  from `alerts.jsonl` by byte offset, so variant files are byte-identical
+  copies of ingested records and memory stays small.
+
+# Phase 2 — Cases and case-level scoring (M4)
+
+```
+AlertPool + labels.csv (AttackTimeline)
+        │  build_cases: attack case per phase + matched benign windows (seeded)
+        ▼
+ for each experiment variant × case:
+   case_alerts ── window [start-pad, end+pad), time-ordered, cap (earliest) ── truncation recorded
+        │
+        ▼
+ score_case (app/evaluation/case_scoring.py)
+   coverage by time / event_label (attack_step_coverage, alert ids)
+   unsupported claims (Claim.record_id = alert_id vs flattened alert records)
+   load = alerts in case
+        │
+        ▼
+ data/processed/cases/<scenario>/<scenario>.cases.json          windows, sampling log, ids, truncation
+ data/processed/cases/<scenario>/<scenario>.case_ceilings.json  per-variant ceilings (dev only)
+```
+
+`app.evaluation.case_scoring` imports `app.study.cases` for types only, so
+the evaluation layer has no runtime dependency on the study layer.
+
+M4b additions: noise controls are rebuilt per case by
+`noise_case_alerts` (event-benign alerts, same window first, scenario pool
+as fallback); `app/study/baselines.py` holds the deterministic citers that
+`dev_case_report` scores on every variant (`baselines` section of
+`<scenario>.case_ceilings.json`); `app.study.baselines` imports
+`app.study.cases` for types only.

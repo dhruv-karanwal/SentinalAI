@@ -1,0 +1,14 @@
+time,name,ip,host,short,time_label,event_label
+1699999200,Wazuh: ClamAV database update,10.0.0.5,mail,W-Sys-Cav,false_positive,-
+1700000100,Suricata: Alert - ET SCAN synthetic signature,10.0.0.9,firewall,S-Syn-Sig,dirb,dirb
+1700000100,Wazuh: First time this IDS alert is generated.,10.0.0.9,firewall,W-All-Ids,dirb,dirb
+1700000150,Wazuh: First time this IDS alert is generated.,10.0.0.9,firewall,W-All-Ids,dirb,-
+1700000050,Wazuh: Web server 400 error code, synthetic.,192.168.10.20,intranet_server,W-Acc-400,network_scans,service_scan
+1700000000,Wazuh: ClamAV database update,10.0.0.5,mail,W-Sys-Cav,false_positive,-
+1699999260,Wazuh: ClamAV database update,999.1.1.1,mail,W-Sys-Cav,false_positive,-
+1699999270,Wazuh: unparseable,10.0.0.5,mail,W-Unk,false_positive,-
+1699990010,AMiner: New event type.,10.0.0.7,intranet_server,A-Aud-Nep,dnsteal,-
+1700000120,AMiner: New value in Audit logs.,10.0.0.7,intranet_server,A-Aud-Nvd,dirb,escalated_sudo_command
+1700000300,AMiner: Unusual occurrence frequencies of DNS log events.,10.0.0.8,inet-firewall,A-Dns-Ecc,false_positive,-
+1699990030,AMiner: Unusual occurrence frequencies of query records in DNS logs.,10.0.0.8,inet-firewall,A-Dns-Efd,dnsteal,dnsteal
+1700000400,AMiner: New event type.,10.0.0.7,intranet_server,A-Aud-Nep,false_positive,-
