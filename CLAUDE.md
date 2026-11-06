@@ -17,18 +17,10 @@ built in phases.
 
 ### Roadmap (phase 3)
 
-| Milestone | Scope | Status |
-|-----------|-------|--------|
-| M5 | Model client + tool layer + single tool-using agent | **Done** (FakeClient only: no endpoint configured yet; no real model run) |
-| M6 | PILOT on dev scenarios with the M5 agent: tokens, latency, cost, quality vs the baselines. **Gate** before building more | Next (needs a model endpoint chosen by the user) |
-| M7 | ATT&CK knowledge base + retrieval (RAG), exposed as an agent tool | Not started |
-| M8 | Multi-agent investigation (LangGraph) + alert-evidence verifier, at matched budgets with M5 | Not started |
-| M9 | Correlation layer (same host / IP / time grouping of alerts into incidents) | Not started |
-| M10 | Report generation + human approval step | Not started |
-| M11 | Demo UI wrapping the same pipeline (use the ui-ux-pro-max skill) | Not started |
-| M12 | Held-out runs, statistics (paired bootstrap, Holm), freeze results | Not started |
-
-Held-out scenarios stay untouched until M12.
+The M7-M12 milestones are now delivered inside waves (pace rule below):
+M7 RAG and M8 multi-agent + verifier -> Wave C; M9 correlation -> Wave B3;
+M10 reports + approval and M11 UI -> Wave D; M12 held-out + statistics -> Wave E.
+Held-out scenarios stay untouched until Wave E.
 
 **Pace (user decision 2026-11-07, replaces "build only the next milestone"):
 build wave by wave; inside a wave, each sub-milestone is its own tested,
@@ -48,11 +40,24 @@ short (first to last): Copilot chat, Jira, compliance extras, Grafana
 dashboards, OpenSearch, Kafka. Never cut: the study pipeline, the
 multi-agent comparison, the verifier, statistics.
 
-| Wave | Status |
-|------|--------|
-| M6 | Selection options done (`--select reachable`, `--case-id`); smoke test + mini-pilot **blocked: no local model yet** (Ollama download paused, slow internet) |
-| A | Done: replay collector, stream (in-memory / Kafka), enrichment, consumer, SQLite / PostgreSQL storage with migrations, truth area, FTS5 / OpenSearch, local / MinIO objects, FastAPI + JWT + RBAC + audit, docker-compose |
-| B-E | See docs/session-notes.md |
+| Wave / unit | Status |
+|-------------|--------|
+| M5 | **Done** (FakeClient only; no real model run yet) |
+| M6 | Case selection options **done** (`run-agent --select reachable`, `--case-id`). 2-case smoke test + gated mini-pilot **blocked: no local model** (Ollama + `qwen2.5:7b-instruct` approved, download paused: slow internet) |
+| A | **Done, merged** (PR #3): replay collector, stream (in-memory / Kafka), enrichment, batched consumer, SQLite / PostgreSQL storage with migrations, separate truth area, FTS5 / OpenSearch, local / MinIO objects, FastAPI + JWT + RBAC + audit, Prometheus metrics, docker-compose `lite`/`full` |
+| B1 | **Done**: ATT&CK KB from local STIX + deterministic alert mapping (Wazuh native ids, then `RULE_TABLE`), IOC store + matcher, OTX/MISP/VirusTotal disabled stubs with a labelled synthetic sample |
+| B2 | **Next**: Sigma rule engine over normalized events (pySigma 2.0.2 parses all 256 approved rules; the evaluator is not written yet) |
+| B3 | Not started: triage dedup + grouping, deterministic Low/Medium/High rule, correlation into incidents (same host / IP / time) |
+| B4 | Not started: ML detection baselines (IsolationForest / scikit-learn / XGBoost) on AIT-ADS **dev scenarios only** (CICIDS2017 not available: its URL returns a registration page) |
+| C | Not started: ATT&CK RAG (bge-small already local), LangGraph supervisor + agents, evidence verifier, matched-budget comparison; **GATE after the pilot** |
+| D | Not started: reports (JSON/PDF/CSV), approvals, React dashboard (needs the npm download), copilot, feedback script, Grafana JSON, security notes, Jira stub |
+| E | Only after the user says go |
+
+**Where we stopped (2026-11-07) and what comes next:** see the last section of
+`docs/session-notes.md` ("Where we left off"). In short: build B2 (Sigma), B3
+and B4 offline; then the Wave C code with FakeClient tests; resume the paused
+downloads (Ollama + model, npm, Docker images) when the internet allows; then
+run the M6 smoke test and the Wave C pilot and stop at the gate.
 
 Nested rules: `backend/CLAUDE.md`, `infra/CLAUDE.md` (and `frontend/CLAUDE.md`
 once the frontend exists). This file is the index.
@@ -90,7 +95,20 @@ S=../data/samples/synthetic_ait_ads
 # real model: set SENTINEL_LLM_BASE_URL + SENTINEL_LLM_MODEL (and the key in
 # SENTINEL_LLM_API_KEY for a hosted API) -- only with the user's explicit approval
 # scripted demo without a model: --fake-responses replies.json (JSON list of reply strings)
+# M6 selection: --select reachable (attack cases on alert-reachable phases + their benign
+# matches) or --case-id <id> (repeatable)
+
+# Wave A platform: replay a DEV scenario into the stores (SQLite fallback in data/platform/,
+# or PostgreSQL / OpenSearch / Kafka via SENTINEL_DB_URL / SENTINEL_SEARCH_URL / SENTINEL_KAFKA)
+../.venv/Scripts/python.exe -m app.main platform-ingest --scenario russellmitchell
+# passwords and secrets only from the environment, never as arguments
+../.venv/Scripts/python.exe -m app.main create-user --username alice --role analyst   # needs SENTINEL_NEW_USER_PASSWORD
+../.venv/Scripts/python.exe -m app.main serve      # API on 127.0.0.1:8000; needs SENTINEL_JWT_SECRET
 ```
+
+Infra (optional): copy `.env.example` to `.env`, fill it, then
+`docker compose --profile lite up -d` (PostgreSQL + pgvector) or `--profile full`.
+See `infra/CLAUDE.md`.
 
 `tests/test_ait_ads_real.py` runs on the real russellmitchell files when
 `data/raw/ait_ads/` holds them and skips otherwise (~8 s).
@@ -144,12 +162,27 @@ backend/app/
                           offsets, mask_times; never sees labels
   agent/protocol.py       SYSTEM_PROMPT (PROMPT_VERSION), strict JSON reply parsing (ToolCall, FinalAnswer)
   agent/agent.py          investigate(): bounded loop -> CaseRun (status, tokens, transcript, claims)
-  agent/runner.py         prepare_run (dev only), select_cases, estimate_run, config_hash, run_agent
-                          (run log + scores next to baselines)
+  agent/runner.py         prepare_run (dev only), select_cases (interleaved | reachable | case ids),
+                          estimate_run, config_hash, run_agent (run log + scores next to baselines)
+  storage/                db.py (SQLite | PostgreSQL, templated migrations), repository.py (Repository,
+                          AlertReader for agent tools, TruthStore), search.py, objects.py,
+                          migrations/{core,truth}/NNNN_*.sql
+  platform/               stream.py, collectors.py (dataset replay, dev only), enrichment.py,
+                          consumer.py, bootstrap.py (open_stores, ingest_scenario)
+  api/                    auth.py (roles, PERMISSIONS, JWT, bcrypt), app.py (routes), server.py
+  ops/metrics.py          Prometheus metrics (API + agent cost)
+  intel/attack.py         AttackKB.from_stix, Technique, map_alert, RULE_TABLE
+  intel/ioc.py            Indicator, IocStore.match_alert, disabled feed adapters (FEEDS)
 backend/tests/            pytest, one file per module + test_pipeline.py (end to end)
 data/samples/             committed SYNTHETIC samples (see its README)
 data/raw/, data/processed/ git-ignored: local datasets and pipeline outputs
 data/samples/synthetic_ait_ads/ SYNTHETIC files in the AIT-ADS shapes (scenario "synthetic")
+data/samples/synthetic_attack_stix.json SYNTHETIC 3-technique ATT&CK bundle for tests
+data/raw/mitre/, data/raw/sigma/repo/ approved local ATT&CK bundle and SigmaHQ rules (git-ignored)
+data/models/fastembed/    local bge-small-en-v1.5 ONNX embedding model (git-ignored)
+data/platform/            SQLite fallback stores core.db, truth.db, search.db, objects/ (git-ignored)
+docker-compose.yml, infra/ lite/full profiles, Postgres role init, Prometheus config
+.env.example              names of every secret; the real .env is git-ignored
 docs/                     architecture.md, research-methodology.md, session-notes.md
 experiments/config/study.json  frozen split; variant seed, shuffled/noise references; cases; baselines (k list, frozen order); pilot (scenarios, truncations); model (endpoint, null = none); agent (budgets)
 ```
@@ -416,6 +449,19 @@ experiments/config/study.json  frozen split; variant seed, shuffled/noise refere
   eligible counts are not simple subtractions.
 - `test_alert_pipeline.py` asserts exact counts for `data/samples/synthetic_ait_ads/`;
   update it and `data/samples/README.md` if you change those files.
+- Wazuh alerts carry native ATT&CK ids in `rule.mitre.id` (dev: T1078 on the
+  dovecot authentication_success alerts dominates); Suricata and AMiner carry
+  none. Map only native ids and `RULE_TABLE` rows; never guess.
+- pySigma 2.0.2 parses all 256 approved rules (rules/linux, rules/web) with 0
+  errors. Most need fields (process_creation, auditd key=value, webserver
+  cs-*/sc-*); AIT-ADS evidence is raw log lines, so the Sigma engine must
+  parse lines into fields per log type or run keyword-only rules.
+- The CICIDS2017 MachineLearningCSV URL returns an HTML registration page,
+  not the zip: check the content type of any dataset download.
+- The internet here can be slow (~100 kB/s): run downloads in the background
+  and use `git -c http.postBuffer=524288000 push` for large pushes.
+- Heredocs with quotes can fail in this Git Bash; write multi-line scripts to
+  a scratch file with the Write tool and run that instead.
 
 ## Conventions
 
@@ -427,9 +473,11 @@ Python 3.11+, type hints everywhere (mypy strict passes), PEP 8 naming,
 
 Nested loops. Do not skip a level.
 
-1. **Outer loop, per milestone** (one milestone = one small, testable slice of
-   the study, on its own `phase2/<name>` branch):
-   plan -> inner loop until done -> update this file -> commit -> report.
+1. **Outer loop, per wave unit** (one sub-milestone = one small, testable
+   slice, committed on the wave's `phase3/wave-<x>` branch): plan -> inner
+   loop until done -> update this file -> commit -> report. At the end of a
+   wave (or of a work day): session notes, push, open a PR to `main` and
+   merge it (user decision 2026-11-07).
 2. **Inner loop, per component:** write the test first -> implement ->
    `pytest` -> `mypy` -> fix -> repeat until both are clean. Never report a
    component done on a red run; report real command output.
@@ -438,7 +486,10 @@ Nested loops. Do not skip a level.
 4. **Close of every milestone:** update CLAUDE.md (status table, layout,
    gotchas, any new rule) in the same commit as the code. If code and this
    file disagree, the code wins and this file gets fixed.
-5. **When the user asks for a CLAUDE.md prompt:** give a copy-pasteable prompt
+5. **No Claude attribution** in commit messages or PRs (no
+   `Co-Authored-By: Claude` trailer, no "Generated with Claude Code" line;
+   user decision 2026-11-07). Never force-push.
+6. **When the user asks for a CLAUDE.md prompt:** give a copy-pasteable prompt
    that regenerates/updates this file from the current repo state, and keep
    this file updated on every change thereafter.
 

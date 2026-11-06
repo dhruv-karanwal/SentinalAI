@@ -1214,3 +1214,196 @@ experimental results.
    formats only, not to look at results. If either is intended as held-out,
    say so; the verification touched only file structure and label
    alignment.
+
+
+# 2026-11-07: pace change, M6 selection, Wave A, Wave B1
+
+User decision: build the whole SentinelAI architecture in waves (A-E)
+instead of one milestone at a time; inside a wave each sub-milestone is its
+own tested, committed unit. Commits and PRs carry no Claude attribution; at
+the end of a wave or work day: push, open a PR to `main`, merge it.
+
+## Approved downloads and what actually arrived
+
+One approval batch ("approve all") covered: Ollama + `qwen2.5:7b-instruct`
+(fallback `qwen2.5:3b-instruct`), the Python and npm packages, the Docker
+images, MITRE ATT&CK enterprise STIX, SigmaHQ `rules/linux` + `rules/web`,
+`BAAI/bge-small-en-v1.5` (ONNX), and optionally CICIDS2017. Downloads ran at
+about 100 kB/s; the user then paused all downloads.
+
+| Item | Status | Details |
+|------|--------|---------|
+| Python packages | **Installed** | fastapi 0.162.0, uvicorn 0.54.0, httpx 0.28.1, PyJWT 2.15.1, bcrypt 5.0.0, psycopg 3.3.8, langgraph 1.2.20, langchain-core 1.7.6, numpy 2.4.6, scipy 1.17.1, scikit-learn 1.9.1, xgboost 3.2.0, fastembed 0.9.1, onnxruntime 1.31.1, pySigma 2.0.2, reportlab 5.1.0, prometheus_client 0.26.0, confluent-kafka 2.16.1, opensearch-py 3.2.0, minio 7.2.20 (the first attempt hit a read timeout; the retry with `--timeout 180 --retries 10` succeeded) |
+| MITRE ATT&CK | **Downloaded** | `data/raw/mitre/enterprise-attack.json`, 55,277,605 bytes, sha256 `539a843a7b53ed9749740b2123dddae3726b1a4831841c32aca740b011b910b5`, 26,699 objects, collection `x_mitre_version` 20.1 (modified 2026-11-05); latest commit on that path in `mitre-attack/attack-stix-data` at download: `f59b03e`. MITRE publishes no checksum for this file, so the sha256 is recorded, not verified against a published value |
+| SigmaHQ rules | **Downloaded** | sparse clone of `rules/linux` + `rules/web` at commit `53423dac8742ef6a44fb73f23f049e84594a66ce`, 256 `.yml` rules, 1.1 MB, in `data/raw/sigma/repo/` |
+| Embedding model | **Downloaded** | `Qdrant/bge-small-en-v1.5-onnx-Q` via fastembed into `data/models/fastembed/`; a test embedding has 384 dimensions; the download took about 9 minutes |
+| Ollama + LLM | **Not installed** | `winget install Ollama.Ollama` was still downloading when the user paused downloads; it was stopped. No model is pulled |
+| npm packages | Not started | needed for the Wave D dashboard |
+| Docker images | Not started | Docker Desktop is installed at `D:\Docker` but not running; `docker compose` (the plugin) was not found, so `docker compose config` has not been run |
+| CICIDS2017 | **Not available** | `http://cicresearch.ca/.../MachineLearningCSV.zip` returned HTTP 200 with a 98,455-byte HTML registration page, not the zip. The file was deleted. Per the user's fallback, ML baselines will use the AIT-ADS dev scenarios only |
+
+Machine: 15.6 GB RAM, RTX 4060 Laptop GPU with 8 GB, Node 22.19.0, Python 3.11.9.
+
+## What was built
+
+**M6 (partial).** `select_cases(cases, limit, mode, reachable, case_ids)`:
+`interleaved` (as before), `reachable` (attack cases on alert-reachable
+phases plus the benign cases matched to them, interleaved), or explicit case
+ids. CLI `run-agent --select`, `--case-id` (repeatable). The 2-case smoke
+test and the gated mini-pilot need a local model and have **not** been run.
+
+**Wave A, merged as PR #3.**
+
+- `app/platform`: `DatasetReplayCollector` (dev only: `require_dev` before
+  the file is opened; Beats / Logstash / Fluentd are documented production
+  adapters, not built), `InMemoryStream` / `KafkaStream` on topic
+  `sentinel.alerts.raw`, `enrich()` (event type, source, time, network with
+  IP class from `ipaddress`, geo only from Wazuh `GeoLocation`; missing =
+  None), `consume()` (validated, idempotent by `alert_id`, rejected messages
+  counted with their error, transactions of 1000), `bootstrap.open_stores` /
+  `ingest_scenario`.
+- `app/storage`: `SqliteDatabase` / `PostgresDatabase` behind one
+  `Database` protocol; templated, append-only migrations with sha256 check
+  (`core/0001_core.sql`: alerts, cases, runs, agent_transcripts, incidents,
+  reports, feedback, approvals, audit_log, users, memory;
+  `truth/0001_truth.sql`: ground_truth). Truth is a separate SQLite file or
+  PostgreSQL schema `truth`, which the `sentinel_agent` role cannot read.
+  `Repository` (core), `AlertReader` (read-only, for agent tools),
+  `TruthStore`. `SqliteFtsIndex` / `OpenSearchIndex`, `LocalObjectStore` /
+  `MinioObjectStore` (keys validated so they cannot escape the root).
+- `app/api`: FastAPI routes for health, login, me, users, alerts (list,
+  search, stats, get), cases, runs, incidents (list, get, status), reports,
+  feedback, audit, metrics. JWT HS256 with the secret only from
+  `SENTINEL_JWT_SECRET` (>= 32 chars), bcrypt passwords, roles analyst /
+  manager / admin / executive (read-only, no raw records), every write and
+  every denial written to `audit_log`.
+- `app/ops/metrics.py`: Prometheus registry (HTTP requests and latency,
+  agent tokens, requests, latency, parse failures, dropped claims).
+- `docker-compose.yml` (`lite` = PostgreSQL 16 + pgvector; `full` = + Kafka
+  KRaft, OpenSearch 2.17 with 512 MB heap, MinIO, Prometheus, Grafana), all
+  ports on 127.0.0.1, every secret `${VAR:?}` from a git-ignored `.env`
+  (`.env.example` lists the names). `infra/postgres/init/01-roles.sh`.
+- CLI: `platform-ingest`, `create-user` (password from
+  `SENTINEL_NEW_USER_PASSWORD`), `serve`.
+- Nested `backend/CLAUDE.md` and `infra/CLAUDE.md`.
+
+**Wave B1 (on branch `phase3/wave-b`).** `app/intel/attack.py`:
+`AttackKB.from_stix` (techniques, tactics, groups; revoked and deprecated
+skipped), `map_alert` (Wazuh native `rule.mitre.id` first, then
+`RULE_TABLE`, which has one row: Suricata category "Web Application Attack"
+-> T1190; anything else unmapped; ids missing from the loaded version are
+flagged `known=False`). `app/intel/ioc.py`: `IocStore` (exact ip / domain
+with subdomains / url / md5 / sha256 matching over enrichment fields,
+Suricata http/tls/dns fields and log-line tokens), disabled OTX / MISP /
+VirusTotal adapters whose `offline_sample()` is SYNTHETIC (TEST-NET-3 and
+`.example` values). Test sample: `data/samples/synthetic_attack_stix.json`.
+
+## Descriptive dev-scenario statistics used for design decisions
+
+From `data/processed/{russellmitchell,shaw}.alerts.jsonl` (all alerts, both
+dev scenarios together; descriptive, not results):
+
+- Wazuh native ATT&CK ids (`rule.mitre.id`): T1078 on 42,540 alerts,
+  T1595.002 on 918, T1110.001 on 196, T1110 on 32, T1055 on 18, T1021.004
+  on 11, [T1078, T1021] on 9, T1548.003 on 5, [T1055, T1083, T1190] on 4,
+  T1190 on 2. All of these ids exist in the downloaded ATT&CK 20.1 bundle
+  (`test_real_attack_bundle_has_the_dev_native_ids`).
+- Suricata `alert.category`: Generic Protocol Command Decode 24,887, Not
+  Suspicious Traffic 826, Potentially Bad Traffic 136, Web Application
+  Attack 27, none 16, Misc activity 2. No Suricata alert carries an ATT&CK id
+  in its metadata, so only "Web Application Attack" is mapped.
+- AMiner component types: NewMatchPathValueDetector 4,613,
+  NewMatchPathDetector 676, NewMatchPathValueComboDetector 411,
+  CharsetDetector 264, EventCountClusterDetector 122, EventFrequencyDetector
+  73, EntropyDetector 60, MatchValueAverageChangeDetector 46,
+  ValueRangeDetector 34. Not mapped to techniques.
+- russellmitchell raw-record shapes: 3,385 Wazuh records carry
+  `GeoLocation` (the only geo source used by enrichment).
+- Sigma: pySigma 2.0.2 parsed all 256 rules with 0 errors. Log sources:
+  linux/process_creation 123, linux/auditd 53, proxy 29, linux (generic) 15,
+  webserver 13, linux/file_event 8, linux/network_connection 5, linux/syslog
+  2, apache 2, one each for clamav, cron, guacamole, sshd, vsftpd, nginx.
+
+## Final test and type-check output (end of day)
+
+```
+$ ../.venv/Scripts/python.exe -m pytest -q
+SKIPPED [1] tests\test_infra_integration.py:28: SENTINEL_TEST_DB_URL not set (docker-compose services not configured)
+SKIPPED [1] tests\test_infra_integration.py:28: SENTINEL_TEST_AGENT_DB_URL not set (docker-compose services not configured)
+SKIPPED [1] tests\test_infra_integration.py:28: SENTINEL_TEST_SEARCH_URL not set (docker-compose services not configured)
+SKIPPED [1] tests\test_infra_integration.py:28: SENTINEL_TEST_KAFKA not set (docker-compose services not configured)
+327 passed, 4 skipped in 17.72s
+$ ../.venv/Scripts/python.exe -m mypy
+Success: no issues found in 53 source files
+```
+
+No frontend exists yet, so there is no frontend test output.
+
+## Decisions taken (conservative options, recorded)
+
+1. Search backend in `full` is OpenSearch (Apache-2.0), not Elasticsearch.
+2. Embeddings via fastembed + ONNX (CPU, no PyTorch).
+3. CICIDS2017 unavailable -> ML baselines on AIT-ADS dev scenarios only.
+4. ATT&CK mapping uses detector-native ids plus a one-row rule table; no
+   keyword or LLM mapping.
+5. The 13 earlier branch commits had a Claude co-author trailer. M2-M4b were
+   already on `main` (PR #1) with the trailer; those cannot change without
+   rewriting `main`, which was not done. The 4 later commits were rebuilt on
+   top of `main` without it (PR #3); PR #2 was closed as superseded.
+6. Secret scan before opening the PRs: no keys, tokens, private keys or
+   `.env` files anywhere in the history of any branch; only `.env.example`
+   (empty values) and a deliberate dummy `sk-test-not-a-real-key` in
+   `tests/test_agent_client.py`.
+
+## Where we left off
+
+State at the end of the day: `main` has Wave A (PR #3); this note,
+B1 and the CLAUDE.md updates are on `phase3/wave-b` and are merged in the
+end-of-day PR.
+
+Not done / not verified:
+
+- **Real dev replay into the platform stores was interrupted** (by the user,
+  part-way through russellmitchell). `data/platform/` holds a partial
+  `core.db`; delete `data/platform/` and re-run
+  `platform-ingest --scenario russellmitchell` and `--scenario shaw`
+  (batched writes; expected to take minutes, not measured yet). No real
+  replay counts exist yet.
+- `docker compose config` not run; no memory measurements of the profiles.
+- M6 smoke test and mini-pilot not run (no model).
+
+Next steps, in order:
+
+1. **B2 Sigma engine** (`app/detection/sigma_engine.py`): evaluate pySigma's
+   parsed conditions over events built from alert evidence log lines
+   (Apache combined -> webserver fields; auditd key=value; syslog
+   keyword-only rules); emit `Alert` records with detector `sigma` as an
+   additional source (study detectors unchanged; the `Detector` enum and
+   `DETECTOR_TYPES` need a new member, so check every place that iterates
+   detectors). Report real hit counts per rule on the dev scenarios.
+2. **B3 triage and correlation**: dedup (exists), grouping by host / IP /
+   time gap, a documented deterministic Low/Medium/High rule, incidents
+   written through `Repository.put_incident`, plus an API route to build
+   them.
+3. **B4 ML baselines**: IsolationForest + a supervised scikit-learn /
+   XGBoost model on documented alert features, leakage-safe split by time
+   inside the dev scenarios, labels only from the truth area at training
+   time; report metrics labelled "detection baselines, dev scenarios".
+4. Wave B session notes, PR, merge.
+5. **Wave C code** (no model needed for the code): ATT&CK chunks embedded
+   with the local bge-small model (SQLite fallback vector table, pgvector in
+   `lite`), retrieval tool with a hand-written relevance test set, LangGraph
+   supervisor with the six agents, evidence verifier, matched-budget runner;
+   FakeClient tests for the graph control flow.
+6. **When the internet allows**: resume Ollama (`winget install
+   Ollama.Ollama`) and `ollama pull qwen2.5:7b-instruct`; npm packages;
+   Docker images. Then: M6 2-case smoke test, gated mini-pilot, Wave C pilot,
+   and **stop at the Wave C gate** with the exact numbers.
+
+## Open questions for the user
+
+1. The CICIDS2017 site needs a registration form; if you want CICIDS2017
+   baselines, download `MachineLearningCSV.zip` yourself into
+   `data/raw/cicids2017/` (otherwise ML stays AIT-ADS dev only).
+2. Start Docker Desktop (and install the compose plugin if it is missing)
+   when you want the `lite`/`full` profiles tested and measured.
