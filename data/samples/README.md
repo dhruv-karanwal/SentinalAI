@@ -35,3 +35,7 @@ invented. Pass `--dataset-name synthetic-ait-ads-format` when ingesting them.
 
 Expected ingest: 13 input, 9 normalized, 4 rejected (asserted in
 `backend/tests/test_alert_pipeline.py`).
+
+## `synthetic_attack_stix.json` — MITRE ATT&CK STIX shape
+
+A SYNTHETIC 9-object STIX 2.1 bundle in the shape of `enterprise-attack.json`: a collection (version `synthetic-1`), 2 tactics, 3 techniques (T1110, T1110.001, T1190; descriptions marked SYNTHETIC), 1 revoked and 1 deprecated technique (both must be skipped), 1 intrusion set. Used by `backend/tests/test_intel.py`; not real ATT&CK content.
