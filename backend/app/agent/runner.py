@@ -79,10 +79,33 @@ class PreparedRun:
     reachable: tuple[str, ...]
 
 
-def select_cases(cases: Sequence[Case], limit: int | None) -> list[int]:
-    """Indices of attack and benign cases interleaved in case order, first ``limit``."""
-    attack = [i for i, c in enumerate(cases) if c.kind is CaseKind.ATTACK]
-    benign = [i for i, c in enumerate(cases) if c.kind is CaseKind.BENIGN]
+SELECTION_MODES = ("interleaved", "reachable")
+
+
+def select_cases(cases: Sequence[Case], limit: int | None, *, mode: str = "interleaved",
+                 reachable: Sequence[str] = (), case_ids: Sequence[str] | None = None) -> list[int]:
+    """Indices of the cases a run investigates, deterministic.
+
+    - ``case_ids``: exactly these cases, in the given order (unknown id = error);
+    - mode ``interleaved``: attack and benign cases interleaved in case order;
+    - mode ``reachable`` (M6): the same, restricted to attack cases on an
+      alert-reachable phase and the benign cases matched to those phases, so a
+      small pilot does not spend its budget on phases no detector can show.
+    ``limit`` then takes the first N.
+    """
+    if case_ids is not None:
+        index = {c.case_id: i for i, c in enumerate(cases)}
+        missing = [cid for cid in case_ids if cid not in index]
+        if missing:
+            raise ValueError(f"unknown case id(s): {', '.join(missing)}")
+        picked = [index[cid] for cid in case_ids]
+        return picked if limit is None else picked[:limit]
+    if mode not in SELECTION_MODES:
+        raise ValueError(f"selection mode must be one of {', '.join(SELECTION_MODES)}")
+    keep = set(reachable)
+    allowed = [i for i, c in enumerate(cases) if mode == "interleaved" or c.phase in keep]
+    attack = [i for i in allowed if cases[i].kind is CaseKind.ATTACK]
+    benign = [i for i in allowed if cases[i].kind is CaseKind.BENIGN]
     order: list[int] = []
     for k in range(max(len(attack), len(benign))):
         order.extend(group[k] for group in (attack, benign) if k < len(group))
@@ -91,7 +114,8 @@ def select_cases(cases: Sequence[Case], limit: int | None) -> list[int]:
 
 def prepare_run(processed_dir: str | Path, labels_path: str | Path, scenario: str, variant: str,
                 config: StudyConfig, *, limit: int | None,
-                truncation: str | None = None) -> PreparedRun:
+                truncation: str | None = None, selection: str = "interleaved",
+                case_ids: Sequence[str] | None = None) -> PreparedRun:
     config.split.require_dev(scenario)  # before any file is read
     rule = truncation or config.cases.truncation
     if rule not in TRUNCATION_CHOICES:
@@ -105,7 +129,8 @@ def prepare_run(processed_dir: str | Path, labels_path: str | Path, scenario: st
         raise ValueError(f"unknown experiment variant {variant!r}; choose from {', '.join(variants)}")
     views = variant_case_views(case_set, variants, pool, case_config)[variant]
     reachable, _ = reachable_phases(case_set, pool)
-    chosen = select_cases(case_set.cases, limit)
+    chosen = select_cases(case_set.cases, limit, mode=selection, reachable=reachable,
+                          case_ids=case_ids)
     return PreparedRun(scenario, variant, rule, config, pool,
                        tuple(case_set.cases[i] for i in chosen), tuple(views[i] for i in chosen),
                        reachable)
