@@ -371,10 +371,10 @@ def _summary(cases: tuple[Case, ...], views: list[CaseAlerts], scores: list[Case
     }
 
 
-def _baseline_summaries(case_set: CaseSet, views: list[CaseAlerts], pool: AlertPool,
-                        config: BaselineConfig, reachable: Sequence[str],
-                        matched: int | None = None) -> dict[str, Any]:
-    cases = case_set.cases
+def baseline_summaries(cases: Sequence[Case], views: Sequence[CaseAlerts], pool: AlertPool,
+                       config: BaselineConfig, reachable: Sequence[str],
+                       matched: int | None = None) -> dict[str, Any]:
+    """Every baseline row scored over ``cases`` (all cases of a scenario, or an agent run's subset)."""
     flat: dict[str, dict[str, str]] = {}
     summaries: dict[str, Any] = {}
     for row in baseline_rows(config, matched=matched):
@@ -472,7 +472,7 @@ def dev_case_report(processed_dir: str | Path, labels_path: str | Path, scenario
                   for c, v in zip(case_set.cases, views)]
         summaries[name] = {"family": variants[name].family,
                            **_summary(case_set.cases, views, scores)}
-        baselines[name] = _baseline_summaries(case_set, views, pool, config.baselines, reachable)
+        baselines[name] = baseline_summaries(case_set.cases, views, pool, config.baselines, reachable)
         for record, view, score in zip(case_records, views, scores):
             record["variants"][name] = {
                 "alerts_in_window": view.in_window,

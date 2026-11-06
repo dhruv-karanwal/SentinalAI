@@ -5,6 +5,7 @@
     python -m app.main ingest-alerts --data-dir ../data/raw/ait_ads --scenario russellmitchell
     python -m app.main variants --scenario russellmitchell      # dev scenarios only
     python -m app.main cases --scenario russellmitchell         # dev scenarios only
+    python -m app.main run-agent --scenario russellmitchell --variant fused --limit 2 --dry-run
 
 This is a local research tool: it reads whatever path it is given. Do not
 expose it behind a network API without validating paths against an
@@ -15,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import json
 import re
 import sys
 from collections.abc import Sequence
@@ -22,6 +24,9 @@ from datetime import timedelta, timezone, tzinfo
 from pathlib import Path
 from typing import Any
 
+from app.agent.client import ChatClient, FakeClient, OpenAICompatibleClient
+from app.agent.config import api_key, load_agent_settings
+from app.agent.runner import estimate_run, prepare_run, run_agent
 from app.alert_pipeline import AitAdsInputs, run_alert_ingest
 from app.ingestion.mappings import AIT_ADS_DATASET_NAME, MAPPINGS, get_mapping
 from app.ingestion.records import IngestionError
@@ -29,6 +34,7 @@ from app.pipeline import FORMATS, run_pipeline
 from app.study.config import (
     DEFAULT_STUDY_CONFIG,
     SHUFFLED_REFERENCE_CHOICES,
+    TRUNCATION_CHOICES,
     HeldOutScenarioError,
     load_study_config,
 )
@@ -136,6 +142,28 @@ def build_parser() -> argparse.ArgumentParser:
     cases.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR / "cases",
                        help=f"where to write case manifests (default: {DEFAULT_OUTPUT_DIR / 'cases'})")
     cases.add_argument("--no-output", action="store_true", help="only print; write no files")
+
+    agent = sub.add_parser("run-agent", help="run the M5 single tool-using agent on dev cases")
+    agent.add_argument("--scenario", required=True, help="a dev scenario (held-out ones are refused)")
+    agent.add_argument("--variant", required=True, help="experiment variant, e.g. fused, aminer")
+    agent.add_argument("--limit", type=_positive_int, default=None,
+                       help="first N cases, attack and benign interleaved (default: all)")
+    agent.add_argument("--truncation", choices=TRUNCATION_CHOICES, default=None,
+                       help="case cap rule (default: cases.truncation in the study config)")
+    agent.add_argument("--dry-run", action="store_true",
+                       help="print the token and cost bound; call no model")
+    agent.add_argument("--confirm", action="store_true",
+                       help="allow a run whose token bound exceeds agent.run_token_budget")
+    agent.add_argument("--fake-responses", type=Path, default=None,
+                       help="JSON list of scripted replies (FakeClient; for demos, no model)")
+    agent.add_argument("--processed-dir", type=Path, default=DEFAULT_OUTPUT_DIR,
+                       help=f"where ingest-alerts wrote its outputs (default: {DEFAULT_OUTPUT_DIR})")
+    agent.add_argument("--labels", type=Path, default=DEFAULT_LABELS,
+                       help=f"attack-interval labels CSV (default: {DEFAULT_LABELS})")
+    agent.add_argument("--study-config", type=Path, default=DEFAULT_STUDY_CONFIG,
+                       help=f"study config (default: {DEFAULT_STUDY_CONFIG})")
+    agent.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR / "runs",
+                       help=f"where run logs go (default: {DEFAULT_OUTPUT_DIR / 'runs'})")
     return parser
 
 
@@ -333,6 +361,75 @@ def _cases(args: argparse.Namespace) -> int:
     return 0
 
 
+def _fake_client(path: Path) -> FakeClient:
+    script = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(script, list) or not all(isinstance(s, str) for s in script):
+        raise ValueError("--fake-responses must be a JSON list of reply strings")
+    return FakeClient(script)
+
+
+def _run_agent(args: argparse.Namespace) -> int:
+    try:
+        config = load_study_config(args.study_config)
+        settings = load_agent_settings(args.study_config)
+        prep = prepare_run(args.processed_dir, args.labels, args.scenario, args.variant, config,
+                           limit=args.limit, truncation=args.truncation)
+    except (HeldOutScenarioError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except IngestionError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    est = estimate_run(prep, settings)
+    kinds = ", ".join(f"{c.kind.value}" for c in prep.cases)
+    print(f"DEV-SCENARIO AGENT RUN - scenario {prep.scenario}, variant {prep.variant}, truncation "
+          f"{prep.truncation}; {est['cases']} case(s): {kinds}")
+    print(f"Budget: token bound {est['token_bound']} ({est['token_bound_per_case']} per case), cost "
+          f"bound ${est['cost_bound_usd']:.4f} at ${est['price_per_million_used']}/M tokens; first "
+          f"prompts ~{est['first_prompt_tokens_estimate']} tokens; run budget {est['run_token_budget']}")
+    if args.dry_run:
+        print("DRY RUN: no model was called" + (" (a real run would need --confirm)"
+                                                if est["needs_confirm"] else ""))
+        return 0
+    if est["needs_confirm"] and not args.confirm:
+        print(f"error: token bound {est['token_bound']} exceeds agent.run_token_budget "
+              f"{est['run_token_budget']}; re-run with --confirm or a smaller --limit", file=sys.stderr)
+        return 2
+    client: ChatClient
+    try:
+        if args.fake_responses is not None:
+            client = _fake_client(args.fake_responses)
+        elif not settings.model.configured:
+            print("error: no model endpoint configured; set model.base_url and model.model in the "
+                  "study config or SENTINEL_LLM_BASE_URL / SENTINEL_LLM_MODEL (or use --dry-run)",
+                  file=sys.stderr)
+            return 2
+        else:
+            client = OpenAICompatibleClient(settings.model, api_key=api_key(settings.model))
+    except (OSError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    report = run_agent(prep, settings, client, output_dir=args.output_dir,
+                       study_config_path=args.study_config)
+    for case in report["manifest"]["cases"]:
+        print(f"  case {case['index']}: {case['kind']:6s} alerts {case['alerts']:3d} status "
+              f"{case['status']} parse {case['parse_status']} verdict {case['verdict']} tokens "
+              f"{case['input_tokens']}+{case['output_tokens']}"
+              f"{'' if case['usage_reported'] else ' (estimated)'} tool calls {case['tool_calls']} "
+              f"latency {case['latency_seconds']:.2f} s" + (f" error: {case['error']}" if case['error'] else ""))
+    scores = report["scores"]
+    print(f"\nAgent vs baselines on the same cases (DEV, not held-out); matched k = {scores['matched_k']}")
+    print_score_header()
+    print_score_row(prep.variant, f"agent ({client.model_id})", scores["agent"])
+    for name, row in scores["baselines"].items():
+        print_score_row(prep.variant, name, row)
+    verdict = scores["agent"]["verdict"]
+    print(f"Verdicts: {verdict['correct']}/{verdict['cases']} correct, {verdict['failed']} failed "
+          f"(tp {verdict['tp']}, fp {verdict['fp']}, fn {verdict['fn']}, tn {verdict['tn']})")
+    print(f"Wrote run log to {report['run_dir']}")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     # Labels may contain non-ASCII characters; never crash on a narrow console.
@@ -342,6 +439,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _ingest_alerts(args)
     if args.command == "variants":
         return _variants(args)
+    if args.command == "run-agent":
+        return _run_agent(args)
     if args.command == "cases":
         return _cases(args)
     mapping = get_mapping(args.mapping)
