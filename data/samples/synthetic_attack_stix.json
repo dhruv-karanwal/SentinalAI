@@ -1,0 +1,30 @@
+{
+  "type": "bundle",
+  "id": "bundle--00000000-0000-4000-8000-000000000000",
+  "objects": [
+    {"type": "x-mitre-collection", "id": "x-mitre-collection--synthetic", "name": "SYNTHETIC ATT&CK sample", "x_mitre_version": "synthetic-1"},
+    {"type": "x-mitre-tactic", "id": "x-mitre-tactic--1", "name": "Credential Access", "x_mitre_shortname": "credential-access",
+     "external_references": [{"source_name": "mitre-attack", "external_id": "TA0006"}]},
+    {"type": "x-mitre-tactic", "id": "x-mitre-tactic--2", "name": "Initial Access", "x_mitre_shortname": "initial-access",
+     "external_references": [{"source_name": "mitre-attack", "external_id": "TA0001"}]},
+    {"type": "attack-pattern", "id": "attack-pattern--1", "name": "Brute Force",
+     "description": "SYNTHETIC: adversaries guess passwords repeatedly.", "x_mitre_platforms": ["Linux"],
+     "x_mitre_detection": "Monitor authentication failures.",
+     "kill_chain_phases": [{"kill_chain_name": "mitre-attack", "phase_name": "credential-access"}],
+     "external_references": [{"source_name": "mitre-attack", "external_id": "T1110", "url": "https://attack.mitre.org/techniques/T1110"}]},
+    {"type": "attack-pattern", "id": "attack-pattern--2", "name": "Password Guessing", "x_mitre_is_subtechnique": true,
+     "description": "SYNTHETIC: guessing passwords.", "x_mitre_platforms": ["Linux"],
+     "kill_chain_phases": [{"kill_chain_name": "mitre-attack", "phase_name": "credential-access"}],
+     "external_references": [{"source_name": "mitre-attack", "external_id": "T1110.001"}]},
+    {"type": "attack-pattern", "id": "attack-pattern--3", "name": "Exploit Public-Facing Application",
+     "description": "SYNTHETIC: exploiting a web application.", "x_mitre_platforms": ["Linux"],
+     "kill_chain_phases": [{"kill_chain_name": "mitre-attack", "phase_name": "initial-access"}],
+     "external_references": [{"source_name": "mitre-attack", "external_id": "T1190"}]},
+    {"type": "attack-pattern", "id": "attack-pattern--4", "name": "Old Revoked Technique", "revoked": true,
+     "external_references": [{"source_name": "mitre-attack", "external_id": "T9999"}]},
+    {"type": "attack-pattern", "id": "attack-pattern--5", "name": "Old Deprecated Technique", "x_mitre_deprecated": true,
+     "external_references": [{"source_name": "mitre-attack", "external_id": "T9998"}]},
+    {"type": "intrusion-set", "id": "intrusion-set--1", "name": "SYNTHETIC Group", "aliases": ["Synth"],
+     "external_references": [{"source_name": "mitre-attack", "external_id": "G9999"}]}
+  ]
+}
