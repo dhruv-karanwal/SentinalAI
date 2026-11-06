@@ -5,6 +5,7 @@
     python -m app.main ingest-alerts --data-dir ../data/raw/ait_ads --scenario russellmitchell
     python -m app.main variants --scenario russellmitchell      # dev scenarios only
     python -m app.main cases --scenario russellmitchell         # dev scenarios only
+    python -m app.main run-agent --scenario russellmitchell --variant fused --limit 2 --dry-run
 
 This is a local research tool: it reads whatever path it is given. Do not
 expose it behind a network API without validating paths against an
@@ -15,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import json
 import re
 import sys
 from collections.abc import Sequence
@@ -22,6 +24,10 @@ from datetime import timedelta, timezone, tzinfo
 from pathlib import Path
 from typing import Any
 
+from app.agent.client import ChatClient, FakeClient, OpenAICompatibleClient
+from app.agent.config import api_key, load_agent_settings
+from app.api.auth import Role
+from app.agent.runner import SELECTION_MODES, estimate_run, prepare_run, run_agent
 from app.alert_pipeline import AitAdsInputs, run_alert_ingest
 from app.ingestion.mappings import AIT_ADS_DATASET_NAME, MAPPINGS, get_mapping
 from app.ingestion.records import IngestionError
@@ -29,6 +35,7 @@ from app.pipeline import FORMATS, run_pipeline
 from app.study.config import (
     DEFAULT_STUDY_CONFIG,
     SHUFFLED_REFERENCE_CHOICES,
+    TRUNCATION_CHOICES,
     HeldOutScenarioError,
     load_study_config,
 )
@@ -38,6 +45,7 @@ from app.study.variants import dev_triage_report
 DEFAULT_LABELS = Path(__file__).resolve().parents[2] / "data" / "raw" / "ait_ads" / "labels.csv"
 
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parents[2] / "data" / "processed"
+DEFAULT_PLATFORM_DIR = Path(__file__).resolve().parents[2] / "data" / "platform"
 
 _OFFSET_RE = re.compile(r"([+-])(\d{2}):?(\d{2})")
 
@@ -136,6 +144,50 @@ def build_parser() -> argparse.ArgumentParser:
     cases.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR / "cases",
                        help=f"where to write case manifests (default: {DEFAULT_OUTPUT_DIR / 'cases'})")
     cases.add_argument("--no-output", action="store_true", help="only print; write no files")
+
+    agent = sub.add_parser("run-agent", help="run the M5 single tool-using agent on dev cases")
+    agent.add_argument("--scenario", required=True, help="a dev scenario (held-out ones are refused)")
+    agent.add_argument("--variant", required=True, help="experiment variant, e.g. fused, aminer")
+    agent.add_argument("--limit", type=_positive_int, default=None,
+                       help="first N cases, attack and benign interleaved (default: all)")
+    agent.add_argument("--select", choices=SELECTION_MODES, default="interleaved",
+                       help="case selection: interleaved (all) or reachable (attack cases on "
+                            "alert-reachable phases + their benign matches)")
+    agent.add_argument("--case-id", action="append", default=None, dest="case_ids",
+                       help="investigate exactly this case (repeatable; overrides --select)")
+    agent.add_argument("--truncation", choices=TRUNCATION_CHOICES, default=None,
+                       help="case cap rule (default: cases.truncation in the study config)")
+    agent.add_argument("--dry-run", action="store_true",
+                       help="print the token and cost bound; call no model")
+    agent.add_argument("--confirm", action="store_true",
+                       help="allow a run whose token bound exceeds agent.run_token_budget")
+    agent.add_argument("--fake-responses", type=Path, default=None,
+                       help="JSON list of scripted replies (FakeClient; for demos, no model)")
+    agent.add_argument("--processed-dir", type=Path, default=DEFAULT_OUTPUT_DIR,
+                       help=f"where ingest-alerts wrote its outputs (default: {DEFAULT_OUTPUT_DIR})")
+    agent.add_argument("--labels", type=Path, default=DEFAULT_LABELS,
+                       help=f"attack-interval labels CSV (default: {DEFAULT_LABELS})")
+    agent.add_argument("--study-config", type=Path, default=DEFAULT_STUDY_CONFIG,
+                       help=f"study config (default: {DEFAULT_STUDY_CONFIG})")
+    agent.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR / "runs",
+                       help=f"where run logs go (default: {DEFAULT_OUTPUT_DIR / 'runs'})")
+
+    plat = sub.add_parser("platform-ingest", help="replay a dev scenario into the platform stores")
+    plat.add_argument("--scenario", required=True, help="a dev scenario (held-out ones are refused)")
+    plat.add_argument("--limit", type=_positive_int, default=None, help="first N alerts only")
+    plat.add_argument("--processed-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    plat.add_argument("--study-config", type=Path, default=DEFAULT_STUDY_CONFIG)
+    plat.add_argument("--data-dir", type=Path, default=DEFAULT_PLATFORM_DIR,
+                      help=f"SQLite fallback stores (default: {DEFAULT_PLATFORM_DIR})")
+
+    user = sub.add_parser("create-user", help="create or replace a platform user")
+    user.add_argument("--username", required=True)
+    user.add_argument("--role", required=True, choices=[r.value for r in Role])
+    user.add_argument("--data-dir", type=Path, default=DEFAULT_PLATFORM_DIR)
+
+    serve = sub.add_parser("serve", help="run the HTTP API (uvicorn)")
+    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--port", type=int, default=8000)
     return parser
 
 
@@ -261,6 +313,24 @@ def _frac(rate: dict[str, Any]) -> str:
     return f"{rate['covered']}/{rate['cases']}"
 
 
+def print_score_header() -> None:
+    """Header of the shared score table (baselines and agent runs; headline column first)."""
+    print("cov = phases covered by event_label (headline) / time (sensitivity), over reachable "
+          "phases | all phases; prec = citation precision (event_label / time); "
+          "unsup = unsupported-claim rate")
+    print(f"{'variant':16s} {'citer':36s} {'cov e rch':>9s} {'cov e all':>9s} {'cov t rch':>9s} "
+          f"{'cov t all':>9s} {'prec e':>7s} {'prec t':>7s} {'unsup':>7s} {'cited':>6s} {'per case':>9s}")
+
+
+def print_score_row(variant: str, name: str, r: dict[str, Any]) -> None:
+    cov, prec = r["coverage"], r["citation_precision"]
+    print(f"{variant:16s} {name:36s} {_frac(cov['event_label']['reachable']):>9s} "
+          f"{_frac(cov['event_label']['all']):>9s} {_frac(cov['time_label']['reachable']):>9s} "
+          f"{_frac(cov['time_label']['all']):>9s} {_fmt(prec['event_label']):>7s} "
+          f"{_fmt(prec['time_label']):>7s} {_fmt(r['unsupported_claim_rate']):>7s} "
+          f"{r['alerts_cited']['total']:>6d} {_fmt(r['alerts_cited']['mean_per_case']):>9s}")
+
+
 def _cases(args: argparse.Namespace) -> int:
     try:
         config = load_study_config(args.study_config)
@@ -278,15 +348,17 @@ def _cases(args: argparse.Namespace) -> int:
     print(f"Cases: {counts['attack']} attack, {counts['benign']} benign "
           f"({len(log['unavailable'])} benign unavailable); padding {cfg['padding_seconds']} s, "
           f"cap {cfg['max_alerts']} ({cfg['truncation']}), seed {cfg['seed']}")
-    print(f"{'variant':16s} {'ceil time':>10s} {'ceil event':>10s} {'pre-cap t/e':>12s} "
+    print(f"Headline: coverage by {report['headline']['coverage']}; "
+          f"{report['headline']['sensitivity']} is the sensitivity analysis")
+    print(f"{'variant':16s} {'ceil event':>10s} {'ceil time':>10s} {'pre-cap e/t':>12s} "
           f"{'mean att':>9s} {'mean ben':>9s} {'trunc':>6s} {'dropped':>8s} {'drop atk e/t':>13s} "
           f"{'ben w/ atk':>10s}")
     for name, s in report["variants"].items():
         ceil, pre, mean, trunc = (s["coverage_ceiling"], s["coverage_ceiling_before_cap"],
                                   s["mean_alerts_per_case"], s["truncation"])
-        print(f"{name:16s} {ceil['time_label']['covered']:>4d}/{ceil['time_label']['cases']:<5d} "
-              f"{ceil['event_label']['covered']:>4d}/{ceil['event_label']['cases']:<5d} "
-              f"{pre['time_label']['covered']:>5d}/{pre['event_label']['covered']:<6d} "
+        print(f"{name:16s} {ceil['event_label']['covered']:>4d}/{ceil['event_label']['cases']:<5d} "
+              f"{ceil['time_label']['covered']:>4d}/{ceil['time_label']['cases']:<5d} "
+              f"{pre['event_label']['covered']:>5d}/{pre['time_label']['covered']:<6d} "
               f"{_fmt(mean['attack']):>9s} {_fmt(mean['benign']):>9s} "
               f"{trunc['cases_truncated']:>6d} {trunc['alerts_dropped']:>8d} "
               f"{trunc['cases_cap_dropped_event_attack']:>6d}/{trunc['cases_cap_dropped_time_attack']:<6d} "
@@ -297,26 +369,132 @@ def _cases(args: argparse.Namespace) -> int:
     noise_rows = [(n, s["noise"]) for n, s in report["variants"].items() if s["noise"] is not None]
     for name, noise in noise_rows:
         print(f"  {name}: {noise['reference_count']} alerts matched, {noise['from_window']} from the "
-              f"same window, {noise['from_fallback']} from the scenario pool, "
-              f"{noise['shortfall']} short")
+              f"same window, {noise['from_fallback']} nearest outside it (max "
+              f"{noise['fallback_max_distance_seconds']:.0f} s away), {noise['shortfall']} short")
     b = report["baseline_config"]
+    frozen = " (frozen)" if b.get("detector_order_frozen") else ""
     print(f"\nDEV-SCENARIO BASELINES - deterministic non-LLM citers, not agent results "
-          f"(top_k {b['top_k']}, detector order {', '.join(b['detector_order'])})")
-    print("cov = phases covered (time / event_label) over all phases | over reachable phases; "
-          "prec = citation precision (event_label / time); unsup = unsupported-claim rate")
-    print(f"{'variant':16s} {'baseline':26s} {'cov t all':>9s} {'cov e all':>9s} {'cov t rch':>9s} "
-          f"{'cov e rch':>9s} {'prec e':>7s} {'prec t':>7s} {'unsup':>7s} {'cited':>6s} {'per case':>9s}")
+          f"(top_k {b['top_k']}, detector order {', '.join(b['detector_order'])}{frozen})")
+    print_score_header()
     for variant, rows in report["baselines"].items():
         for name, r in rows.items():
-            cov, prec = r["coverage"], r["citation_precision"]
-            print(f"{variant:16s} {name:26s} {_frac(cov['time_label']['all']):>9s} "
-                  f"{_frac(cov['event_label']['all']):>9s} {_frac(cov['time_label']['reachable']):>9s} "
-                  f"{_frac(cov['event_label']['reachable']):>9s} {_fmt(prec['event_label']):>7s} "
-                  f"{_fmt(prec['time_label']):>7s} {_fmt(r['unsupported_claim_rate']):>7s} "
-                  f"{r['alerts_cited']['total']:>6d} {_fmt(r['alerts_cited']['mean_per_case']):>9s}")
+            print_score_row(variant, name, r)
     if not args.no_output:
         print(f"Wrote {report['scenario']}.cases.json and {report['scenario']}.case_ceilings.json to "
               f"{Path(args.output_dir) / report['scenario']}")
+    return 0
+
+
+def _fake_client(path: Path) -> FakeClient:
+    script = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(script, list) or not all(isinstance(s, str) for s in script):
+        raise ValueError("--fake-responses must be a JSON list of reply strings")
+    return FakeClient(script)
+
+
+def _run_agent(args: argparse.Namespace) -> int:
+    try:
+        config = load_study_config(args.study_config)
+        settings = load_agent_settings(args.study_config)
+        prep = prepare_run(args.processed_dir, args.labels, args.scenario, args.variant, config,
+                           limit=args.limit, truncation=args.truncation, selection=args.select,
+                           case_ids=args.case_ids)
+    except (HeldOutScenarioError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except IngestionError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    est = estimate_run(prep, settings)
+    kinds = ", ".join(f"{c.kind.value}" for c in prep.cases)
+    print(f"DEV-SCENARIO AGENT RUN - scenario {prep.scenario}, variant {prep.variant}, truncation "
+          f"{prep.truncation}; {est['cases']} case(s): {kinds}")
+    print(f"Budget: token bound {est['token_bound']} ({est['token_bound_per_case']} per case), cost "
+          f"bound ${est['cost_bound_usd']:.4f} at ${est['price_per_million_used']}/M tokens; first "
+          f"prompts ~{est['first_prompt_tokens_estimate']} tokens; run budget {est['run_token_budget']}")
+    if args.dry_run:
+        print("DRY RUN: no model was called" + (" (a real run would need --confirm)"
+                                                if est["needs_confirm"] else ""))
+        return 0
+    if est["needs_confirm"] and not args.confirm:
+        print(f"error: token bound {est['token_bound']} exceeds agent.run_token_budget "
+              f"{est['run_token_budget']}; re-run with --confirm or a smaller --limit", file=sys.stderr)
+        return 2
+    client: ChatClient
+    try:
+        if args.fake_responses is not None:
+            client = _fake_client(args.fake_responses)
+        elif not settings.model.configured:
+            print("error: no model endpoint configured; set model.base_url and model.model in the "
+                  "study config or SENTINEL_LLM_BASE_URL / SENTINEL_LLM_MODEL (or use --dry-run)",
+                  file=sys.stderr)
+            return 2
+        else:
+            client = OpenAICompatibleClient(settings.model, api_key=api_key(settings.model))
+    except (OSError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    report = run_agent(prep, settings, client, output_dir=args.output_dir,
+                       study_config_path=args.study_config)
+    for case in report["manifest"]["cases"]:
+        print(f"  case {case['index']}: {case['kind']:6s} alerts {case['alerts']:3d} status "
+              f"{case['status']} parse {case['parse_status']} verdict {case['verdict']} tokens "
+              f"{case['input_tokens']}+{case['output_tokens']}"
+              f"{'' if case['usage_reported'] else ' (estimated)'} tool calls {case['tool_calls']} "
+              f"latency {case['latency_seconds']:.2f} s" + (f" error: {case['error']}" if case['error'] else ""))
+    scores = report["scores"]
+    print(f"\nAgent vs baselines on the same cases (DEV, not held-out); matched k = {scores['matched_k']}")
+    print_score_header()
+    print_score_row(prep.variant, f"agent ({client.model_id})", scores["agent"])
+    for name, row in scores["baselines"].items():
+        print_score_row(prep.variant, name, row)
+    verdict = scores["agent"]["verdict"]
+    print(f"Verdicts: {verdict['correct']}/{verdict['cases']} correct, {verdict['failed']} failed "
+          f"(tp {verdict['tp']}, fp {verdict['fp']}, fn {verdict['fn']}, tn {verdict['tn']})")
+    print(f"Wrote run log to {report['run_dir']}")
+    return 0
+
+
+def _platform_ingest(args: argparse.Namespace) -> int:
+    from app.platform.bootstrap import ingest_scenario, open_stores
+
+    try:
+        config = load_study_config(args.study_config)
+        config.split.require_dev(args.scenario)
+        report = ingest_scenario(open_stores(args.data_dir), args.processed_dir, args.scenario,
+                                 config, limit=args.limit)
+    except (HeldOutScenarioError, ValueError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(json.dumps({k: v for k, v in report.items() if k != "rejections"}, indent=2))
+    return 0
+
+
+def _create_user(args: argparse.Namespace) -> int:
+    """Password only from the environment (SENTINEL_NEW_USER_PASSWORD), never argv."""
+    import os
+
+    from app.api.auth import hash_password
+    from app.platform.bootstrap import open_stores
+
+    password = os.environ.get("SENTINEL_NEW_USER_PASSWORD", "")
+    if len(password) < 8:
+        print("error: set SENTINEL_NEW_USER_PASSWORD (>= 8 characters) in the environment",
+              file=sys.stderr)
+        return 2
+    stores = open_stores(args.data_dir)
+    stores.repo.put_user(args.username, hash_password(password), args.role)
+    stores.repo.audit("cli", "admin", "user.create", args.username, {"role": args.role})
+    print(f"user {args.username} ({args.role}) saved")
+    return 0
+
+
+def _serve(args: argparse.Namespace) -> int:
+    import uvicorn
+
+    from app.api.server import build_app
+
+    uvicorn.run(build_app(), host=args.host, port=args.port)
     return 0
 
 
@@ -329,8 +507,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _ingest_alerts(args)
     if args.command == "variants":
         return _variants(args)
+    if args.command == "run-agent":
+        return _run_agent(args)
     if args.command == "cases":
         return _cases(args)
+    if args.command == "platform-ingest":
+        return _platform_ingest(args)
+    if args.command == "create-user":
+        return _create_user(args)
+    if args.command == "serve":
+        return _serve(args)
     mapping = get_mapping(args.mapping)
     overrides: dict[str, Any] = {}
     if args.dataset_name is not None:

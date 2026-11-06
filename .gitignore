@@ -40,3 +40,10 @@ data/processed/*
 
 # Logs
 *.log
+!.env.example
+
+# Platform state, local models, frontend build
+data/platform/
+data/models/
+frontend/node_modules/
+frontend/dist/
