@@ -226,6 +226,43 @@ record; their unsupported-claim rate is 0 by construction and checks the
 claim machinery on real records. These baselines are the reference points
 an LLM agent must beat and are reported as baselines, not agent results.
 
+## Investigation agent (M5)
+
+The agent under study is a single tool-using LLM agent
+(`backend/app/agent/`). It is held fixed while the alert source varies.
+
+- **What it sees.** Per case, four tools over the case's alerts only:
+  `list_alerts`, `get_alert`, `search_alerts`, `get_raw_log`. The tool
+  layer is built from the alert records and the window start; it never
+  receives ground truth, labels, phase names, the case kind or the
+  variant name. Alert ids are opaque per run and case (real Wazuh ids
+  begin with an epoch timestamp). Times are offsets in seconds from the
+  window start; every other absolute date or time in the records and log
+  lines is masked as `<TIME>`. Masking replaces spans only, so a quote
+  that avoids the mask is an exact substring of the real log line and is
+  checked by the unchanged quote-claim rule. Automated tests scan every
+  tool output for labels, phases, variants, case ids, real ids and dates
+  (synthetic sample and the real dev scenario).
+- **What it returns.** One JSON object per reply, parsed strictly: a tool
+  call, or a final answer with a verdict (attack / benign) and findings,
+  each with cited alert ids and claims of the two existing kinds. At most
+  one repair retry per case; output that is still unparseable is a logged
+  failure with no verdict and no citations.
+- **Budgets.** Tool calls and tokens per case are capped
+  (`agent` in `study.json`); the token check happens before each request,
+  so a run is bounded by cases x tokens per case. Request retries are
+  bounded (`model.max_retries`).
+- **Scoring.** Agent citations and claims go through the same case scoring
+  as the baselines, and every agent run is reported next to the baselines
+  on the same cases (k = 5, 10 and k matched to the agent's mean
+  citations), headline first. The case-level verdict is reported as
+  counts against the case kind, with failed cases counted.
+- **Model.** Any OpenAI-compatible chat-completions endpoint, temperature
+  0. The model, endpoint and budgets are part of each run's config hash
+  and manifest. As of M5 no endpoint has been configured and no real model
+  run has been made: all M5 runs used a scripted fake client and are
+  plumbing checks, not results.
+
 ## Pilot
 
 The pilot runs on the dev scenarios only (`pilot.scenarios` in

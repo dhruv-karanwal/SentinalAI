@@ -19,8 +19,8 @@ built in phases.
 
 | Milestone | Scope | Status |
 |-----------|-------|--------|
-| M5 | Model client + tool layer + single tool-using agent | Next |
-| M6 | PILOT on dev scenarios with the M5 agent: tokens, latency, cost, quality vs the baselines. **Gate** before building more | Not started |
+| M5 | Model client + tool layer + single tool-using agent | **Done** (FakeClient only: no endpoint configured yet; no real model run) |
+| M6 | PILOT on dev scenarios with the M5 agent: tokens, latency, cost, quality vs the baselines. **Gate** before building more | Next (needs a model endpoint chosen by the user) |
 | M7 | ATT&CK knowledge base + retrieval (RAG), exposed as an agent tool | Not started |
 | M8 | Multi-agent investigation (LangGraph) + alert-evidence verifier, at matched budgets with M5 | Not started |
 | M9 | Correlation layer (same host / IP / time grouping of alerts into incidents) | Not started |
@@ -64,6 +64,12 @@ S=../data/samples/synthetic_ait_ads
 # M4/M4b: cases + per-variant coverage ceilings + deterministic baselines (DEV only;
 # also reads ../data/raw/ait_ads/labels.csv, writes data/processed/cases/<scenario>/)
 ../.venv/Scripts/python.exe -m app.main cases --scenario russellmitchell
+# M5: single tool-using agent on dev cases (attack/benign interleaved; writes
+# data/processed/runs/<run_id>/). --dry-run prints the token/cost bound and calls nothing.
+../.venv/Scripts/python.exe -m app.main run-agent --scenario russellmitchell --variant fused --limit 2 --dry-run
+# real model: set SENTINEL_LLM_BASE_URL + SENTINEL_LLM_MODEL (and the key in
+# SENTINEL_LLM_API_KEY for a hosted API) -- only with the user's explicit approval
+# scripted demo without a model: --fake-responses replies.json (JSON list of reply strings)
 ```
 
 `tests/test_ait_ads_real.py` runs on the real russellmitchell files when
@@ -78,7 +84,9 @@ so imports are `from app...`). There is no linter configured.
 ```
 backend/app/
   main.py                 CLI: `ingest PATH`, `ingest-alerts --data-dir D --scenario S`,
-                          `variants --scenario S`, `cases --scenario S` (both dev only)
+                          `variants --scenario S`, `cases --scenario S`, `run-agent --scenario S
+                          --variant V [--limit N] [--dry-run] [--confirm] [--truncation R]
+                          [--fake-responses F]` (all three dev only); print_score_header/row
   pipeline.py             load → normalize → quality report; writes outputs
   alert_pipeline.py       AIT-ADS scenario: Wazuh then AMiner lines → Alert + GroundTruth + report;
                           AitAdsInputs.from_layout, iter_alert_file(path, selection)
@@ -104,14 +112,26 @@ backend/app/
                           triage_by_truth, write_variant, dev_triage_report (dev only)
   study/cases.py          Case, build_cases (attack + matched benign windows), case_alerts (cap:
                           spread|earliest), noise_case_alerts, variant_case_views, reachable_phases,
-                          dev_case_report (dev only; ceilings + baselines)
-  study/baselines.py      deterministic non-LLM citers (BASELINE_NAMES), baseline_claims
+                          dev_case_report (dev only; ceilings + baselines), summarize_scores,
+                          baseline_summaries (any case subset)
+  study/baselines.py      deterministic non-LLM citers (BASELINE_NAMES), baseline_rows (@k rows),
+                          matched_k, baseline_claims
+  agent/config.py         ModelConfig (endpoint; env overrides), AgentConfig (budgets), load_agent_settings,
+                          api_key (environment only)
+  agent/client.py         OpenAICompatibleClient (stdlib urllib, injectable transport, bounded retries),
+                          FakeClient (scripted), ChatResult, estimate_tokens
+  agent/tools.py          CaseToolkit: list_alerts, get_alert, search_alerts, get_raw_log; opaque ids,
+                          offsets, mask_times; never sees labels
+  agent/protocol.py       SYSTEM_PROMPT (PROMPT_VERSION), strict JSON reply parsing (ToolCall, FinalAnswer)
+  agent/agent.py          investigate(): bounded loop -> CaseRun (status, tokens, transcript, claims)
+  agent/runner.py         prepare_run (dev only), select_cases, estimate_run, config_hash, run_agent
+                          (run log + scores next to baselines)
 backend/tests/            pytest, one file per module + test_pipeline.py (end to end)
 data/samples/             committed SYNTHETIC samples (see its README)
 data/raw/, data/processed/ git-ignored: local datasets and pipeline outputs
 data/samples/synthetic_ait_ads/ SYNTHETIC files in the AIT-ADS shapes (scenario "synthetic")
 docs/                     architecture.md, research-methodology.md, session-notes.md
-experiments/config/study.json  frozen split; variant seed, shuffled/noise references; cases; baselines (k list, frozen order); pilot (scenarios, truncations)
+experiments/config/study.json  frozen split; variant seed, shuffled/noise references; cases; baselines (k list, frozen order); pilot (scenarios, truncations); model (endpoint, null = none); agent (budgets)
 ```
 
 ## Design rules (keep these)
@@ -137,7 +157,7 @@ experiments/config/study.json  frozen split; variant seed, shuffled/noise refere
   underscores collapsed — see `normalize_column_name`).
 - **Streaming:** CSV and JSONL are read row by row; outputs are written
   incrementally. Don't load whole files (no pandas in Phase 1).
-- **Minimal dependencies:** runtime is `pydantic` only (M2-M4b added none).
+- **Minimal dependencies:** runtime is `pydantic` only (M2-M5 added none; the M5 model client uses stdlib `urllib`).
 
 ## AIT-ADS alerts (M2/M3 policies, decided by the user)
 
@@ -163,7 +183,7 @@ experiments/config/study.json  frozen split; variant seed, shuffled/noise refere
   `alert_id = "aminer-" + sha256(scenario, file, line, canonical JSON)[:32]`
   with `alert_id_derived=True`. `event_ids` stays empty: the alerts carry no
   log-event IDs, and IDs are never invented. AIT-LDSv2 is **not** used
-  (user decision): the M6 verifier checks claims against fields of the alert
+  (user decision): the verifier (M8) checks claims against fields of the alert
   record and the raw log lines in its evidence.
 - **Evidence** = what the alert carries: `source_alert_id`, `log_lines`
   (`full_log` / AMiner `RawLogData`; empty for aggregates, whose raw line
@@ -265,6 +285,56 @@ experiments/config/study.json  frozen split; variant seed, shuffled/noise refere
 - Detector-level triage numbers and case ceilings are **dev-scenario
   numbers** and are labelled so wherever printed or written.
 
+## Investigation agent (M5 policies)
+
+- **Model endpoint.** One OpenAI-compatible chat-completions client
+  (`agent/client.py`, stdlib `urllib`) covers Ollama, llama.cpp, vLLM and
+  hosted APIs. Settings: `model` in `study.json` (committed with
+  `base_url`/`model` = null: **no endpoint configured**), overridable by
+  `SENTINEL_LLM_BASE_URL` / `SENTINEL_LLM_MODEL`. Temperature 0 by default.
+  **API keys only from the environment** (`model.api_key_env`, default
+  `SENTINEL_LLM_API_KEY`); the loader rejects an `api_key` in the config; keys
+  never go into manifests, errors or `repr`. Retries: at most
+  `model.max_retries` (<= 3), only for timeouts/connection errors/429/5xx.
+  Never download models or call a paid API without the user's explicit
+  approval for that run.
+- **Tests never touch the network**: they use `FakeClient` (scripted replies,
+  callables of the messages, or exceptions) or an injected transport.
+- **Tool layer** (`agent/tools.py`): `CaseToolkit` is built from the case's
+  `Alert` records and the window start only (never ground truth, labels,
+  case id, phase, kind or variant). Alert ids are opaque (`al-` + salted
+  sha256; salt = run config hash + case index); real ids inside records are
+  replaced; times are offsets in seconds from the window start; every other
+  absolute date/time in text is masked as `<TIME>` (`mask_times`; masking
+  keeps unmasked substrings exact, so quote claims still verify). Selection
+  flags, scenario, dataset name and source file/line are dropped. Leak tests
+  (`tests/test_agent_tools.py`) scan every tool output, synthetic and real
+  dev, for labels, phases, variants, case ids, real ids and dates; keep
+  them passing when changing the view.
+- **Protocol** (`agent/protocol.py`): one JSON object per reply (`call_tool`
+  or `final`), strict parse (no fences, no extra keys); final = verdict
+  attack|benign + findings with cited alert ids and claims (`field_value`,
+  `quote`). Plain JSON, not native function calling, so any endpoint works.
+  Changing `SYSTEM_PROMPT` changes the config hash; bump `PROMPT_VERSION`.
+- **Bounded loop** (`agent/agent.py`): `agent.max_tool_calls` per case (one
+  "answer now" notice, then `tool_budget_exceeded`); `agent.max_tokens_per_case`
+  checked *before* each request (prompt at 3 chars/token + `max_tokens`);
+  at most **one repair retry** per case; a second bad reply is
+  `status=failed, parse_status=unparseable`: a logged failure with no
+  verdict and no citations, never a silent success. Unknown cited ids become
+  `unknown:<id>` (wrong citations).
+- **Runs** (`agent/runner.py`, CLI `run-agent`): dev scenarios only
+  (`require_dev` before any file is read); cases attack/benign interleaved in
+  case order, first `--limit`; run log in git-ignored
+  `data/processed/runs/<run_id>/` (manifest, per-case transcripts with the
+  id map, scores). Agent and baselines are scored on the **same cases** with
+  `summarize_scores` (k = 5, 10, matched). `--dry-run` prints the token
+  bound (cases x `max_tokens_per_case`) and cost bound and calls nothing;
+  a bound above `agent.run_token_budget` needs `--confirm`.
+- Agent numbers on dev scenarios are **dev pilot material**, labelled
+  `DEV-SCENARIO AGENT RUN`; runs made with `FakeClient` are plumbing checks,
+  never agent results.
+
 ## Research integrity
 
 - Never fabricate dataset statistics, model performance or test results;
@@ -308,6 +378,12 @@ experiments/config/study.json  frozen split; variant seed, shuffled/noise refere
   netflow matching, and very few Suricata alerts carry one (dev: 44/9,186
   and 0/16,708); see docs/session-notes.md before interpreting Suricata
   results.
+- Agent run logs (`data/processed/runs/`) hold full transcripts and grow
+  with every run; they are git-ignored. `--fake-responses` runs land there
+  too (model id `fake`).
+- On russellmitchell the first attack case in time order is
+  `network_scans`, an unreachable phase, so `--limit 2` there pairs an
+  unreachable attack case with a benign one.
 - Case manifests can be large-ish (ids for up to 100 alerts x variants x
   cases); they live in git-ignored `data/processed/cases/`.
 - The earliest-100 cap drops thousands of attack-labelled alerts in the
