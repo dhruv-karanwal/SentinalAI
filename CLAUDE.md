@@ -30,12 +30,32 @@ built in phases.
 
 Held-out scenarios stay untouched until M12.
 
-Build only the next milestone in the roadmap; never skip ahead. Agents, LLM
-integration, RAG, LangGraph and a frontend are authorized (user decision
-2026-11-07), but only in the milestone that lists them. Kafka and vector
-databases are not in the roadmap: do not add them unless the user asks. The
-paper's scope is the detector-conditioned study in `docs/` and the Google
-Doc draft.
+**Pace (user decision 2026-11-07, replaces "build only the next milestone"):
+build wave by wave; inside a wave, each sub-milestone is its own tested,
+committed unit; stop only at a gate or a blocker.** Waves map the 5-stage
+SentinelAI architecture: A = platform foundation (ingestion, storage, API),
+B = detection and analysis (Sigma, ML, ATT&CK/IOC, triage/correlation),
+C = multi-agent investigation (RAG, LangGraph, verifier, matched-budget
+pilot; **GATE: stop and report the pilot numbers**), D = outputs and
+operations (reports, approvals, UI, copilot, feedback, metrics), E = held-out
+runs and statistics (**only after the user says go**). Kafka, vector
+databases, PostgreSQL, OpenSearch and MinIO are now authorized, each behind
+an interface with an in-process fallback. Every other rule stands: tests
+first, pytest + mypy clean, CLAUDE.md updated in the same commit as code,
+real numbers only, dev scenarios only until Wave E, held-out guard stays,
+secrets only from the environment, no paid APIs. Cut order if time runs
+short (first to last): Copilot chat, Jira, compliance extras, Grafana
+dashboards, OpenSearch, Kafka. Never cut: the study pipeline, the
+multi-agent comparison, the verifier, statistics.
+
+| Wave | Status |
+|------|--------|
+| M6 | Selection options done (`--select reachable`, `--case-id`); smoke test + mini-pilot **blocked: no local model yet** (Ollama download paused, slow internet) |
+| A | Done: replay collector, stream (in-memory / Kafka), enrichment, consumer, SQLite / PostgreSQL storage with migrations, truth area, FTS5 / OpenSearch, local / MinIO objects, FastAPI + JWT + RBAC + audit, docker-compose |
+| B-E | See docs/session-notes.md |
+
+Nested rules: `backend/CLAUDE.md`, `infra/CLAUDE.md` (and `frontend/CLAUDE.md`
+once the frontend exists). This file is the index.
 
 ## Commands
 
@@ -157,7 +177,7 @@ experiments/config/study.json  frozen split; variant seed, shuffled/noise refere
   underscores collapsed — see `normalize_column_name`).
 - **Streaming:** CSV and JSONL are read row by row; outputs are written
   incrementally. Don't load whole files (no pandas in Phase 1).
-- **Minimal dependencies:** runtime is `pydantic` only (M2-M5 added none; the M5 model client uses stdlib `urllib`).
+- **Dependencies:** the study code paths (ingest, variants, cases, scoring, M5 agent) still need only `pydantic`; the platform (Wave A+) adds FastAPI, PyJWT, bcrypt, psycopg, prometheus-client and optional infra clients, all in `backend/requirements.txt`. Optional infra clients are imported lazily.
 
 ## AIT-ADS alerts (M2/M3 policies, decided by the user)
 

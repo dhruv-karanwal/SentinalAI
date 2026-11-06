@@ -1,1 +1,27 @@
+# Study core
 pydantic>=2.6,<3
+# Platform (Wave A+)
+fastapi>=0.115
+uvicorn>=0.30
+httpx>=0.27
+PyJWT>=2.9
+bcrypt>=4.2
+prometheus-client>=0.21
+# Optional infra clients (imported lazily; needed only with docker-compose services)
+psycopg[binary]>=3.2
+pgvector>=0.3
+confluent-kafka>=2.5
+opensearch-py>=2.7
+minio>=7.2
+# Detection / RAG / agents (Waves B-C)
+numpy>=1.26
+scipy>=1.13
+scikit-learn>=1.5
+xgboost>=2.1
+joblib>=1.4
+pySigma>=0.11
+fastembed>=0.4
+onnxruntime>=1.19
+langgraph>=0.2
+langchain-core>=0.3
+reportlab>=4.2

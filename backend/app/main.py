@@ -26,7 +26,8 @@ from typing import Any
 
 from app.agent.client import ChatClient, FakeClient, OpenAICompatibleClient
 from app.agent.config import api_key, load_agent_settings
-from app.agent.runner import estimate_run, prepare_run, run_agent
+from app.api.auth import Role
+from app.agent.runner import SELECTION_MODES, estimate_run, prepare_run, run_agent
 from app.alert_pipeline import AitAdsInputs, run_alert_ingest
 from app.ingestion.mappings import AIT_ADS_DATASET_NAME, MAPPINGS, get_mapping
 from app.ingestion.records import IngestionError
@@ -44,6 +45,7 @@ from app.study.variants import dev_triage_report
 DEFAULT_LABELS = Path(__file__).resolve().parents[2] / "data" / "raw" / "ait_ads" / "labels.csv"
 
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parents[2] / "data" / "processed"
+DEFAULT_PLATFORM_DIR = Path(__file__).resolve().parents[2] / "data" / "platform"
 
 _OFFSET_RE = re.compile(r"([+-])(\d{2}):?(\d{2})")
 
@@ -148,6 +150,11 @@ def build_parser() -> argparse.ArgumentParser:
     agent.add_argument("--variant", required=True, help="experiment variant, e.g. fused, aminer")
     agent.add_argument("--limit", type=_positive_int, default=None,
                        help="first N cases, attack and benign interleaved (default: all)")
+    agent.add_argument("--select", choices=SELECTION_MODES, default="interleaved",
+                       help="case selection: interleaved (all) or reachable (attack cases on "
+                            "alert-reachable phases + their benign matches)")
+    agent.add_argument("--case-id", action="append", default=None, dest="case_ids",
+                       help="investigate exactly this case (repeatable; overrides --select)")
     agent.add_argument("--truncation", choices=TRUNCATION_CHOICES, default=None,
                        help="case cap rule (default: cases.truncation in the study config)")
     agent.add_argument("--dry-run", action="store_true",
@@ -164,6 +171,23 @@ def build_parser() -> argparse.ArgumentParser:
                        help=f"study config (default: {DEFAULT_STUDY_CONFIG})")
     agent.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR / "runs",
                        help=f"where run logs go (default: {DEFAULT_OUTPUT_DIR / 'runs'})")
+
+    plat = sub.add_parser("platform-ingest", help="replay a dev scenario into the platform stores")
+    plat.add_argument("--scenario", required=True, help="a dev scenario (held-out ones are refused)")
+    plat.add_argument("--limit", type=_positive_int, default=None, help="first N alerts only")
+    plat.add_argument("--processed-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    plat.add_argument("--study-config", type=Path, default=DEFAULT_STUDY_CONFIG)
+    plat.add_argument("--data-dir", type=Path, default=DEFAULT_PLATFORM_DIR,
+                      help=f"SQLite fallback stores (default: {DEFAULT_PLATFORM_DIR})")
+
+    user = sub.add_parser("create-user", help="create or replace a platform user")
+    user.add_argument("--username", required=True)
+    user.add_argument("--role", required=True, choices=[r.value for r in Role])
+    user.add_argument("--data-dir", type=Path, default=DEFAULT_PLATFORM_DIR)
+
+    serve = sub.add_parser("serve", help="run the HTTP API (uvicorn)")
+    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--port", type=int, default=8000)
     return parser
 
 
@@ -373,7 +397,8 @@ def _run_agent(args: argparse.Namespace) -> int:
         config = load_study_config(args.study_config)
         settings = load_agent_settings(args.study_config)
         prep = prepare_run(args.processed_dir, args.labels, args.scenario, args.variant, config,
-                           limit=args.limit, truncation=args.truncation)
+                           limit=args.limit, truncation=args.truncation, selection=args.select,
+                           case_ids=args.case_ids)
     except (HeldOutScenarioError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -430,6 +455,49 @@ def _run_agent(args: argparse.Namespace) -> int:
     return 0
 
 
+def _platform_ingest(args: argparse.Namespace) -> int:
+    from app.platform.bootstrap import ingest_scenario, open_stores
+
+    try:
+        config = load_study_config(args.study_config)
+        config.split.require_dev(args.scenario)
+        report = ingest_scenario(open_stores(args.data_dir), args.processed_dir, args.scenario,
+                                 config, limit=args.limit)
+    except (HeldOutScenarioError, ValueError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(json.dumps({k: v for k, v in report.items() if k != "rejections"}, indent=2))
+    return 0
+
+
+def _create_user(args: argparse.Namespace) -> int:
+    """Password only from the environment (SENTINEL_NEW_USER_PASSWORD), never argv."""
+    import os
+
+    from app.api.auth import hash_password
+    from app.platform.bootstrap import open_stores
+
+    password = os.environ.get("SENTINEL_NEW_USER_PASSWORD", "")
+    if len(password) < 8:
+        print("error: set SENTINEL_NEW_USER_PASSWORD (>= 8 characters) in the environment",
+              file=sys.stderr)
+        return 2
+    stores = open_stores(args.data_dir)
+    stores.repo.put_user(args.username, hash_password(password), args.role)
+    stores.repo.audit("cli", "admin", "user.create", args.username, {"role": args.role})
+    print(f"user {args.username} ({args.role}) saved")
+    return 0
+
+
+def _serve(args: argparse.Namespace) -> int:
+    import uvicorn
+
+    from app.api.server import build_app
+
+    uvicorn.run(build_app(), host=args.host, port=args.port)
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     # Labels may contain non-ASCII characters; never crash on a narrow console.
@@ -443,6 +511,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_agent(args)
     if args.command == "cases":
         return _cases(args)
+    if args.command == "platform-ingest":
+        return _platform_ingest(args)
+    if args.command == "create-user":
+        return _create_user(args)
+    if args.command == "serve":
+        return _serve(args)
     mapping = get_mapping(args.mapping)
     overrides: dict[str, Any] = {}
     if args.dataset_name is not None:

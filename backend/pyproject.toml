@@ -4,6 +4,7 @@
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-ra"
+markers = ["infra: needs the docker-compose services (skips cleanly when they are not reachable)"]
 
 [tool.mypy]
 python_version = "3.11"
