@@ -2,7 +2,9 @@
 
 Each baseline reads only what an agent would see (the case's alerts, in
 time order) and returns the alert ids it cites. None of them looks at
-labels. Rules (k = ``baselines.top_k``, default 5):
+labels. Rules (k from ``baselines.top_k``; every configured k is reported
+as a row ``<name>@k<k>``, and agent runs add ``<name>@k<k>-matched`` with
+k = the agent's mean citations per case, see :func:`matched_k`):
 
 - ``cite-all``: every alert of the case. Its coverage is the case ceiling.
 - ``cite-none``: nothing. Coverage 0; precision and claim rate undefined.
@@ -27,7 +29,9 @@ claim machinery on real records and is the floor an LLM agent must match.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from app.evaluation.metrics import QUOTE_MIN_CHARS, Claim
@@ -40,6 +44,33 @@ if TYPE_CHECKING:  # type-only: app.study.cases runs the baselines
 
 BASELINE_NAMES = ("cite-all", "cite-none", "cite-top-k-wazuh-level",
                   "cite-top-k-detector-order", "cite-aminer-only")
+TOP_K_NAMES = ("cite-top-k-wazuh-level", "cite-top-k-detector-order")
+
+
+@dataclass(frozen=True)
+class BaselineRow:
+    """One reported baseline row: a base rule at a given k (None for rules without k)."""
+
+    name: str
+    base: str
+    k: int | None
+
+
+def matched_k(mean_citations_per_case: float) -> int:
+    """k matched to an agent's mean citations per case: rounded half up, at least 1."""
+    return max(1, math.floor(mean_citations_per_case + 0.5))
+
+
+def baseline_rows(config: BaselineConfig, *, matched: int | None = None) -> list[BaselineRow]:
+    rows: list[BaselineRow] = []
+    for base in BASELINE_NAMES:
+        if base not in TOP_K_NAMES:
+            rows.append(BaselineRow(base, base, None))
+            continue
+        rows.extend(BaselineRow(f"{base}@k{k}", base, k) for k in config.top_k)
+        if matched is not None:
+            rows.append(BaselineRow(f"{base}@k{matched}-matched", base, matched))
+    return rows
 
 
 def _time_key(entry: PoolEntry) -> tuple[object, ...]:
@@ -53,9 +84,11 @@ def _wazuh_level_key(entry: PoolEntry) -> tuple[object, ...]:
     return (1, 0, *_time_key(entry))
 
 
-def baseline_citations(name: str, view: CaseAlerts, config: BaselineConfig) -> list[str]:
+def baseline_citations(name: str, view: CaseAlerts, config: BaselineConfig,
+                       k: int | None = None) -> list[str]:
+    """Alert ids cited by base rule ``name``; ``k`` defaults to the first configured k."""
     entries = list(view.entries)  # time-ordered
-    k = config.top_k
+    k = config.top_k[0] if k is None else k
     rules: dict[str, Callable[[], list[PoolEntry]]] = {
         "cite-all": lambda: entries,
         "cite-none": lambda: [],

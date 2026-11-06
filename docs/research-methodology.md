@@ -104,10 +104,18 @@ eligible alerts (no training-mode, duplicate or aggregate alerts).
 - `noise-wazuh`, `noise-suricata`, `noise-aminer` (**the random control**,
   decision of M4b): alerts whose `event_label` is benign, count-matched to
   the reference detector. In cases they are rebuilt per case: as many
-  alerts as the detector has in the case window, drawn from event-benign
-  alerts of the same window first, then from the scenario pool's other
-  event-benign alerts (which then lie outside the window). Each case
-  manifest records the split (`from_window`, `from_fallback`, `shortfall`).
+  alerts as the detector has in the case window, drawn (seeded, uniform)
+  from event-benign alerts of the same window first; any shortfall is
+  filled with the event-benign pool alerts **nearest in time** outside the
+  window (distance to the nearer window edge, ties by time then source
+  line; decision of M5 Part A, replacing M4b's uniform draw from the whole
+  scenario pool). Each case manifest records the split (`from_window`,
+  `from_fallback`, `shortfall`) and the largest fallback distance in
+  seconds. Agents never see absolute timestamps (times are offsets from
+  the window start, see "Investigation agent"), so a fallback alert is not
+  recognisable by its date alone. On the dev scenarios the nearest
+  fallback is still far for the dense web-scan windows (up to 31,970 s in
+  russellmitchell, 11,757 s in shaw for `noise-wazuh`).
   At scenario level (triage tables) it is a seeded draw of the detector's
   count from the pool's event-benign alerts. It measures what an agent does
   when its alert source is pure noise at a real detector's volume.
@@ -158,11 +166,14 @@ longer applies.)
 
 ### Case-level scores (deterministic, no LLM)
 
-- Attack-step coverage by time (primary for cases, because a case is
-  defined by its phase interval): the phase is covered if at least one
-  cited alert of the case lies inside the phase interval.
-- The same with `event_label` (sensitivity): only cited alerts with an
-  attack event_label count.
+- **Headline (decision of M5 Part A): attack-step coverage by
+  `event_label` on the alert-reachable phases**: the phase is covered if
+  at least one cited alert of the case lies inside the phase interval and
+  carries an attack event_label. Noise cannot inflate it.
+- Sensitivity analysis: the same by time (any cited alert inside the phase
+  interval counts). Time coverage can be reached by noise (below), which
+  is why it is no longer the headline (it was in M4/M4b). Reports and the
+  CLI print the headline column first.
 - Coverage is reported over **all** attack phases and over the
   **alert-reachable** subset: phases where at least one investigation-
   eligible alert of any detector has an attack event_label inside the phase
@@ -202,7 +213,13 @@ coverage is the ceiling), `cite-none`, `cite-top-k-wazuh-level` (Wazuh
 alerts by `rule.level` descending, then the rest in time order; k = 5),
 `cite-top-k-detector-order` (by detector in the order aminer, wazuh,
 suricata, set from the M3 dev triage precision, a dev-derived choice; then
-time; k = 5) and `cite-aminer-only`. Each cited alert gets one field-value
+time) and `cite-aminer-only`. Every k in `baselines.top_k` is reported (k = 5
+and k = 10, rows `<name>@k5`, `<name>@k10`); agent runs add a row at k
+matched to the agent's mean citations per case (rounded half up, at least
+1; `<name>@k<k>-matched`) so comparisons are also made at equal citation
+volume. The detector order was **frozen on 2026-11-07**, before any
+held-out run (`baselines.detector_order_frozen` in `study.json`; the
+loader rejects a frozen config with any other order, and a test pins it). Each cited alert gets one field-value
 claim (`rule_id`, else `rule_name`) and one quote claim (first 60
 characters of its first raw log line, if >= 8 characters), copied from the
 record; their unsupported-claim rate is 0 by construction and checks the
@@ -213,7 +230,10 @@ an LLM agent must beat and are reported as baselines, not agent results.
 
 The pilot runs on the dev scenarios only (`pilot.scenarios` in
 `study.json`, validated as a subset of `split.dev`). Held-out scenarios
-stay untouched until the final runs.
+stay untouched until the final runs (M12). The pilot reports both
+truncation rules side by side (`pilot.truncation`: `spread`, `earliest`),
+because `spread` dropped the only event-labelled alerts of one dev case
+(shaw, fused `cracking`).
 
 ## Labels and features
 
