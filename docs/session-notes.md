@@ -5,6 +5,278 @@ are estimates.
 
 ---
 
+# M5: model client, tool layer, single tool-using agent (+ M4b decisions)
+
+Date: 2026-11-07. User decision: build the original SentinelAI plan
+milestone by milestone (roadmap M5-M12 in CLAUDE.md); the paper measures
+the detector-conditioned study on top of it.
+
+- Part A: branch `phase2/pilot-decisions` (from `phase2/baselines` at
+  `b01c6a4`), commit `48c0f17`, pushed.
+- Part B: branch `phase2/agent-single` (from Part A), code commit `24ffb50`, pushed, no PR.
+- **Model endpoint: none.** Asked at the start; the user chose "FakeClient
+  only". Everything was built and tested with the scripted `FakeClient`. No
+  model was downloaded, no API was called, and there is **no real agent
+  output** in these notes. The 2-case real run is therefore not done; it
+  is the first step once an endpoint is chosen (M6).
+- No new dependency (the client uses stdlib `urllib`).
+
+## Part A: decisions applied (M4b open questions)
+
+1. **Noise fallback = nearest time outside the window.** Shortfalls are
+   filled with the event-benign pool alerts nearest to the window
+   (distance to the nearer edge; ties by time, source file, source line);
+   no randomness in the fallback. Each case records
+   `fallback_max_distance_seconds`, and the variant summary records the
+   rule. Agents see only offsets (Part B).
+2. **Headline coverage = event_label on alert-reachable phases**; time
+   coverage is the sensitivity analysis. The methodology doc, CLAUDE.md,
+   the report (`headline` key) and the CLI column order are updated.
+3. **Truncation side by side**: `pilot.truncation: ["spread", "earliest"]`
+   (validated). `run-agent --truncation` picks one rule per run.
+4. **Baseline k**: `baselines.top_k: [5, 10]` gives rows `<name>@k5` and
+   `<name>@k10`. Agent runs add `<name>@k<k>-matched`, where k = the
+   agent's mean citations per case rounded half up, minimum 1
+   (`matched_k`).
+5. **Detector order frozen** (2026-11-07): `detector_order_frozen: true`.
+   The loader rejects a frozen config whose order is not
+   `FROZEN_DETECTOR_ORDER`, and `test_detector_order_is_frozen` pins it.
+
+### DEV-SCENARIO CEILINGS after Part A (not agent results)
+
+`cases` output, headline column first:
+
+```
+Headline: coverage by event_label, alert-reachable phases; time_label is the sensitivity analysis
+variant          ceil event  ceil time  pre-cap e/t  mean att  mean ben  trunc  dropped  drop atk e/t ben w/ atk
+wazuh               4/10       7/10        4/7        40.1000   21.5000      5     8136      2/3               0
+suricata            1/10       5/10        1/5        14.9000   16.0000      1       64      0/1               0
+aminer              6/10       8/10        6/8        28.8000    0.0000      2     3185      1/2               0
+fused               7/10      10/10        7/10       45.0000   24.7000      6    11901      3/4               0
+oracle              7/10       7/10        7/7        28.0000    0.0000      2    10677      2/2               0
+shuffled-wazuh      7/10      10/10        7/10       43.5000   22.8000      6     7433      3/4               0
+shuffled-suricata    5/10       8/10        5/8        38.8000   17.4000      4     2653      2/3               0
+shuffled-aminer     5/10       6/10        5/6        28.2000    7.2000      2      953      2/2               0
+noise-wazuh         0/10       4/10        0/5        40.1000   21.5000      5     8136      0/3               0
+noise-suricata      0/10       5/10        0/5        14.9000   16.0000      1       64      0/1               0
+noise-aminer        0/10       4/10        0/5        28.8000    0.0000      2     3185      0/2               0
+
+Headline: coverage by event_label, alert-reachable phases; time_label is the sensitivity analysis
+variant          ceil event  ceil time  pre-cap e/t  mean att  mean ben  trunc  dropped  drop atk e/t ben w/ atk
+wazuh               3/10       8/10        3/8        42.6000   12.5000      5     5171      2/4               0
+suricata            0/10       1/10        0/1        10.0000   10.0000      2      232      0/1               0
+aminer              7/10       9/10        7/9        31.3000    0.0000      2      653      1/2               0
+fused               6/10      10/10        7/10       47.6000   12.5000      5     6519      3/4               0
+oracle              7/10       7/10        7/7        26.0000    0.0000      2     5800      2/2               0
+shuffled-wazuh      6/10       9/10        6/9        42.5000   11.6000      4     4178      3/3               0
+shuffled-suricata    5/10       9/10        5/9        35.7000   10.7000      4     1751      2/3               0
+shuffled-aminer     3/10       5/10        3/5        16.6000    1.7000      1       43      1/1               0
+noise-wazuh         0/10       6/10        0/6        42.6000   12.5000      5     5171      0/4               0
+noise-suricata      0/10       1/10        0/1        10.0000   10.0000      2      232      0/1               0
+noise-aminer        0/10       5/10        0/5        31.3000    0.0000      2      653      0/2               0
+```
+
+Compared with M4b, the ceilings are unchanged, and so are the noise
+controls' coverage counts (russellmitchell noise-wazuh/-suricata/-aminer
+time coverage 4/5/4 out of 10, event 0/10). What changed is where the
+fallback alerts come from. They are now the nearest ones, but for the
+dense web-scan windows the nearest event-benign alerts are still up to
+31,970 s (russellmitchell) and 11,757 s (shaw) away (`noise-wazuh`).
+
+### DEV-SCENARIO BASELINES on fused after Part A (not agent results)
+
+russellmitchell:
+
+```
+fused            cite-all                                   7/7      7/10       7/7     10/10  0.3544  0.6456  0.0000    697   34.8500
+fused            cite-none                                  0/7      0/10       0/7      0/10     n/a     n/a     n/a      0    0.0000
+fused            cite-top-k-wazuh-level@k5                  5/7      5/10       7/7     10/10  0.2903  0.6613  0.0000     62    3.1000
+fused            cite-top-k-wazuh-level@k10                 7/7      7/10       7/7     10/10  0.3273  0.6727  0.0000    110    5.5000
+fused            cite-top-k-detector-order@k5               6/7      6/10       7/7     10/10  0.3387  0.6613  0.0000     62    3.1000
+fused            cite-top-k-detector-order@k10              6/7      6/10       7/7     10/10  0.3273  0.6727  0.0000    110    5.5000
+fused            cite-aminer-only                           6/7      6/10       7/7      8/10  0.5683  1.0000  0.0000    139    6.9500
+```
+
+shaw:
+
+```
+fused            cite-all                                   6/7      6/10       7/7     10/10  0.4276  0.7920  0.0000    601   30.0500
+fused            cite-none                                  0/7      0/10       0/7      0/10     n/a     n/a     n/a      0    0.0000
+fused            cite-top-k-wazuh-level@k5                  6/7      6/10       7/7     10/10  0.3065  0.6452  0.0000     62    3.1000
+fused            cite-top-k-wazuh-level@k10                 6/7      6/10       7/7     10/10  0.3301  0.6796  0.0000    103    5.1500
+fused            cite-top-k-detector-order@k5               6/7      6/10       7/7     10/10  0.3710  0.6452  0.0000     62    3.1000
+fused            cite-top-k-detector-order@k10              6/7      6/10       7/7     10/10  0.4078  0.6796  0.0000    103    5.1500
+fused            cite-aminer-only                           6/7      6/10       7/7      9/10  0.8226  1.0000  0.0000    124    6.2000
+```
+
+With k = 10, `cite-top-k-wazuh-level` on russellmitchell fused reaches 7/7
+reachable phases by event_label (the same as cite-all), with 110 citations
+against cite-all's 697.
+
+## Part B: what was built (M5)
+
+- `app/agent/config.py`: `ModelConfig` (base URL, model, temperature 0,
+  max_tokens, timeout, max_retries <= 3, API-key variable name, prices) and
+  `AgentConfig` (max_tool_calls 12, max_tokens_per_case 40,000,
+  max_tool_output_chars 6,000, page size 25, repair_retries <= 1,
+  run_token_budget 200,000). Both are new sections of `study.json`, with
+  `SENTINEL_LLM_BASE_URL` / `SENTINEL_LLM_MODEL` environment overrides. A
+  config that contains an `api_key` is rejected; the key comes only from
+  the environment.
+- `app/agent/client.py`: `OpenAICompatibleClient` (POST
+  `/chat/completions`, injectable transport, retries only on
+  timeout/connection/429/5xx and at most `max_retries`, the key only in the
+  header and never in errors or repr). Token usage comes from the response,
+  or is estimated and flagged `usage_reported=false`. Also `FakeClient`.
+- `app/agent/tools.py`: `CaseToolkit` with `list_alerts`, `get_alert`,
+  `search_alerts` and `get_raw_log`. Ids are opaque, times are offsets,
+  dates in text are masked as `<TIME>`, and label-bearing or provenance
+  fields are dropped. Errors come back as JSON, and long outputs are
+  truncated with a marker.
+- `app/agent/protocol.py`: system prompt (`m5-v1`) and strict parsing of
+  one JSON object per reply.
+- `app/agent/agent.py`: `investigate()`, the bounded loop with statuses
+  `ok`, `failed` (unparseable after one repair), `tool_budget_exceeded`,
+  `token_budget_exceeded` (checked before each request) and
+  `request_failed`.
+- `app/agent/runner.py` and the CLI `run-agent`:
+  - dev-only guard, then attack and benign cases interleaved, first
+    `--limit`;
+  - run log in `data/processed/runs/<run_id>/` (manifest, transcripts with
+    id maps, scores);
+  - the agent's row and all baseline rows are scored on the same cases;
+  - `--dry-run`, `--confirm` above the run budget, and `--fake-responses`
+    for scripted demos.
+- `cases.py`: `summarize_scores` and `baseline_summaries` work on any case
+  subset, so agents and baselines share one table.
+
+## Final test and type-check output
+
+```
+$ ../.venv/Scripts/python.exe -m pytest
+rootdir: D:\Projects\ERA\backend
+configfile: pyproject.toml
+testpaths: tests
+collected 296 items
+
+tests\test_agent_client.py ........                                      [  2%]
+tests\test_agent_loop.py ........                                        [  5%]
+tests\test_agent_runner.py ..........                                    [  8%]
+tests\test_agent_tools.py .........                                      [ 11%]
+tests\test_ait_ads_real.py ...                                           [ 12%]
+tests\test_alert_normalizer.py ........................                  [ 20%]
+tests\test_alert_pipeline.py ......                                      [ 22%]
+tests\test_alert_schema.py ............                                  [ 27%]
+tests\test_baselines.py .....                                            [ 28%]
+tests\test_case_scoring.py ......                                        [ 30%]
+tests\test_cases.py ............                                         [ 34%]
+tests\test_data_quality.py ........                                      [ 37%]
+tests\test_event_schema.py .................                             [ 43%]
+tests\test_ground_truth.py ................                              [ 48%]
+tests\test_ingestion.py .................................                [ 59%]
+tests\test_metrics.py ........                                           [ 62%]
+tests\test_normalizer.py ............................................... [ 78%]
+............                                                             [ 82%]
+tests\test_pipeline.py .......                                           [ 84%]
+tests\test_study_config.py ..................................            [ 96%]
+tests\test_variants.py ...........                                       [100%]
+
+============================ 296 passed in 16.33s =============================
+
+$ ../.venv/Scripts/python.exe -m mypy
+Success: no issues found in 33 source files
+```
+
+`test_agent_tools.py::test_real_dev_cases_do_not_leak` ran on the real
+russellmitchell files (not skipped).
+
+## Run output
+
+**Dry runs** (no model called):
+
+```
+DEV-SCENARIO AGENT RUN - scenario russellmitchell, variant fused, truncation spread; 2 case(s): attack, benign
+Budget: token bound 80000 (40000 per case), cost bound $0.0000 at $0.0/M tokens; first prompts ~1527 tokens; run budget 200000
+DRY RUN: no model was called
+exit 0
+DEV-SCENARIO AGENT RUN - scenario shaw, variant fused, truncation spread; 2 case(s): attack, benign
+Budget: token bound 80000 (40000 per case), cost bound $0.0000 at $0.0/M tokens; first prompts ~1520 tokens; run budget 200000
+DRY RUN: no model was called
+exit 0
+```
+
+The CLI's other guards behave as intended: a held-out scenario exits 2
+with `scenario 'wilson' is held out and frozen`. A real run with no
+endpoint configured exits 2 with `no model endpoint configured`.
+
+**Plumbing check on real dev data with a scripted FakeClient.** This is
+NOT an agent result: the script calls `list_alerts` once and then answers
+"benign" with no findings, in both cases.
+
+```
+DEV-SCENARIO AGENT RUN - scenario russellmitchell, variant fused, truncation spread; 2 case(s): attack, benign
+Budget: token bound 80000 (40000 per case), cost bound $0.0000 at $0.0/M tokens; first prompts ~1527 tokens; run budget 200000
+  case 0: attack alerts   8 status ok parse ok verdict benign tokens 1538+30 (estimated) tool calls 1 latency 0.00 s
+  case 1: benign alerts  41 status ok parse ok verdict benign tokens 2415+30 (estimated) tool calls 1 latency 0.00 s
+
+Agent vs baselines on the same cases (DEV, not held-out); matched k = 1
+cov = phases covered by event_label (headline) / time (sensitivity), over reachable phases | all phases; prec = citation precision (event_label / time); unsup = unsupported-claim rate
+variant          citer                                cov e rch cov e all cov t rch cov t all  prec e  prec t   unsup  cited  per case
+fused            agent (fake)                               0/0       0/1       0/0       0/1     n/a     n/a     n/a      0    0.0000
+fused            cite-all                                   0/0       0/1       0/0       1/1  0.0000  0.1633  0.0000     49   24.5000
+fused            cite-none                                  0/0       0/1       0/0       0/1     n/a     n/a     n/a      0    0.0000
+fused            cite-top-k-wazuh-level@k5                  0/0       0/1       0/0       1/1  0.0000  0.5000  0.0000     10    5.0000
+fused            cite-top-k-wazuh-level@k10                 0/0       0/1       0/0       1/1  0.0000  0.4444  0.0000     18    9.0000
+fused            cite-top-k-wazuh-level@k1-matched          0/0       0/1       0/0       1/1  0.0000  0.5000  0.0000      2    1.0000
+fused            cite-top-k-detector-order@k5               0/0       0/1       0/0       1/1  0.0000  0.5000  0.0000     10    5.0000
+fused            cite-top-k-detector-order@k10              0/0       0/1       0/0       1/1  0.0000  0.4444  0.0000     18    9.0000
+fused            cite-top-k-detector-order@k1-matched       0/0       0/1       0/0       1/1  0.0000  0.5000  0.0000      2    1.0000
+fused            cite-aminer-only                           0/0       0/1       0/0       0/1     n/a     n/a     n/a      0    0.0000
+Verdicts: 1/2 correct, 0 failed (tp 0, fp 0, fn 1, tn 1)
+Wrote run log to D:\Projects\ERA\data\processed\runs\20261106T200125Z-1e7f17c5
+```
+
+This shows the real-data path end to end: tool calls, opaque-id mapping,
+manifest and transcripts, scoring next to the baselines on the same cases,
+verdict counts and the matched-k row (mean citations 0, so k = 1).
+
+## Surprises
+
+1. Real Wazuh alert ids start with an epoch timestamp (for example
+   `1685715378.241`), so they would leak time. This is why ids are opaque.
+2. Records and log lines carry dates in several formats (ISO, syslog,
+   ctime, Suricata fast.log, `audit(<epoch>:n)`), all masked; the Apache
+   access-log format is masked too (not yet seen in the inspected records). Masking keeps
+   quote claims verifiable because only the masked spans change.
+3. The first russellmitchell attack case in time order is
+   `network_scans`, which is unreachable (8 Wazuh alerts in the fused view; the two first listed are ClamAV updates). So the
+   default `--limit 2` pilot pair scores an attack case that no source can
+   cover by event_label.
+4. Nearest-time fallback still reaches far for high-volume sources
+   (see the ceilings above): fallback alerts can still sit hours away, so
+   their offsets fall far outside [0, window length) and still show they are
+   outside the window, even without dates.
+
+## Open questions for the user
+
+1. **Endpoint for M6.** Which model and server: a local 7-9B model via
+   Ollama or llama.cpp (you start it and pull the model), or a hosted API
+   (you set the key in `SENTINEL_LLM_API_KEY`)? M6 starts with exactly 2
+   dev cases.
+2. **Offsets of out-of-window noise alerts.** Surprise 4 means agents can
+   still reject fallback noise by its offset. Options: accept and report
+   it, clip shown offsets to the window, or count only same-window noise.
+3. **Case selection for small runs.** Should `--limit` skip unreachable
+   phases (surprise 3), or take a seeded random order, instead of time
+   order?
+4. **Native tool calling.** M5 uses a plain-JSON protocol so any endpoint
+   works. Should M6 also try the provider's native function calling, or
+   keep one protocol for comparability?
+5. **Budgets.** Are 12 tool calls and 40,000 tokens per case, and 200,000
+   per run before `--confirm`, the right starting point for the pilot?
+
+---
+
 # M4b: noise controls, spread truncation, claim kinds, deterministic baselines
 
 Date: 2026-10-31. Branch `phase2/baselines` (from `phase2/cases` at
