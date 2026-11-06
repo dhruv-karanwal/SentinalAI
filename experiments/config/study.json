@@ -22,13 +22,16 @@
     "benign_per_attack": 1
   },
   "baselines": {
-    "top_k": 5,
+    "top_k": [5, 10],
     "detector_order": ["aminer", "wazuh", "suricata"],
+    "detector_order_frozen": true,
+    "detector_order_frozen_on": "2026-11-07",
     "quote_chars": 60,
-    "note": "detector_order is set from the M3 dev triage precision (aminer > wazuh > suricata on both dev scenarios); it is a dev-derived, documented choice."
+    "note": "detector_order is set from the M3 dev triage precision (aminer > wazuh > suricata on both dev scenarios); it is a dev-derived, documented choice, frozen on 2026-11-07 before any held-out run. Every k in top_k is reported; agent runs add a k matched to the agent's mean citations per case."
   },
   "pilot": {
     "scenarios": ["russellmitchell", "shaw"],
-    "note": "The pilot runs on dev scenarios only; held-out scenarios stay untouched."
+    "truncation": ["spread", "earliest"],
+    "note": "The pilot runs on dev scenarios only; held-out scenarios stay untouched. Both truncation rules are reported side by side."
   }
 }

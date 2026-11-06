@@ -11,15 +11,31 @@ built in phases.
 | Phase | Scope | Status |
 |-------|-------|--------|
 | 1 — Data foundation | Load CSV/JSON/JSONL, validate, normalize to a canonical schema, data-quality report | **Done** |
-| 2 — Study foundation | Deterministic metrics, AIT-ADS alert schema and loader, alert-source variants, case units and case-level scoring | **In progress**: metrics, M2 loader, M3 variants + frozen split, M4 cases + case scoring + dev ceilings, M4b noise controls + baselines + claim kinds done; next M5 single tool-using agent |
+| 2 — Study foundation | Deterministic metrics, AIT-ADS alert schema and loader, alert-source variants, case units and case-level scoring | **Done**: metrics, M2 loader, M3 variants + frozen split, M4 cases + case scoring + dev ceilings, M4b noise controls + baselines + claim kinds, M4b decisions (nearest-time noise fallback, event_label headline, k = 5/10/matched, frozen detector order, pilot truncation side by side) |
 | 2b — CICIDS2017 detection baselines | Feature matrices, leakage-safe splits, baseline classifier | **Optional, off the critical path** (only after the pilot, if the user asks) |
-| 3 — Investigation agents | Single tool-using agent, multi-agent + event-ID verifier, local 7-9B model | Not started |
-| Later | Demo UI, RAG over ATT&CK polish | Not started |
+| 3 — SentinelAI pipeline | The original plan (user decision 2026-11-07): ingest -> normalize -> detection layer -> correlation -> ATT&CK RAG -> multi-agent investigation -> evidence verification -> report -> human approval -> demo UI; the paper measures the detector-conditioned study on top of it | **In progress**, milestone by milestone (roadmap below) |
 
-Do not start a later phase, or add agents, LLMs, RAG, Kafka, vector databases,
-LangGraph or a frontend, unless the user asks for it. The paper's scope is the
-detector-conditioned study in `docs/` and the Google Doc draft; build only
-what that study needs.
+### Roadmap (phase 3)
+
+| Milestone | Scope | Status |
+|-----------|-------|--------|
+| M5 | Model client + tool layer + single tool-using agent | Next |
+| M6 | PILOT on dev scenarios with the M5 agent: tokens, latency, cost, quality vs the baselines. **Gate** before building more | Not started |
+| M7 | ATT&CK knowledge base + retrieval (RAG), exposed as an agent tool | Not started |
+| M8 | Multi-agent investigation (LangGraph) + alert-evidence verifier, at matched budgets with M5 | Not started |
+| M9 | Correlation layer (same host / IP / time grouping of alerts into incidents) | Not started |
+| M10 | Report generation + human approval step | Not started |
+| M11 | Demo UI wrapping the same pipeline (use the ui-ux-pro-max skill) | Not started |
+| M12 | Held-out runs, statistics (paired bootstrap, Holm), freeze results | Not started |
+
+Held-out scenarios stay untouched until M12.
+
+Build only the next milestone in the roadmap; never skip ahead. Agents, LLM
+integration, RAG, LangGraph and a frontend are authorized (user decision
+2026-11-07), but only in the milestone that lists them. Kafka and vector
+databases are not in the roadmap: do not add them unless the user asks. The
+paper's scope is the detector-conditioned study in `docs/` and the Google
+Doc draft.
 
 ## Commands
 
@@ -95,7 +111,7 @@ data/samples/             committed SYNTHETIC samples (see its README)
 data/raw/, data/processed/ git-ignored: local datasets and pipeline outputs
 data/samples/synthetic_ait_ads/ SYNTHETIC files in the AIT-ADS shapes (scenario "synthetic")
 docs/                     architecture.md, research-methodology.md, session-notes.md
-experiments/config/study.json  frozen split; variant seed, shuffled/noise references; cases; baselines; pilot
+experiments/config/study.json  frozen split; variant seed, shuffled/noise references; cases; baselines (k list, frozen order); pilot (scenarios, truncations)
 ```
 
 ## Design rules (keep these)
@@ -181,8 +197,10 @@ experiments/config/study.json  frozen split; variant seed, shuffled/noise refere
 - **Truth:** `event_label` is primary for alert-level triage (attack = any
   event label, benign = `-`); `time_label` is the sensitivity analysis.
   Every output keeps both and every variant is reported under both. For
-  cases, coverage by time is the headline and event_label coverage the
-  sensitivity (the case is defined by its phase interval).
+  cases (decision 2026-11-07, reversing M4): the **headline is event_label
+  coverage on the alert-reachable phases**, time coverage is the
+  sensitivity analysis (noise can reach time coverage, not event-label
+  coverage). Reports and CLI tables print the headline column first.
 - **Suricata labelling limitation** (methodology doc): Suricata event labels
   come from AIT-NDS netflow matching, so almost none carry one. Report
   Suricata under both labels with the caveat; its base rate is accepted.
@@ -190,8 +208,11 @@ experiments/config/study.json  frozen split; variant seed, shuffled/noise refere
   `wazuh`, `suricata`, `aminer`, `fused` (= whole pool), `oracle` (attack
   event_label); **noise controls** `noise-<det>` (the random control:
   event_label-benign alerts count-matched to `<det>`; in cases rebuilt per
-  case, same window first, scenario pool as fallback, split recorded as
-  `from_window`/`from_fallback`/`shortfall`); **shuffled-pool rows**
+  case, same window first (seeded), shortfall filled with the event-benign
+  pool alerts **nearest in time** outside the window (deterministic; ties
+  by time, source line), split recorded as
+  `from_window`/`from_fallback`/`shortfall` plus
+  `fallback_max_distance_seconds`); **shuffled-pool rows**
   `shuffled-<det>` (the old M3 random controls, kept for comparison).
   `shuffled-fused` (= pool) is written **only as a manifest** with
   `degenerate: true`, `experiment_variant: false`; never use it as a
@@ -220,11 +241,18 @@ experiments/config/study.json  frozen split; variant seed, shuffled/noise refere
   Time coverage can be reached by noise; event-label coverage cannot.
 - **Baselines** (`app/study/baselines.py`): cite-all, cite-none,
   cite-top-k-wazuh-level, cite-top-k-detector-order (aminer, wazuh,
-  suricata: dev-derived, documented), cite-aminer-only; k=5; claims copied
-  from the record (unsupported rate 0 by construction). They are the
-  reference points an LLM agent must beat: **baselines, not agent results**.
+  suricata: dev-derived, documented, **frozen 2026-11-07**:
+  `baselines.detector_order_frozen`, `FROZEN_DETECTOR_ORDER`, pinned by
+  `test_detector_order_is_frozen`; never change it), cite-aminer-only.
+  Every k in `baselines.top_k` ([5, 10]) is a row `<name>@k<k>`; agent
+  runs add `<name>@k<k>-matched` (k = agent's mean citations per case,
+  `matched_k`). Claims copied from the record (unsupported rate 0 by
+  construction). They are the reference points an LLM agent must beat:
+  **baselines, not agent results**. `summarize_scores` (cases.py) builds
+  the row for baselines and agent runs alike.
 - **Pilot** runs on dev scenarios only (`pilot.scenarios` must be a subset
-  of `split.dev`); held-out scenarios stay untouched.
+  of `split.dev`) and reports both truncation rules (`pilot.truncation`:
+  spread, earliest); held-out scenarios stay untouched until M12.
 - **Determinism:** seeds derive via SHA-256 from (base seed, purpose,
   scenario, variant); populations are time-ordered with (source_file,
   source_line) tiebreak.
