@@ -33,5 +33,26 @@
     "scenarios": ["russellmitchell", "shaw"],
     "truncation": ["spread", "earliest"],
     "note": "The pilot runs on dev scenarios only; held-out scenarios stay untouched. Both truncation rules are reported side by side."
+  },
+  "model": {
+    "base_url": null,
+    "model": null,
+    "temperature": 0,
+    "max_tokens": 1024,
+    "timeout_seconds": 120,
+    "max_retries": 1,
+    "api_key_env": "SENTINEL_LLM_API_KEY",
+    "price_input_per_million": 0,
+    "price_output_per_million": 0,
+    "note": "No endpoint is committed: set base_url/model here or SENTINEL_LLM_BASE_URL / SENTINEL_LLM_MODEL in the environment. API keys only via the environment variable named by api_key_env, never in this file."
+  },
+  "agent": {
+    "max_tool_calls": 12,
+    "max_tokens_per_case": 40000,
+    "max_tool_output_chars": 6000,
+    "list_page_size": 25,
+    "repair_retries": 1,
+    "run_token_budget": 200000,
+    "note": "Per-case budgets of the M5 single agent; a run whose token bound exceeds run_token_budget needs --confirm."
   }
 }
