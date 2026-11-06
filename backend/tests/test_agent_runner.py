@@ -184,3 +184,39 @@ def test_cli_fake_run_never_writes_the_api_key(processed: Path, samples_dir: Pat
             assert secret not in path.read_text("utf-8")
     assert secret not in out
     assert main(["run-agent", "--scenario", "wilson", "--variant", "fused", "--dry-run"]) == 2
+
+
+# --- M6: case selection options -------------------------------------------------------------
+
+def test_select_cases_reachable_keeps_reachable_phases_and_their_benign_matches() -> None:
+    from app.agent.runner import select_cases
+    from app.study.cases import Case, CaseKind
+    t = NOW
+
+    def case(kind: CaseKind, phase: str) -> Case:
+        return Case(f"s:{kind.value}:{phase}", "s", kind, phase, t, t, 0)
+
+    cases = [case(CaseKind.ATTACK, "scan"), case(CaseKind.ATTACK, "dirb"),
+             case(CaseKind.BENIGN, "scan"), case(CaseKind.BENIGN, "dirb")]
+    assert select_cases(cases, None) == [0, 2, 1, 3]
+    assert select_cases(cases, None, mode="reachable", reachable=("dirb",)) == [1, 3]
+    assert select_cases(cases, 1, mode="reachable", reachable=("dirb",)) == [1]
+    assert select_cases(cases, None, case_ids=["s:benign:scan", "s:attack:dirb"]) == [2, 1]
+    with pytest.raises(ValueError, match="unknown case id"):
+        select_cases(cases, None, case_ids=["nope"])
+    with pytest.raises(ValueError, match="mode"):
+        select_cases(cases, None, mode="random")
+
+
+def test_prepare_run_passes_selection_through(processed: Path, samples_dir: Path,  # noqa: F811
+                                              tmp_path: Path) -> None:
+    config_path = synthetic_config(tmp_path)
+    config = load_study_config(config_path)
+    every = prepare_run(processed, labels(samples_dir), "synthetic", "fused", config, limit=None)
+    first = every.cases[1].case_id
+    one = prepare_run(processed, labels(samples_dir), "synthetic", "fused", config, limit=None,
+                      case_ids=[first])
+    assert [c.case_id for c in one.cases] == [first]
+    reach = prepare_run(processed, labels(samples_dir), "synthetic", "fused", config, limit=None,
+                        selection="reachable")
+    assert all(c.phase in reach.reachable for c in reach.cases)
