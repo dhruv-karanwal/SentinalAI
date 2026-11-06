@@ -11,7 +11,10 @@ dev scenarios only (``pilot.scenarios`` must be a subset of ``split.dev``).
 History: the M3 per-variant 20-alert study sample was retired in M4 in
 favour of case-based units; in M4b the random controls became noise
 controls, the old ones were kept as "shuffled-pool" rows, and the default
-truncation became ``spread``. See docs/research-methodology.md.
+truncation became ``spread``. M5 (Part A) made ``baselines.top_k`` a list
+(k = 5 and 10 are both reported), froze ``baselines.detector_order`` and
+added ``pilot.truncation`` (spread and earliest side by side). See
+docs/research-methodology.md.
 """
 
 from __future__ import annotations
@@ -29,6 +32,10 @@ SHUFFLED_REFERENCE_CHOICES = ("wazuh", "suricata", "aminer", "fused", "oracle")
 # Noise controls are count-matched to one detector.
 NOISE_REFERENCE_CHOICES = DETECTOR_NAMES
 TRUNCATION_CHOICES = ("spread", "earliest")
+# cite-top-k-detector-order ranking, frozen 2026-11-07 before any held-out run
+# (dev-derived from M3 triage precision). A config that says it is frozen
+# must carry exactly this order.
+FROZEN_DETECTOR_ORDER = ("aminer", "wazuh", "suricata")
 
 
 class HeldOutScenarioError(Exception):
@@ -67,9 +74,10 @@ class CaseConfig:
 class BaselineConfig:
     """Parameters of the deterministic baseline citers (see app.study.baselines)."""
 
-    top_k: int
+    top_k: tuple[int, ...]  # every k is reported; the first is the default
     detector_order: tuple[str, ...]
     quote_chars: int
+    detector_order_frozen: bool = False
 
 
 @dataclass(frozen=True)
@@ -83,6 +91,7 @@ class StudyConfig:
     baselines: BaselineConfig
     pilot_scenarios: tuple[str, ...]
     source: str
+    pilot_truncations: tuple[str, ...] = ("spread",)
 
 
 def _names(value: Any, field: str, *, allow_empty: bool = False) -> tuple[str, ...]:
@@ -99,6 +108,16 @@ def _int(value: Any, field: str, minimum: int) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
         raise ValueError(f"{field} must be an integer >= {minimum}, got {value!r}")
     return value
+
+
+def _top_k(value: Any) -> tuple[int, ...]:
+    values = [value] if isinstance(value, int) and not isinstance(value, bool) else value
+    if not isinstance(values, list) or not values:
+        raise ValueError("baselines.top_k must be an integer or a non-empty list of integers")
+    ks = tuple(_int(v, "baselines.top_k", 1) for v in values)
+    if len(set(ks)) != len(ks):
+        raise ValueError("baselines.top_k has repeated values")
+    return ks
 
 
 def _choices(value: Any, field: str, allowed: tuple[str, ...]) -> tuple[str, ...]:
@@ -143,11 +162,21 @@ def load_study_config(path: str | Path = DEFAULT_STUDY_CONFIG) -> StudyConfig:
     order = _names(baselines_data["detector_order"], "baselines.detector_order")
     if sorted(order) != sorted(DETECTOR_NAMES):
         raise ValueError(f"baselines.detector_order must order exactly {', '.join(DETECTOR_NAMES)}")
+    order_frozen = baselines_data.get("detector_order_frozen", False)
+    if not isinstance(order_frozen, bool):
+        raise ValueError("baselines.detector_order_frozen must be true or false")
+    if order_frozen and order != FROZEN_DETECTOR_ORDER:
+        raise ValueError(f"baselines.detector_order is frozen as {', '.join(FROZEN_DETECTOR_ORDER)}; "
+                         "it must not change after the freeze")
 
     pilot = _names(pilot_data["scenarios"], "pilot.scenarios")
     outside = [s for s in pilot if s not in dev]
     if outside:
         raise ValueError(f"pilot.scenarios must be dev scenarios; not dev: {', '.join(outside)}")
+    pilot_truncations = _names(pilot_data.get("truncation", ["spread"]), "pilot.truncation")
+    bad = [t for t in pilot_truncations if t not in TRUNCATION_CHOICES]
+    if bad:
+        raise ValueError(f"pilot.truncation must use {', '.join(TRUNCATION_CHOICES)}; got {', '.join(bad)}")
 
     return StudyConfig(
         split=ScenarioSplit(dev, held_out, frozen, split_data.get("frozen_on")),
@@ -163,10 +192,12 @@ def load_study_config(path: str | Path = DEFAULT_STUDY_CONFIG) -> StudyConfig:
             benign_per_attack=_int(cases_data["benign_per_attack"], "cases.benign_per_attack", 1),
         ),
         baselines=BaselineConfig(
-            top_k=_int(baselines_data["top_k"], "baselines.top_k", 1),
+            top_k=_top_k(baselines_data["top_k"]),
             detector_order=order,
             quote_chars=_int(baselines_data["quote_chars"], "baselines.quote_chars", 8),
+            detector_order_frozen=order_frozen,
         ),
         pilot_scenarios=pilot,
         source=config_path.name,
+        pilot_truncations=pilot_truncations,
     )

@@ -126,14 +126,36 @@ def test_noise_case_alerts_same_window_first(pool: AlertPool, timeline: AttackTi
     view = noise_case_alerts(dirb, benign_entries(pool), 2, seed=SEED,  # type: ignore[arg-type]
                              name="noise-suricata", max_alerts=100, truncation="spread")
     assert [e.alert_id for e in view.entries] == [W1, S4]
-    assert view.noise == {"reference_count": 2, "from_window": 1, "from_fallback": 1, "shortfall": 0}
+    assert view.noise == {"reference_count": 2, "from_window": 1, "from_fallback": 1, "shortfall": 0,
+                          "fallback_max_distance_seconds": 900.0}  # w1 @1699999200, window @1700000100
     assert all(e.event_attack is False for e in view.entries)
     short = noise_case_alerts(dirb, benign_entries(pool), 5, seed=SEED,  # type: ignore[arg-type]
                               name="noise-x", max_alerts=100, truncation="spread")
-    assert short.noise == {"reference_count": 5, "from_window": 1, "from_fallback": 1, "shortfall": 3}
+    assert short.noise is not None
+    assert (short.noise["from_window"], short.noise["from_fallback"], short.noise["shortfall"]) == (1, 1, 3)
     empty = noise_case_alerts(dirb, benign_entries(pool), 0, seed=SEED,  # type: ignore[arg-type]
                               name="noise-x", max_alerts=100, truncation="spread")
     assert empty.entries == () and empty.noise["reference_count"] == 0  # type: ignore[index]
+
+
+def test_noise_fallback_takes_the_nearest_time_outside_the_window(
+        pool: AlertPool, timeline: AttackTimeline) -> None:
+    dirb = by_id(pool, timeline)["synthetic:attack:dirb"]  # window [1700000100, 1700000200)
+    template = next(e for e in pool.entries if e.alert_id == W1)
+    far_before, near_before, near_after, far_after = (
+        dataclasses.replace(template, alert_id=name, timestamp=ts(t))
+        for name, t in (("fb", 1699990000), ("nb", 1700000000), ("na", 1700000260), ("fa", 1700009000)))
+    benign = [far_before, near_before, near_after, far_after]  # none inside the window
+    view = noise_case_alerts(dirb, benign, 2, seed=SEED,  # type: ignore[arg-type]
+                             name="noise-x", max_alerts=100, truncation="spread")
+    # Distances: nb 100 s before the window start, na 60 s after its end.
+    assert [e.alert_id for e in view.entries] == ["nb", "na"]
+    assert view.noise == {"reference_count": 2, "from_window": 0, "from_fallback": 2, "shortfall": 0,
+                          "fallback_max_distance_seconds": 100.0}
+    # The nearest rule is deterministic: no seed changes it.
+    other = noise_case_alerts(dirb, benign, 2, seed=SEED + 1,  # type: ignore[arg-type]
+                              name="noise-x", max_alerts=100, truncation="spread")
+    assert [e.alert_id for e in other.entries] == ["nb", "na"]
 
 
 def test_reachable_phases(pool: AlertPool, timeline: AttackTimeline) -> None:
@@ -157,7 +179,7 @@ def synthetic_config(tmp_path: Path, **cases: object) -> Path:
     data["split"]["dev"] = ["synthetic"]
     data["pilot"]["scenarios"] = ["synthetic"]
     data["variants"]["shuffled_reference"] = ["aminer"]
-    data["baselines"]["top_k"] = 1
+    data["baselines"]["top_k"] = [1, 2]
     data["cases"].update(cases)
     path = tmp_path / "study.json"
     path.write_text(json.dumps(data), encoding="utf-8")
@@ -199,8 +221,13 @@ def test_dev_case_report(processed: Path, samples_dir: Path, tmp_path: Path) -> 
     assert json.loads((out / "synthetic.case_ceilings.json").read_text("utf-8")) == report
 
     baselines = report["baselines"]
-    assert list(baselines["fused"]) == ["cite-all", "cite-none", "cite-top-k-wazuh-level",
-                                        "cite-top-k-detector-order", "cite-aminer-only"]
+    assert list(baselines["fused"]) == [
+        "cite-all", "cite-none", "cite-top-k-wazuh-level@k1", "cite-top-k-wazuh-level@k2",
+        "cite-top-k-detector-order@k1", "cite-top-k-detector-order@k2", "cite-aminer-only"]
+    assert baselines["fused"]["cite-top-k-detector-order@k2"]["alerts_cited"]["total"] == 3
+    assert report["headline"]["coverage"] == "event_label, alert-reachable phases"
+    assert report["headline"]["sensitivity"] == "time_label"
+    assert "nearest" in report["variants"]["noise-suricata"]["noise"]["fallback_rule"]
     cite_all = baselines["fused"]["cite-all"]
     assert cite_all["coverage"]["time_label"]["all"] == {"covered": 2, "cases": 3, "rate": 2 / 3}
     assert cite_all["coverage"]["time_label"]["reachable"] == {"covered": 2, "cases": 2, "rate": 1.0}
@@ -239,6 +266,9 @@ def test_cli(processed: Path, samples_dir: Path, tmp_path: Path,  # noqa: F811
     assert code == 0
     out = capsys.readouterr().out
     assert "CEILINGS" in out and "not agent results" in out
-    assert "BASELINES" in out and "cite-top-k-detector-order" in out
+    assert "BASELINES" in out and "cite-top-k-detector-order@k1" in out
+    # Headline first: event_label on reachable phases, then time (sensitivity).
+    assert out.index("ceil event") < out.index("ceil time")
+    assert out.index("cov e rch") < out.index("cov t all")
     assert main(["cases", "--scenario", "wilson", "--processed-dir", str(processed),
                  "--labels", str(labels), "--no-output"]) == 2

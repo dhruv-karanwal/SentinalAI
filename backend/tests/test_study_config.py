@@ -7,6 +7,7 @@ from app.ingestion.mappings import AIT_ADS_SCENARIOS
 from app.study.cases import dev_case_report
 from app.study.config import (
     DEFAULT_STUDY_CONFIG,
+    FROZEN_DETECTOR_ORDER,
     HeldOutScenarioError,
     StudyConfig,
     load_study_config,
@@ -32,8 +33,24 @@ def test_committed_config_is_the_frozen_decision() -> None:
             cases.benign_per_attack) == (20261031, 0, 100, "spread", 1)
     baselines = config.baselines
     assert (baselines.top_k, baselines.detector_order, baselines.quote_chars) == (
-        5, ("aminer", "wazuh", "suricata"), 60)
+        (5, 10), ("aminer", "wazuh", "suricata"), 60)
     assert config.pilot_scenarios == ("russellmitchell", "shaw")  # dev only
+    assert config.pilot_truncations == ("spread", "earliest")  # reported side by side
+
+
+def test_detector_order_is_frozen() -> None:
+    """The cite-top-k-detector-order ranking was frozen on 2026-11-07 (M4b decision 5).
+
+    It was derived from dev triage precision; changing it after the freeze
+    would tune a baseline after the protocol was fixed. Do not edit this test
+    or study.json's detector_order.
+    """
+    baselines = load_study_config().baselines
+    assert baselines.detector_order_frozen
+    assert baselines.detector_order == FROZEN_DETECTOR_ORDER == ("aminer", "wazuh", "suricata")
+    raw = json.loads(DEFAULT_STUDY_CONFIG.read_text(encoding="utf-8"))["baselines"]
+    assert raw["detector_order"] == ["aminer", "wazuh", "suricata"]
+    assert raw["detector_order_frozen_on"] == "2026-11-07"
 
 
 @pytest.mark.parametrize("scenario", HELD_OUT)
@@ -79,6 +96,14 @@ def write_config(tmp_path: Path, **changes: object) -> Path:
         ({"cases__truncation": "earliest"}, None),
         ({"variants__noise_reference": ["fused"]}, "noise_reference"),
         ({"baselines__top_k": 0}, "top_k"),
+        ({"baselines__top_k": [5, 0]}, "top_k"),
+        ({"baselines__top_k": []}, "top_k"),
+        ({"baselines__top_k": [5, 5]}, "top_k"),
+        ({"baselines__top_k": 3}, None),
+        ({"baselines__detector_order": ["wazuh", "aminer", "suricata"]}, "frozen"),
+        ({"baselines__detector_order_frozen": "yes"}, "detector_order_frozen"),
+        ({"pilot__truncation": ["random"]}, "truncation"),
+        ({"pilot__truncation": []}, "truncation"),
         ({"baselines__detector_order": ["aminer", "wazuh"]}, "detector_order"),
         ({"baselines__quote_chars": 7}, "quote_chars"),
         ({"pilot__scenarios": ["fox"]}, "pilot"),

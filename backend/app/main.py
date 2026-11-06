@@ -261,6 +261,24 @@ def _frac(rate: dict[str, Any]) -> str:
     return f"{rate['covered']}/{rate['cases']}"
 
 
+def print_score_header() -> None:
+    """Header of the shared score table (baselines and agent runs; headline column first)."""
+    print("cov = phases covered by event_label (headline) / time (sensitivity), over reachable "
+          "phases | all phases; prec = citation precision (event_label / time); "
+          "unsup = unsupported-claim rate")
+    print(f"{'variant':16s} {'citer':36s} {'cov e rch':>9s} {'cov e all':>9s} {'cov t rch':>9s} "
+          f"{'cov t all':>9s} {'prec e':>7s} {'prec t':>7s} {'unsup':>7s} {'cited':>6s} {'per case':>9s}")
+
+
+def print_score_row(variant: str, name: str, r: dict[str, Any]) -> None:
+    cov, prec = r["coverage"], r["citation_precision"]
+    print(f"{variant:16s} {name:36s} {_frac(cov['event_label']['reachable']):>9s} "
+          f"{_frac(cov['event_label']['all']):>9s} {_frac(cov['time_label']['reachable']):>9s} "
+          f"{_frac(cov['time_label']['all']):>9s} {_fmt(prec['event_label']):>7s} "
+          f"{_fmt(prec['time_label']):>7s} {_fmt(r['unsupported_claim_rate']):>7s} "
+          f"{r['alerts_cited']['total']:>6d} {_fmt(r['alerts_cited']['mean_per_case']):>9s}")
+
+
 def _cases(args: argparse.Namespace) -> int:
     try:
         config = load_study_config(args.study_config)
@@ -278,15 +296,17 @@ def _cases(args: argparse.Namespace) -> int:
     print(f"Cases: {counts['attack']} attack, {counts['benign']} benign "
           f"({len(log['unavailable'])} benign unavailable); padding {cfg['padding_seconds']} s, "
           f"cap {cfg['max_alerts']} ({cfg['truncation']}), seed {cfg['seed']}")
-    print(f"{'variant':16s} {'ceil time':>10s} {'ceil event':>10s} {'pre-cap t/e':>12s} "
+    print(f"Headline: coverage by {report['headline']['coverage']}; "
+          f"{report['headline']['sensitivity']} is the sensitivity analysis")
+    print(f"{'variant':16s} {'ceil event':>10s} {'ceil time':>10s} {'pre-cap e/t':>12s} "
           f"{'mean att':>9s} {'mean ben':>9s} {'trunc':>6s} {'dropped':>8s} {'drop atk e/t':>13s} "
           f"{'ben w/ atk':>10s}")
     for name, s in report["variants"].items():
         ceil, pre, mean, trunc = (s["coverage_ceiling"], s["coverage_ceiling_before_cap"],
                                   s["mean_alerts_per_case"], s["truncation"])
-        print(f"{name:16s} {ceil['time_label']['covered']:>4d}/{ceil['time_label']['cases']:<5d} "
-              f"{ceil['event_label']['covered']:>4d}/{ceil['event_label']['cases']:<5d} "
-              f"{pre['time_label']['covered']:>5d}/{pre['event_label']['covered']:<6d} "
+        print(f"{name:16s} {ceil['event_label']['covered']:>4d}/{ceil['event_label']['cases']:<5d} "
+              f"{ceil['time_label']['covered']:>4d}/{ceil['time_label']['cases']:<5d} "
+              f"{pre['event_label']['covered']:>5d}/{pre['time_label']['covered']:<6d} "
               f"{_fmt(mean['attack']):>9s} {_fmt(mean['benign']):>9s} "
               f"{trunc['cases_truncated']:>6d} {trunc['alerts_dropped']:>8d} "
               f"{trunc['cases_cap_dropped_event_attack']:>6d}/{trunc['cases_cap_dropped_time_attack']:<6d} "
@@ -297,23 +317,16 @@ def _cases(args: argparse.Namespace) -> int:
     noise_rows = [(n, s["noise"]) for n, s in report["variants"].items() if s["noise"] is not None]
     for name, noise in noise_rows:
         print(f"  {name}: {noise['reference_count']} alerts matched, {noise['from_window']} from the "
-              f"same window, {noise['from_fallback']} from the scenario pool, "
-              f"{noise['shortfall']} short")
+              f"same window, {noise['from_fallback']} nearest outside it (max "
+              f"{noise['fallback_max_distance_seconds']:.0f} s away), {noise['shortfall']} short")
     b = report["baseline_config"]
+    frozen = " (frozen)" if b.get("detector_order_frozen") else ""
     print(f"\nDEV-SCENARIO BASELINES - deterministic non-LLM citers, not agent results "
-          f"(top_k {b['top_k']}, detector order {', '.join(b['detector_order'])})")
-    print("cov = phases covered (time / event_label) over all phases | over reachable phases; "
-          "prec = citation precision (event_label / time); unsup = unsupported-claim rate")
-    print(f"{'variant':16s} {'baseline':26s} {'cov t all':>9s} {'cov e all':>9s} {'cov t rch':>9s} "
-          f"{'cov e rch':>9s} {'prec e':>7s} {'prec t':>7s} {'unsup':>7s} {'cited':>6s} {'per case':>9s}")
+          f"(top_k {b['top_k']}, detector order {', '.join(b['detector_order'])}{frozen})")
+    print_score_header()
     for variant, rows in report["baselines"].items():
         for name, r in rows.items():
-            cov, prec = r["coverage"], r["citation_precision"]
-            print(f"{variant:16s} {name:26s} {_frac(cov['time_label']['all']):>9s} "
-                  f"{_frac(cov['event_label']['all']):>9s} {_frac(cov['time_label']['reachable']):>9s} "
-                  f"{_frac(cov['event_label']['reachable']):>9s} {_fmt(prec['event_label']):>7s} "
-                  f"{_fmt(prec['time_label']):>7s} {_fmt(r['unsupported_claim_rate']):>7s} "
-                  f"{r['alerts_cited']['total']:>6d} {_fmt(r['alerts_cited']['mean_per_case']):>9s}")
+            print_score_row(variant, name, r)
     if not args.no_output:
         print(f"Wrote {report['scenario']}.cases.json and {report['scenario']}.case_ceilings.json to "
               f"{Path(args.output_dir) / report['scenario']}")

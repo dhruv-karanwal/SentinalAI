@@ -27,10 +27,14 @@ Every truncation is recorded: the rule, alerts dropped, and how many of
 those were attack-labelled by event_label and by time_label.
 
 Noise controls (``noise-<det>``) are rebuilt per case: as many alerts as
-``<det>`` has in the window (before the cap), drawn from event-benign
-alerts of the same window first, then from the scenario pool's other
-event-benign alerts (which then lie outside the window), with the split
-recorded. The cap then applies as for any variant.
+``<det>`` has in the window (before the cap), drawn at random (seeded) from
+event-benign alerts of the same window first; any shortfall is filled with
+the event-benign pool alerts *nearest in time* outside the window (distance
+to the nearer window edge, ties by time then source line; M5 Part A
+decision, replacing M4b's uniform scenario-pool draw), with the split and
+the largest fallback distance recorded. The cap then applies as for any
+variant. Agents never see absolute timestamps (app.agent.tools), so a
+fallback alert is not recognisable by its date alone.
 
 Ceilings: scoring a case as if the agent cited *every* alert it was given
 gives the best coverage any agent could reach from that alert source.
@@ -53,9 +57,16 @@ from typing import Any
 
 from app.evaluation.case_scoring import CaseScore, alert_claim_index, alert_quote_index, score_case
 from app.ingestion.ground_truth import AttackTimeline
-from app.study.baselines import BASELINE_NAMES, baseline_citations, baseline_claims
+from app.study.baselines import baseline_citations, baseline_claims, baseline_rows
 from app.study.config import TRUNCATION_CHOICES, BaselineConfig, CaseConfig, StudyConfig
 from app.study.variants import AlertPool, PoolEntry, Variant, derive_seed, experiment_variants
+
+
+# M5 Part A decisions (docs/research-methodology.md).
+NOISE_FALLBACK_RULE = ("shortfall filled with the event-benign pool alerts nearest in time outside "
+                       "the window (distance to the nearer window edge; ties by time, source_file, "
+                       "source_line)")
+HEADLINE = {"coverage": "event_label, alert-reachable phases", "sensitivity": "time_label"}
 
 
 class CaseKind(StrEnum):
@@ -182,7 +193,7 @@ class CaseAlerts:
     in_phase_before_cap: int
     in_phase_event_attack_before_cap: int
     truncation_rule: str
-    noise: dict[str, int] | None = None
+    noise: dict[str, float] | None = None
 
 
 def in_phase(case: Case, entry: PoolEntry) -> bool:
@@ -215,7 +226,7 @@ def _truncate(window: Sequence[PoolEntry], max_alerts: int,
 
 
 def _view(case: Case, name: str, window: Sequence[PoolEntry], max_alerts: int, truncation: str,
-          noise: dict[str, int] | None = None) -> CaseAlerts:
+          noise: dict[str, float] | None = None) -> CaseAlerts:
     kept, dropped, rule = _truncate(window, max_alerts, truncation)
     return CaseAlerts(
         case_id=case.case_id,
@@ -244,10 +255,13 @@ def case_alerts(case: Case, variant: Variant, *, max_alerts: int, truncation: st
 
 def noise_case_alerts(case: Case, benign: Sequence[PoolEntry], count: int, *, seed: int, name: str,
                       max_alerts: int, truncation: str) -> CaseAlerts:
-    """``count`` event-benign alerts for a case: same window first, scenario pool as fallback.
+    """``count`` event-benign alerts for a case: same window first, nearest outside as fallback.
 
-    ``benign`` is the pool's event-benign alerts in time order. The split
-    (from_window / from_fallback / shortfall) is recorded on the view.
+    ``benign`` is the pool's event-benign alerts in time order. Inside the
+    window the draw is seeded and uniform; the fallback takes the alerts
+    nearest the window (module docstring). The split (from_window /
+    from_fallback / shortfall) and the largest fallback distance in seconds
+    are recorded on the view.
     """
     lo, hi = _window(benign, case)
     inside, outside = list(benign[lo:hi]), list(benign[:lo]) + list(benign[hi:])
@@ -255,10 +269,19 @@ def noise_case_alerts(case: Case, benign: Sequence[PoolEntry], count: int, *, se
     from_window = min(count, len(inside))
     chosen = [inside[i] for i in rng.sample(range(len(inside)), from_window)]
     from_fallback = min(count - from_window, len(outside))
-    chosen += [outside[i] for i in rng.sample(range(len(outside)), from_fallback)]
+
+    def distance(entry: PoolEntry) -> float:
+        if entry.timestamp < case.window_start:
+            return (case.window_start - entry.timestamp).total_seconds()
+        return (entry.timestamp - case.window_end).total_seconds()
+
+    nearest = sorted(outside, key=lambda e: (distance(e), *_time_key(e)))[:from_fallback]
+    chosen += nearest
     chosen.sort(key=_time_key)
-    record = {"reference_count": count, "from_window": from_window, "from_fallback": from_fallback,
-              "shortfall": count - from_window - from_fallback}
+    record: dict[str, float] = {
+        "reference_count": count, "from_window": from_window, "from_fallback": from_fallback,
+        "shortfall": count - from_window - from_fallback,
+        "fallback_max_distance_seconds": max((distance(e) for e in nearest), default=0.0)}
     return _view(case, name, chosen, max_alerts, truncation, noise=record)
 
 
@@ -306,10 +329,14 @@ def _summary(cases: tuple[Case, ...], views: list[CaseAlerts], scores: list[Case
     kinds = [c.kind for c in cases]
     attack = [i for i, k in enumerate(kinds) if k is CaseKind.ATTACK]
     benign = [i for i, k in enumerate(kinds) if k is CaseKind.BENIGN]
-    noise = None
+    noise: dict[str, Any] | None = None
     if views and views[0].noise is not None:
-        noise = {key: sum(v.noise[key] for v in views if v.noise is not None)
+        noise = {key: int(sum(v.noise[key] for v in views if v.noise is not None))
                  for key in ("reference_count", "from_window", "from_fallback", "shortfall")}
+        noise["fallback_max_distance_seconds"] = max(
+            (v.noise["fallback_max_distance_seconds"] for v in views if v.noise is not None),
+            default=0.0)
+        noise["fallback_rule"] = NOISE_FALLBACK_RULE
     return {
         "attack_cases": len(attack),
         "benign_cases": len(benign),
@@ -345,17 +372,15 @@ def _summary(cases: tuple[Case, ...], views: list[CaseAlerts], scores: list[Case
 
 
 def _baseline_summaries(case_set: CaseSet, views: list[CaseAlerts], pool: AlertPool,
-                        config: BaselineConfig, reachable: tuple[str, ...]) -> dict[str, Any]:
+                        config: BaselineConfig, reachable: Sequence[str],
+                        matched: int | None = None) -> dict[str, Any]:
     cases = case_set.cases
-    attack = [i for i, c in enumerate(cases) if c.kind is CaseKind.ATTACK]
-    benign = [i for i, c in enumerate(cases) if c.kind is CaseKind.BENIGN]
-    reach = [i for i in attack if cases[i].phase in reachable]
     flat: dict[str, dict[str, str]] = {}
     summaries: dict[str, Any] = {}
-    for name in BASELINE_NAMES:
+    for row in baseline_rows(config, matched=matched):
         scores = []
         for case, view in zip(cases, views):
-            cited = baseline_citations(name, view, config)
+            cited = baseline_citations(row.base, view, config, k=row.k)
             wanted = set(cited)
             alerts = [pool.alert(e) for e in view.entries if e.alert_id in wanted]
             for alert in alerts:
@@ -365,37 +390,51 @@ def _baseline_summaries(case_set: CaseSet, views: list[CaseAlerts], pool: AlertP
                 case, view, cited, claims=baseline_claims(alerts, quote_chars=config.quote_chars),
                 claim_index={a.alert_id: flat[a.alert_id] for a in alerts},
                 quote_index=alert_quote_index(alerts)))
-        cited_total = sum(s.cited for s in scores)
-        claims = sum(s.claims for s in scores)
-        summaries[name] = {
-            "coverage": {
-                "time_label": {
-                    "all": _rate(sum(scores[i].coverage_time == 1.0 for i in attack), len(attack)),
-                    "reachable": _rate(sum(scores[i].coverage_time == 1.0 for i in reach), len(reach)),
-                },
-                "event_label": {
-                    "all": _rate(sum(scores[i].coverage_event == 1.0 for i in attack), len(attack)),
-                    "reachable": _rate(sum(scores[i].coverage_event == 1.0 for i in reach), len(reach)),
-                },
-            },
-            "citation_precision": {
-                "event_label": (sum(s.cited_event_attack for s in scores) / cited_total
-                                if cited_total else None),
-                "time_label": sum(s.cited_in_phase for s in scores) / cited_total if cited_total else None,
-                "cited": cited_total,
-                "event_attack": sum(s.cited_event_attack for s in scores),
-                "in_phase": sum(s.cited_in_phase for s in scores),
-            },
-            "unsupported_claim_rate": sum(s.unsupported_claims for s in scores) / claims if claims else None,
-            "claims": claims,
-            "alerts_cited": {
-                "total": cited_total,
-                "mean_per_case": _mean([s.cited for s in scores]),
-                "mean_per_attack_case": _mean([scores[i].cited for i in attack]),
-                "mean_per_benign_case": _mean([scores[i].cited for i in benign]),
-            },
-        }
+        summaries[row.name] = {"base": row.base, "k": row.k,
+                               **summarize_scores(cases, scores, reachable)}
     return summaries
+
+
+def summarize_scores(cases: Sequence[Case], scores: Sequence[CaseScore],
+                     reachable: Sequence[str]) -> dict[str, Any]:
+    """Coverage, citation precision, claims and citation volume over a run of case scores.
+
+    Shared by baselines and agent runs, so both appear in the same table.
+    Headline coverage is ``event_label`` on the reachable phases.
+    """
+    attack = [i for i, c in enumerate(cases) if c.kind is CaseKind.ATTACK]
+    benign = [i for i, c in enumerate(cases) if c.kind is CaseKind.BENIGN]
+    reach = [i for i in attack if cases[i].phase in reachable]
+    cited_total = sum(s.cited for s in scores)
+    claims = sum(s.claims for s in scores)
+    return {
+        "coverage": {  # headline first: event_label on reachable phases
+            "event_label": {
+                "reachable": _rate(sum(scores[i].coverage_event == 1.0 for i in reach), len(reach)),
+                "all": _rate(sum(scores[i].coverage_event == 1.0 for i in attack), len(attack)),
+            },
+            "time_label": {
+                "reachable": _rate(sum(scores[i].coverage_time == 1.0 for i in reach), len(reach)),
+                "all": _rate(sum(scores[i].coverage_time == 1.0 for i in attack), len(attack)),
+            },
+        },
+        "citation_precision": {
+            "event_label": (sum(s.cited_event_attack for s in scores) / cited_total
+                            if cited_total else None),
+            "time_label": sum(s.cited_in_phase for s in scores) / cited_total if cited_total else None,
+            "cited": cited_total,
+            "event_attack": sum(s.cited_event_attack for s in scores),
+            "in_phase": sum(s.cited_in_phase for s in scores),
+        },
+        "unsupported_claim_rate": sum(s.unsupported_claims for s in scores) / claims if claims else None,
+        "claims": claims,
+        "alerts_cited": {
+            "total": cited_total,
+            "mean_per_case": _mean([s.cited for s in scores]),
+            "mean_per_attack_case": _mean([scores[i].cited for i in attack]),
+            "mean_per_benign_case": _mean([scores[i].cited for i in benign]),
+        },
+    }
 
 
 def _dump(path: Path, data: Any) -> None:
@@ -462,7 +501,9 @@ def dev_case_report(processed_dir: str | Path, labels_path: str | Path, scenario
                  "= deterministic non-LLM citers; not agent results"),
         "study_config": config.source,
         "case_config": case_config,
-        "baseline_config": {"top_k": b.top_k, "detector_order": list(b.detector_order),
+        "headline": dict(HEADLINE),
+        "baseline_config": {"top_k": list(b.top_k), "detector_order": list(b.detector_order),
+                            "detector_order_frozen": b.detector_order_frozen,
                             "quote_chars": b.quote_chars},
         "cases": {"attack": sum(c.kind is CaseKind.ATTACK for c in case_set.cases),
                   "benign": sum(c.kind is CaseKind.BENIGN for c in case_set.cases)},

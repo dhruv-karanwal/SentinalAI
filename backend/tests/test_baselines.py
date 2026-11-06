@@ -11,14 +11,20 @@ import pytest
 from app.evaluation.metrics import unsupported_claim_rate
 from app.evaluation.case_scoring import alert_claim_index, alert_quote_index
 from app.ingestion.ground_truth import AttackTimeline
-from app.study.baselines import BASELINE_NAMES, baseline_citations, baseline_claims
+from app.study.baselines import (
+    BASELINE_NAMES,
+    baseline_citations,
+    baseline_claims,
+    baseline_rows,
+    matched_k,
+)
 from app.study.cases import build_cases, case_alerts
 from app.study.config import BaselineConfig, CaseConfig
 from app.study.variants import AlertPool, build_variants
 from tests.test_variants import S2, S4, W5, aminer_id, pool, processed  # noqa: F401  (fixtures)
 
 CASES = CaseConfig(seed=7, padding_seconds=0, max_alerts=100, truncation="spread", benign_per_attack=1)
-TOP1 = BaselineConfig(top_k=1, detector_order=("aminer", "wazuh", "suricata"), quote_chars=60)
+TOP1 = BaselineConfig(top_k=(1,), detector_order=("aminer", "wazuh", "suricata"), quote_chars=60)
 
 
 def views(pool: AlertPool, samples_dir: Path) -> dict[str, object]:  # noqa: F811
@@ -45,7 +51,7 @@ def test_baseline_rules(pool: AlertPool, samples_dir: Path) -> None:  # noqa: F8
     assert cite("cite-top-k-detector-order", scans) == [W5]
     assert cite("cite-aminer-only", dirb) == [a2]
     assert cite("cite-aminer-only", scans) == []
-    wide = BaselineConfig(top_k=10, detector_order=("suricata", "wazuh", "aminer"), quote_chars=60)
+    wide = BaselineConfig(top_k=(10,), detector_order=("suricata", "wazuh", "aminer"), quote_chars=60)
     assert baseline_citations("cite-top-k-detector-order", dirb, wide) == [S2, S4, a2]  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="baseline"):
         cite("cite-everything", dirb)
@@ -69,3 +75,27 @@ def test_baseline_claims_are_supported_by_the_records(pool: AlertPool, samples_d
         bool(a.evidence.log_lines) and len(a.evidence.log_lines[0]) >= 8 for a in alerts)
     rate = unsupported_claim_rate(claims, alert_claim_index(alerts), quote_index=alert_quote_index(alerts))
     assert rate == 0.0
+
+
+def test_k_override_and_rows(pool: AlertPool, samples_dir: Path) -> None:  # noqa: F811
+    dirb = views(pool, samples_dir)["synthetic:attack:dirb"]
+    a2 = aminer_id(pool)
+    # Default k is the first configured value; an explicit k overrides it.
+    assert baseline_citations("cite-top-k-detector-order", dirb, TOP1) == [a2]  # type: ignore[arg-type]
+    assert baseline_citations("cite-top-k-detector-order", dirb, TOP1, k=2) == [a2, S2]  # type: ignore[arg-type]
+    two = BaselineConfig(top_k=(5, 10), detector_order=("aminer", "wazuh", "suricata"), quote_chars=60)
+    rows = baseline_rows(two)
+    assert [r.name for r in rows] == [
+        "cite-all", "cite-none", "cite-top-k-wazuh-level@k5", "cite-top-k-wazuh-level@k10",
+        "cite-top-k-detector-order@k5", "cite-top-k-detector-order@k10", "cite-aminer-only"]
+    matched = baseline_rows(two, matched=3)
+    assert [r.name for r in matched if r.k == 3] == [
+        "cite-top-k-wazuh-level@k3-matched", "cite-top-k-detector-order@k3-matched"]
+    assert all(r.base in BASELINE_NAMES for r in matched)
+
+
+def test_matched_k_rounds_half_up_and_is_at_least_one() -> None:
+    assert matched_k(0.0) == 1
+    assert matched_k(2.49) == 2
+    assert matched_k(2.5) == 3
+    assert matched_k(7.0) == 7
