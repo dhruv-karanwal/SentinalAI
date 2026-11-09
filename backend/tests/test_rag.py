@@ -159,3 +159,54 @@ def test_search_attack_tool_errors_empty_and_no_echo(retriever: AttackRetriever,
     texts = {c.text for c in attack_chunks(kb)}
     for t in json.loads(out)["techniques"]:
         assert any(t["excerpt"] in full for full in texts)  # only KB content
+
+
+# ---------------------------------------------------------------- C1 fix: hybrid retrieval
+
+
+def test_bm25_tokenizer_and_scores() -> None:
+    from app.rag.lexical import Bm25Index, tokenize
+    assert tokenize("The SSH brute-force of T1110.001!") == ["ssh", "brute", "force", "t1110", "001"]
+    idx = Bm25Index({"a": "ssh brute force password", "b": "web shell upload", "c": "ssh login"})
+    s = idx.scores("ssh brute force")
+    assert set(s) == {"a", "c"}  # documents with no query term get no score
+    assert s["a"] > s["c"] > 0
+    assert idx.scores("the of") == {}  # stopwords only
+    assert idx.scores("ssh brute force") == s  # deterministic
+
+
+def test_hybrid_mode_validates_and_blends(kb: AttackKB) -> None:
+    from app.rag.retriever import DEFAULT_ALPHA, MODES
+    assert MODES == ("dense", "lexical", "hybrid") and DEFAULT_ALPHA == 0.5
+    with pytest.raises(ValueError):
+        AttackRetriever(SqliteVectorStore(), HashEmbedder(), mode="bm25")
+    with pytest.raises(ValueError):
+        AttackRetriever(SqliteVectorStore(), HashEmbedder(), mode="hybrid", alpha=1.5)
+    store = SqliteVectorStore()
+    dense = AttackRetriever(store, HashEmbedder())
+    dense.index(kb)
+    for mode in MODES:
+        r = AttackRetriever(store, HashEmbedder(), mode=mode, kb=kb)
+        got = r.search("password guessing brute force", 3)
+        ids = [g["technique_id"] for g in got]
+        assert ids and len(ids) == len(set(ids))
+        assert all(0.0 <= g["score"] <= 1.0 for g in got) or mode == "dense"
+        assert got == r.search("password guessing brute force", 3)
+        assert r.search("  ", 3) == []
+    with pytest.raises(ValueError):
+        AttackRetriever(store, HashEmbedder(), mode="hybrid")  # lexical modes need the KB
+
+
+def test_hybrid_is_the_convex_blend_of_normalized_scores(kb: AttackKB) -> None:
+    store = SqliteVectorStore()
+    AttackRetriever(store, HashEmbedder()).index(kb)
+    q = "password guessing brute force"
+    one = {g["technique_id"]: g for g in AttackRetriever(store, HashEmbedder(), mode="hybrid", kb=kb,
+                                                         alpha=1.0).search(q, 3)}
+    dense = [g["technique_id"] for g in AttackRetriever(store, HashEmbedder()).search(q, 3)]
+    assert list(one) == dense  # alpha = 1 is the dense ranking
+    lex = [g["technique_id"] for g in AttackRetriever(store, HashEmbedder(), mode="lexical",
+                                                      kb=kb).search(q, 3)]
+    zero = [g["technique_id"] for g in AttackRetriever(store, HashEmbedder(), mode="hybrid", kb=kb,
+                                                       alpha=0.0).search(q, 3)]
+    assert zero[:len(lex)] == lex  # alpha = 0 ranks like lexical

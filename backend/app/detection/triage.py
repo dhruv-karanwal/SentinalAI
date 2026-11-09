@@ -21,6 +21,18 @@ Pipeline
    entity together while letting a quiet period of five minutes split
    activity. It is a parameter (``TriageConfig.gap_seconds``, CLI
    ``--gap-seconds``, API ``gap_seconds``); report it with every number.
+   The gap applies per entity; ``TriageConfig.entity_gap_seconds`` can set
+   a different gap per entity kind (``host``, ``ip``), default none.
+3b. **Span cap (B3 fix, 2026-11-10):** a component whose alerts span more
+   than ``max_span_seconds`` is cut, in time order, into consecutive
+   segments that each span at most the cap (a segment starts at its first
+   alert; the next alert past ``start + cap`` opens the next segment). Each
+   segment is an incident; ``detail.chain_id`` names the unsplit component
+   and ``detail.segment`` = [k, n], so no link is lost. **Default: 3600 s**,
+   fixed before looking at results and not tuned on labels: one hour is
+   about the longest stretch an analyst reads as one incident, and without a
+   cap one busy host chained 11,208 alerts (russellmitchell) into a single
+   incident. ``None`` disables the cap (the B3 behaviour).
 4. **Severity** from the first matching row of :data:`SEVERITY_TABLE`.
    Inputs only: detector level class, ATT&CK mapping (B1 ``map_alert``),
    IOC match (``IocStore``; empty unless a local indicator file is given,
@@ -47,8 +59,9 @@ priority 1 is its highest. These classes exist only inside triage;
 from __future__ import annotations
 
 import hashlib
+from datetime import datetime
 from collections import Counter
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -59,6 +72,8 @@ from app.schemas.alert import DEFAULT_EVALUATION_SELECTION, Alert, AlertSelectio
 from app.storage.repository import Repository
 
 DEFAULT_GAP_SECONDS = 300
+DEFAULT_MAX_SPAN_SECONDS = 3600
+ENTITY_KINDS = ("host", "ip")
 LEVEL_ORDER = ("none", "low", "medium", "high")
 
 
@@ -66,10 +81,19 @@ LEVEL_ORDER = ("none", "low", "medium", "high")
 class TriageConfig:
     gap_seconds: int = DEFAULT_GAP_SECONDS
     selection: AlertSelection = field(default=DEFAULT_EVALUATION_SELECTION)
+    max_span_seconds: int | None = DEFAULT_MAX_SPAN_SECONDS
+    entity_gap_seconds: Mapping[str, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.gap_seconds < 1:
             raise ValueError("gap_seconds must be >= 1")
+        if self.max_span_seconds is not None and self.max_span_seconds < 1:
+            raise ValueError("max_span_seconds must be >= 1 (or None for no cap)")
+        for kind, gap in self.entity_gap_seconds.items():
+            if kind not in ENTITY_KINDS:
+                raise ValueError(f"unknown entity kind {kind!r}; known: {', '.join(ENTITY_KINDS)}")
+            if gap < 1:
+                raise ValueError("entity gaps must be >= 1")
 
 
 def level_class(alert: Alert) -> str:
@@ -111,7 +135,9 @@ def _time_key(alert: Alert) -> tuple[Any, ...]:
     return (alert.timestamp, alert.source_file, alert.source_line, alert.alert_id)
 
 
-def group_alerts(alerts: Iterable[Alert], gap_seconds: int) -> list[list[Alert]]:
+def group_alerts(alerts: Iterable[Alert], gap_seconds: int,
+                 entity_gaps: Mapping[str, int] | None = None) -> list[list[Alert]]:
+    entity_gaps = entity_gaps or {}
     items = sorted(alerts, key=_time_key)
     parent = list(range(len(items)))
 
@@ -125,10 +151,11 @@ def group_alerts(alerts: Iterable[Alert], gap_seconds: int) -> list[list[Alert]]
     for i, a in enumerate(items):
         for e in entities(a):
             by_entity.setdefault(e, []).append(i)
-    for idx in by_entity.values():  # already time-ordered
+    for entity, idx in by_entity.items():  # already time-ordered
+        limit = entity_gaps.get(entity.split(":", 1)[0], gap_seconds)
         for prev, cur in zip(idx, idx[1:]):
             gap = (items[cur].timestamp - items[prev].timestamp).total_seconds()
-            if gap <= gap_seconds:
+            if gap <= limit:
                 ra, rb = find(prev), find(cur)
                 if ra != rb:
                     parent[max(ra, rb)] = min(ra, rb)
@@ -136,6 +163,19 @@ def group_alerts(alerts: Iterable[Alert], gap_seconds: int) -> list[list[Alert]]
     for i, a in enumerate(items):
         comps.setdefault(find(i), []).append(a)
     return [comps[k] for k in sorted(comps)]
+
+
+def split_by_span(members: list[Alert], max_span_seconds: int | None) -> list[list[Alert]]:
+    """Cut time-ordered members into segments spanning at most the cap (inclusive)."""
+    if max_span_seconds is None or not members:
+        return [members]
+    segments: list[list[Alert]] = [[members[0]]]
+    for a in members[1:]:
+        if (a.timestamp - segments[-1][0].timestamp).total_seconds() > max_span_seconds:
+            segments.append([a])
+        else:
+            segments[-1].append(a)
+    return segments
 
 
 @dataclass(frozen=True)
@@ -205,7 +245,12 @@ def build_incidents(alerts: Iterable[Alert], scenario: str, config: TriageConfig
         else:
             excluded += 1
     out = []
-    for members in group_alerts(kept, config.gap_seconds):
+    segmented: list[tuple[str, int, int, list[Alert]]] = []
+    for component in group_alerts(kept, config.gap_seconds, config.entity_gap_seconds):
+        chain = incident_id(scenario, (a.alert_id for a in component)).replace("inc-", "chain-", 1)
+        parts = split_by_span(component, config.max_span_seconds)
+        segmented.extend((chain, k + 1, len(parts), part) for k, part in enumerate(parts))
+    for chain, k, n, members in segmented:
         feats = incident_features(members, iocs)
         sev, row = severity(feats)
         ids = [a.alert_id for a in members]
@@ -215,6 +260,9 @@ def build_incidents(alerts: Iterable[Alert], scenario: str, config: TriageConfig
             "severity": sev, "alert_ids": ids,
             "detail": {
                 "severity_row": row, "features": asdict(feats), "gap_seconds": config.gap_seconds,
+                "max_span_seconds": config.max_span_seconds,
+                "entity_gap_seconds": dict(config.entity_gap_seconds),
+                "chain_id": chain, "segment": [k, n],
                 "detectors": dict(sorted(Counter(a.detector.value for a in members).items())),
                 "entities": sorted({e for a in members for e in entities(a)}),
                 "excluded_by_selection": excluded,
@@ -224,6 +272,13 @@ def build_incidents(alerts: Iterable[Alert], scenario: str, config: TriageConfig
             },
         })
     return out
+
+
+def _describe(inc: dict[str, Any]) -> dict[str, Any]:
+    span = (datetime.fromisoformat(inc["last_ts"]) - datetime.fromisoformat(inc["first_ts"])).total_seconds()
+    return {"incident_id": inc["incident_id"], "size": len(inc["alert_ids"]), "span_seconds": span,
+            "first_ts": inc["first_ts"], "last_ts": inc["last_ts"], "severity": inc["severity"],
+            "detectors": inc["detail"]["detectors"], "entities": inc["detail"]["entities"]}
 
 
 def summarize(incidents: list[dict[str, Any]]) -> dict[str, Any]:
@@ -241,6 +296,10 @@ def summarize(incidents: list[dict[str, Any]]) -> dict[str, Any]:
         "severity": dict(sorted(Counter(i["severity"] for i in incidents).items())),
         "severity_rows": dict(sorted(Counter(i["detail"]["severity_row"] for i in incidents).items())),
         "cross_detector": sum(1 for i in incidents if i["detail"]["features"]["detectors"] >= 2),
+        "largest_incident": _describe(max(incidents, key=lambda i: (len(i["alert_ids"]), i["incident_id"])))
+        if incidents else None,
+        "chains_split": len({i["detail"].get("chain_id") for i in incidents
+                             if i["detail"].get("segment", [1, 1])[1] > 1}),
     }
 
 
@@ -258,6 +317,7 @@ def build_and_store(repo: Repository, scenario: str, config: TriageConfig,
             repo.put_incident(inc)
     summary = summarize(incidents)
     summary.update({"scenario": scenario, "gap_seconds": config.gap_seconds,
+                    "max_span_seconds": config.max_span_seconds,
                     "stored_alerts_read": len(stored), "extra_alerts": len(extra),
                     "excluded_by_selection": len(stored) + len(extra) - summary["alerts"]})
     return summary

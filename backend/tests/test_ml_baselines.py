@@ -92,11 +92,72 @@ def test_encoder_fits_on_train_and_maps_unseen_to_unknown() -> None:
     assert x.shape == (2, len(fx.FEATURE_NAMES))
 
 
-def test_time_split_is_by_timeline_fraction() -> None:
-    alerts = [mk(str(i), s) for i, s in enumerate([0, 10, 20, 59, 60, 61, 100])]
-    train, test = ml.time_split(alerts, 0.6)
-    assert [a.alert_id for a in train] == ["0", "1", "2", "3"]  # t < 60 (60% of 0..100)
-    assert [a.alert_id for a in test] == ["4", "5", "6"]
+def test_time_split_is_gone() -> None:
+    # replaced by leave-one-phase-out (the 60/40 timeline split had no attacks in training)
+    assert not hasattr(ml, "time_split") and not hasattr(ml, "TRAIN_FRACTION")
+
+
+def test_lopo_folds_hold_out_one_phase_each() -> None:
+    alerts = [mk(str(i), i) for i in range(9)]
+    phases = {"0": "scan", "1": "scan", "3": "dirb", "4": "dirb", "5": "dirb", "8": "exfil"}
+    labels = {a.alert_id: TruthLabels(a.alert_id in phases, a.alert_id in phases,
+                                      phases.get(a.alert_id)) for a in alerts}
+    folds = ml.lopo_folds(alerts, labels)
+    assert [f[0] for f in folds] == ["scan", "dirb", "exfil"]  # first-seen time order
+    for phase, train, test in folds:
+        assert {a.alert_id for a in test} == {k for k, v in phases.items() if v == phase}
+        assert not {a.alert_id for a in train} & {a.alert_id for a in test}
+        assert len(train) + len(test) == len(alerts)
+    # alerts outside every phase are never a test alert
+    tested = {a.alert_id for _, _, t in folds for a in t}
+    assert tested == set(phases)
+
+
+def phased_alerts() -> tuple[list[Alert], dict[str, TruthLabels]]:
+    alerts, labels = [], {}
+    for i in range(160):
+        phase = ("p1", "p2", "p3", "p4")[i // 40]
+        hot = i % 4 == 0
+        a = mk(f"a{i}", i * 7, rule="31101" if hot else "5501", severity=10 if hot else 3,
+               host="10.0.0.5" if hot else "10.0.0.6", lines=["x" * (200 if hot else 20)])
+        alerts.append(a)
+        labels[a.alert_id] = TruthLabels(hot, hot, phase if i % 2 == 0 else None)
+    return alerts, labels
+
+
+def test_lopo_scores_pool_predictions_and_report_per_phase() -> None:
+    alerts, labels = phased_alerts()
+    res = ml.lopo_scores(alerts, labels, seed=7)
+    assert [p["phase"] for p in res["per_phase"]] == ["p1", "p2", "p3", "p4"]
+    hgb = res["pooled"]["hist_gradient_boosting"]["event_label"]
+    tested = sum(1 for a in alerts if labels[a.alert_id].phase is not None)
+    assert hgb["tp"] + hgb["fp"] + hgb["fn"] + hgb["tn"] == tested
+    assert res["pooled"] == ml.lopo_scores(alerts, labels, seed=7)["pooled"]  # deterministic
+    for ph in res["per_phase"]:
+        assert {"n_test", "event_attack", "models"} <= set(ph)
+
+
+def test_ablation_drops_detector_and_rule_id() -> None:
+    assert ml.ABLATION_DROPPED == ("detector", "rule_id")
+    assert ml.FEATURE_SETS["all"] == EXPECTED_FEATURES
+    assert ml.FEATURE_SETS["no_detector_rule_id"] == tuple(
+        f for f in EXPECTED_FEATURES if f not in ("detector", "rule_id"))
+    alerts, attack = synthetic_alerts()
+    labels = labels_for(alerts, attack)
+    res = ml.fit_and_score(alerts[:72], alerts[72:], labels, seed=7,
+                           features=ml.FEATURE_SETS["no_detector_rule_id"])
+    assert res["features"] == list(ml.FEATURE_SETS["no_detector_rule_id"])
+    assert "detector" not in res["test_rows_with_unseen_category"]
+
+
+def test_permutation_importances_cover_every_used_feature() -> None:
+    alerts, attack = synthetic_alerts()
+    labels = labels_for(alerts, attack)
+    res = ml.fit_and_score(alerts[:72], alerts[72:], labels, seed=7, importances=True)
+    imp = res["models"]["hist_gradient_boosting"]["permutation_importance"]
+    assert {r["feature"] for r in imp} == set(EXPECTED_FEATURES)
+    assert imp == sorted(imp, key=lambda r: (-r["mean"], r["feature"]))
+    assert res == ml.fit_and_score(alerts[:72], alerts[72:], labels, seed=7, importances=True)
 
 
 def labels_for(alerts: list[Alert], attack: set[str]) -> dict[str, TruthLabels]:
@@ -118,7 +179,7 @@ def synthetic_alerts() -> tuple[list[Alert], set[str]]:
 def test_models_are_seeded_and_scored_by_both_labels() -> None:
     alerts, attack = synthetic_alerts()
     labels = labels_for(alerts, attack)
-    train, test = ml.time_split(alerts, 0.6)
+    train, test = alerts[:72], alerts[72:]
     first = ml.fit_and_score(train, test, labels, seed=7)
     again = ml.fit_and_score(train, test, labels, seed=7)
     assert first == again
@@ -136,7 +197,7 @@ def test_unavailable_event_labels_are_left_out_of_training_and_event_scoring() -
     labels = labels_for(alerts, attack)
     gone = alerts[1].alert_id
     labels[gone] = TruthLabels(None, False)
-    train, test = ml.time_split(alerts, 0.6)
+    train, test = alerts[:72], alerts[72:]
     res = ml.fit_and_score(train, test, labels, seed=7)
     assert res["class_balance"]["train"]["event_label"]["unavailable"] == 1
     assert res["class_balance"]["train"]["n"] == len(train)
@@ -145,7 +206,7 @@ def test_unavailable_event_labels_are_left_out_of_training_and_event_scoring() -
 def test_single_class_training_is_reported_not_raised() -> None:
     alerts, _ = synthetic_alerts()
     labels = labels_for(alerts, set())
-    train, test = ml.time_split(alerts, 0.6)
+    train, test = alerts[:72], alerts[72:]
     res = ml.fit_and_score(train, test, labels, seed=7)
     assert res["models"]["hist_gradient_boosting"] == {
         "skipped": "training split has a single event_label class"}

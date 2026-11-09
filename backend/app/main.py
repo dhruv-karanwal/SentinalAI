@@ -198,6 +198,9 @@ def build_parser() -> argparse.ArgumentParser:
     tri.add_argument("--scenario", required=True, help="a dev scenario (held-out ones are refused)")
     tri.add_argument("--gap-seconds", type=_positive_int, default=300,
                      help="max gap between linked alerts on one entity (default: 300)")
+    tri.add_argument("--max-span-seconds", type=_positive_int, default=3600,
+                     help="cut incidents spanning longer than this into segments (default: 3600)")
+    tri.add_argument("--no-span-cap", action="store_true", help="disable the span cap (B3 behaviour)")
     tri.add_argument("--include-sigma", action="store_true",
                      help="add <scenario>.sigma.alerts.jsonl from --sigma-dir (written by `sigma`)")
     tri.add_argument("--sigma-dir", type=Path, default=DEFAULT_OUTPUT_DIR / "sigma")
@@ -213,8 +216,6 @@ def build_parser() -> argparse.ArgumentParser:
                                               "baselines on dev scenarios")
     mlb.add_argument("--scenarios", nargs="+", default=["russellmitchell", "shaw"],
                      help="dev scenarios (held-out ones are refused)")
-    mlb.add_argument("--train-fraction", type=float, default=0.6,
-                     help="time split: share of the timeline that trains (default 0.6)")
     mlb.add_argument("--processed-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     mlb.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR / "ml")
     mlb.add_argument("--study-config", type=Path, default=DEFAULT_STUDY_CONFIG)
@@ -581,7 +582,8 @@ def _triage(args: argparse.Namespace) -> int:
             extra = list(iter_alert_file(args.sigma_dir / f"{args.scenario}.sigma.alerts.jsonl"))
         iocs = IocStore.load(args.ioc_file) if args.ioc_file else None
         t0 = time.perf_counter()
-        summary = build_and_store(stores.repo, args.scenario, TriageConfig(args.gap_seconds),
+        summary = build_and_store(stores.repo, args.scenario, TriageConfig(
+            args.gap_seconds, max_span_seconds=None if args.no_span_cap else args.max_span_seconds),
                                   extra, iocs)
         summary["runtime_seconds"] = round(time.perf_counter() - t0, 2)
         summary["ioc_indicators"] = len(iocs) if iocs else 0
@@ -594,7 +596,7 @@ def _triage(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     print(f"TRIAGE - scenario {args.scenario} (dev scenario, not a paper result); "
-          f"gap {summary['gap_seconds']} s, sigma alerts added {summary['extra_alerts']}, "
+          f"gap {summary['gap_seconds']} s, span cap {summary['max_span_seconds']} s, sigma alerts added {summary['extra_alerts']}, "
           f"IOC indicators {summary['ioc_indicators']}")
     print(json.dumps({k: v for k, v in summary.items() if k != "size_distribution"}, indent=2))
     print(f"\n{check['label']}: attack phases (labels.csv) overlapped in time by >= 1 incident: "
@@ -619,11 +621,9 @@ def _ml_baselines(args: argparse.Namespace) -> int:
         config = load_study_config(args.study_config)
         for s in args.scenarios:
             config.split.require_dev(s)
-        if not 0 < args.train_fraction < 1:
-            raise ValueError("--train-fraction must be between 0 and 1")
         t0 = time.perf_counter()
         report = run_ml_baselines(args.processed_dir, open_stores(args.data_dir).truth, config,
-                                  args.scenarios, args.train_fraction)
+                                  args.scenarios)
         report["runtime_seconds"] = round(time.perf_counter() - t0, 2)
     except (HeldOutScenarioError, ValueError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -632,27 +632,43 @@ def _ml_baselines(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     print(f"ML DETECTION BASELINES - {report['label']}")
-    print(f"features ({len(report['features'])}): {', '.join(report['features'])}")
+    for set_name, feats in report["feature_sets"].items():
+        print(f"feature set {set_name} ({len(feats)}): {', '.join(feats)}")
+
+    def row(model: str, res: dict[str, Any], indent: str = "  ") -> None:
+        if "skipped" in res:
+            print(f"{indent}{model:24s} skipped: {res['skipped']}")
+            return
+        for truth in ("event_label", "time_label"):
+            s = res[truth]
+            print(f"{indent}{model:24s} {truth:11s} TP {s['tp']:>6d} FP {s['fp']:>6d} FN {s['fn']:>6d} "
+                  f"TN {s['tn']:>6d} prec {_fmt(s['precision'])} recall {_fmt(s['recall'])} "
+                  f"F1 {_fmt(s['f1'])} FNR {_fmt(s['fnr'])}")
+
+    print("\nPRIMARY: cross-scenario")
     for name, split in report["splits"].items():
         bal = split["class_balance"]
         print(f"\n{name}  train {bal['train']['n']} (event attack {bal['train']['event_label']['attack']}, "
               f"benign {bal['train']['event_label']['benign']}, unavailable "
-              f"{bal['train']['event_label']['unavailable']}; time attack "
-              f"{bal['train']['time_label']['attack']})  test {bal['test']['n']} (event attack "
+              f"{bal['train']['event_label']['unavailable']})  test {bal['test']['n']} (event attack "
               f"{bal['test']['event_label']['attack']}, benign {bal['test']['event_label']['benign']}, "
-              f"unavailable {bal['test']['event_label']['unavailable']}; time attack "
-              f"{bal['test']['time_label']['attack']})")
-        if split.get("cutoff"):
-            print(f"  cutoff {split['cutoff']}")
+              f"unavailable {bal['test']['event_label']['unavailable']})")
         for model, res in split["models"].items():
-            if "skipped" in res:
-                print(f"  {model:24s} skipped: {res['skipped']}")
-                continue
-            for truth in ("event_label", "time_label"):
-                s = res[truth]
-                print(f"  {model:24s} {truth:11s} TP {s['tp']:>6d} FP {s['fp']:>6d} FN {s['fn']:>6d} "
-                      f"TN {s['tn']:>6d} prec {_fmt(s['precision'])} recall {_fmt(s['recall'])} "
-                      f"F1 {_fmt(s['f1'])} FNR {_fmt(s['fnr'])}")
+            row(model, res)
+        imp = split["models"].get("hist_gradient_boosting", {}).get("permutation_importance")
+        if isinstance(imp, list):
+            print("  permutation importance (HistGB, test F1 drop): "
+                  + ", ".join(f"{r['feature']} {r['mean']:.4f}" for r in imp))
+    print("\nLEAVE-ONE-PHASE-OUT (test = alerts inside the held-out phase; pooled over folds)")
+    for name, lo in report["lopo"].items():
+        print(f"\n{name}  phases {len(lo['per_phase'])}")
+        for model, res in lo["pooled"].items():
+            row(model, res)
+        for ph in lo["per_phase"]:
+            hgb = ph["models"].get("hist_gradient_boosting", {})
+            ev = hgb.get("event_label")
+            print(f"    {ph['phase']:28s} n {ph['n_test']:>6d} event attack {ph['event_attack']:>6d} "
+                  f"HistGB recall {_fmt(ev['recall']) if ev else 'skipped'}")
     print(f"\nruntime {report['runtime_seconds']} s")
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)

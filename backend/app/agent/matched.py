@@ -17,6 +17,15 @@ status, tokens in/out, requests, tool calls, latency, budget hit, citations
 and claims kept/dropped), ``cases/<n>.<arm>.json`` (transcripts, request
 logs, id maps, verifier detail), ``scores.json``.
 
+Resume (2026-11-10, ``resume=True``): the run directory is
+``matched-<config hash[:16]>`` (stable for one configuration, so a restart
+finds it). After each case both arms' summaries and the inputs of the four
+score rows (cited ids and claims) go to ``cases/<n>.checkpoint.json``; a
+restart reloads checkpointed cases instead of calling the model again and
+re-scores them with the same ``score_case``. A directory that already holds
+``scores.json`` is a completed run: it is returned unchanged (``skipped``)
+and no model is called. Only one process may write a run directory at a time.
+
 Dry run (:func:`estimate_matched`): token bound = cases x
 ``max_tokens_per_case`` per arm (no request may start that could exceed it;
 prompts estimated at 3 characters per token), tool calls bound = cases x
@@ -54,6 +63,7 @@ from app.agent.rag_tool import AttackSearchTool, Retriever
 from app.agent.runner import PreparedRun, _dump, _run_dir, _toolkit, _verdicts
 from app.agent.verifier import verify_answer
 from app.evaluation.case_scoring import CaseScore, alert_claim_index, alert_quote_index, score_case
+from app.evaluation.metrics import Claim
 from app.rag.embedding import Embedder
 from app.rag.vector_store import VectorStore
 from app.storage.repository import Repository
@@ -61,7 +71,11 @@ from app.study.baselines import matched_k
 from app.study.cases import baseline_summaries, summarize_scores
 
 ARMS = ("single", "graph")
+SCORE_ROWS = ("single", "single+verifier", "graph", "graph+verifier")
 BUDGET_STATUSES = ("token_budget_exceeded", "tool_budget_exceeded")
+_SUMMARY_FIELDS = ("status", "parse_status", "verdict", "input_tokens", "output_tokens",
+                   "usage_reported", "requests", "tool_calls", "repairs", "latency_seconds",
+                   "wall_seconds", "error")
 
 
 def estimate_matched(prep: PreparedRun, settings: AgentSettings,
@@ -96,8 +110,10 @@ def estimate_matched(prep: PreparedRun, settings: AgentSettings,
 
 
 def matched_hash(prep: PreparedRun, settings: AgentSettings, model_ids: dict[str, str],
-                 study_config_path: str | Path, graph: GraphSettings) -> str:
+                 study_config_path: str | Path, graph: GraphSettings,
+                 retrieval: str | None = None) -> str:
     payload = {
+        "retrieval": retrieval,
         "study_config_sha256": hashlib.sha256(Path(study_config_path).read_bytes()).hexdigest(),
         "model": settings.model.public(), "model_ids": model_ids, "agent": asdict(settings.agent),
         "graph": asdict(graph), "prompt_version": PROMPT_VERSION,
@@ -107,6 +123,13 @@ def matched_hash(prep: PreparedRun, settings: AgentSettings, model_ids: dict[str
         "case_ids": [c.case_id for c in prep.cases],
     }
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+def resume_run_id(prep: PreparedRun, settings: AgentSettings, model_ids: dict[str, str],
+                  study_config_path: str | Path, graph: GraphSettings = GraphSettings(),
+                  retrieval: str | None = None) -> str:
+    """The stable run directory name a resumable run of this configuration uses."""
+    return f"matched-{matched_hash(prep, settings, model_ids, study_config_path, graph, retrieval)[:16]}"
 
 
 def _record(run: CaseRun, verification: dict[str, Any]) -> dict[str, Any]:
@@ -140,22 +163,47 @@ def run_matched(prep: PreparedRun, settings: AgentSettings, clients: dict[str, C
                 retriever: Retriever | None = None, repo: Repository | None = None,
                 vectors: VectorStore | None = None, embedder: Embedder | None = None,
                 graph: GraphSettings = GraphSettings(), now: datetime | None = None,
-                on_case: Callable[[int, str, CaseRun], None] | None = None) -> dict[str, Any]:
+                on_case: Callable[[int, str, CaseRun], None] | None = None,
+                resume: bool = False, retrieval_mode: str | None = None) -> dict[str, Any]:
     started = now or datetime.now(timezone.utc)
     model_ids = {arm: clients[arm].model_id for arm in ARMS}
-    digest = matched_hash(prep, settings, model_ids, study_config_path, graph)
-    run_id, run_dir = _run_dir(Path(output_dir), started, digest)
-    run_dir.mkdir(parents=True)
-    scores: dict[str, list[CaseScore]] = {k: [] for k in ("single", "single+verifier", "graph",
-                                                           "graph+verifier")}
+    retrieval = (retrieval_mode or "dense") if retriever is not None else None
+    digest = matched_hash(prep, settings, model_ids, study_config_path, graph, retrieval)
+    if resume:
+        run_id = resume_run_id(prep, settings, model_ids, study_config_path, graph, retrieval)
+        run_dir = Path(output_dir) / run_id
+        if (run_dir / "scores.json").exists():
+            return {"run_id": run_id, "run_dir": str(run_dir), "config_hash": digest, "skipped": True,
+                    "resumed_cases": [],
+                    "manifest": json.loads((run_dir / "manifest.json").read_text(encoding="utf-8")),
+                    "scores": json.loads((run_dir / "scores.json").read_text(encoding="utf-8"))}
+        run_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        run_id, run_dir = _run_dir(Path(output_dir), started, digest)
+        run_dir.mkdir(parents=True)
+    scores: dict[str, list[CaseScore]] = {k: [] for k in SCORE_ROWS}
     runs: dict[str, list[CaseRun]] = {arm: [] for arm in ARMS}
     records = []
+    resumed: list[int] = []
     for i, (case, view) in enumerate(zip(prep.cases, prep.views)):
         alerts = [prep.pool.alert(e) for e in view.entries]
         index, quotes = alert_claim_index(alerts), alert_quote_index(alerts)
 
         def score(cited: Sequence[str], claims: Sequence[Any]) -> CaseScore:
             return score_case(case, view, cited, claims=claims, claim_index=index, quote_index=quotes)
+
+        checkpoint = run_dir / f"cases/{i:03d}.checkpoint.json"
+        if resume and checkpoint.exists():
+            cp = json.loads(checkpoint.read_text(encoding="utf-8"))
+            if cp.get("config_hash") == digest and cp.get("case_id") == case.case_id:
+                for row in SCORE_ROWS:
+                    inp = cp["score_inputs"][row]
+                    scores[row].append(score(inp["cited"], [Claim(**c) for c in inp["claims"]]))
+                runs["single"].append(CaseRun(**cp["runs"]["single"]))
+                runs["graph"].append(GraphRun(**cp["runs"]["graph"]))
+                records.append(cp["record"])
+                resumed.append(i)
+                continue
 
         kit = _toolkit(prep, i, alerts, settings, f"{digest}:single")
         single = investigate(clients["single"], kit, settings.agent, settings.model)
@@ -174,9 +222,6 @@ def run_matched(prep: PreparedRun, settings: AgentSettings, clients: dict[str, C
         scores["graph"].append(score(g.raw_cited_alert_ids, g.raw_claims))
         scores["graph+verifier"].append(score(g.cited_alert_ids, g.claims))
         runs["graph"].append(g)
-        for arm, r in (("single", single), ("graph", g)):
-            if on_case:
-                on_case(i, arm, r)
 
         _dump(run_dir / f"cases/{i:03d}.single.json", {
             "case_id": case.case_id, "messages": single.transcript, "requests": single.request_log,
@@ -186,10 +231,25 @@ def run_matched(prep: PreparedRun, settings: AgentSettings, clients: dict[str, C
             "final": g.final, "id_map": gkit.id_map, "trace": g.trace, "notes": memory.recall(),
             "verification": g.verification, "forced_report": g.forced_report,
             "turns_without_note": g.turns_without_note, "memory_session": memory.session_id})
-        records.append({"index": i, "case_id": case.case_id, "kind": case.kind.value,
-                        "phase": case.phase, "alerts": len(alerts),
-                        "single": _record(single, single_ver),
-                        "graph": {**_record(g, g.verification), "trace": g.trace, "notes": g.notes}})
+        record = {"index": i, "case_id": case.case_id, "kind": case.kind.value,
+                  "phase": case.phase, "alerts": len(alerts),
+                  "single": _record(single, single_ver),
+                  "graph": {**_record(g, g.verification), "trace": g.trace, "notes": g.notes}}
+        records.append(record)
+        inputs = {"single": (single.cited_alert_ids, single.claims),
+                  "single+verifier": (checked.cited, checked.claims),
+                  "graph": (g.raw_cited_alert_ids, g.raw_claims),
+                  "graph+verifier": (g.cited_alert_ids, g.claims)}
+        _dump(checkpoint, {
+            "config_hash": digest, "case_id": case.case_id, "record": record,
+            "score_inputs": {row: {"cited": list(c), "claims": [asdict(x) for x in cl]}
+                             for row, (c, cl) in inputs.items()},
+            "runs": {"single": {f: getattr(single, f) for f in _SUMMARY_FIELDS},
+                     "graph": {**{f: getattr(g, f) for f in _SUMMARY_FIELDS}, "trace": g.trace,
+                               "notes": g.notes}}})
+        for arm, r in (("single", single), ("graph", g)):
+            if on_case:
+                on_case(i, arm, r)
 
     k = matched_k(sum(s.cited for s in scores["graph+verifier"] + scores["single+verifier"])
                   / max(1, 2 * len(prep.cases)))
@@ -213,10 +273,11 @@ def run_matched(prep: PreparedRun, settings: AgentSettings, clients: dict[str, C
         "prompt_versions": {"single": PROMPT_VERSION, "graph": GRAPH_PROMPT_VERSION},
         "graph_agents": list(AGENTS), "graph_prompts_sha256": PROMPTS_SHA256,
         "graph_prompt_chars": {k: len(v) for k, v in PROMPTS.items()},
-        "retrieval": retriever is not None, "estimate": estimate_matched(prep, settings, graph),
-        "cases": records,
+        "retrieval": retriever is not None, "retrieval_mode": retrieval,
+        "estimate": estimate_matched(prep, settings, graph),
+        "resumed_cases": resumed, "cases": records,
     }
     _dump(run_dir / "manifest.json", manifest)
     _dump(run_dir / "scores.json", score_report)
-    return {"run_id": run_id, "run_dir": str(run_dir), "config_hash": digest,
-            "manifest": manifest, "scores": score_report}
+    return {"run_id": run_id, "run_dir": str(run_dir), "config_hash": digest, "skipped": False,
+            "resumed_cases": resumed, "manifest": manifest, "scores": score_report}

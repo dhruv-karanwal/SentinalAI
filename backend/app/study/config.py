@@ -96,6 +96,14 @@ class StudyConfig:
     source: str
     pilot_truncations: tuple[str, ...] = ("spread",)
     extra_detectors: tuple[str, ...] = ()
+    # pilot design (user decision 2026-11-10): variants, case selection, retrieval of the graph arm
+    pilot_variants: tuple[str, ...] = ()
+    pilot_select: str = "interleaved"
+    pilot_retrieval: str = "dense"
+
+
+PILOT_SELECT_CHOICES = ("interleaved", "reachable")
+PILOT_RETRIEVAL_CHOICES = ("dense", "lexical", "hybrid", "none")
 
 
 def _names(value: Any, field: str, *, allow_empty: bool = False) -> tuple[str, ...]:
@@ -184,6 +192,14 @@ def load_study_config(path: str | Path = DEFAULT_STUDY_CONFIG) -> StudyConfig:
     if bad:
         raise ValueError(f"pilot.truncation must use {', '.join(TRUNCATION_CHOICES)}; got {', '.join(bad)}")
 
+    pilot_variants = _names(pilot_data.get("variants", []), "pilot.variants", allow_empty=True)
+    pilot_select = str(pilot_data.get("select", "interleaved"))
+    if pilot_select not in PILOT_SELECT_CHOICES:
+        raise ValueError(f"pilot.select must be one of {', '.join(PILOT_SELECT_CHOICES)}")
+    pilot_retrieval = str(pilot_data.get("retrieval", "dense"))
+    if pilot_retrieval not in PILOT_RETRIEVAL_CHOICES:
+        raise ValueError(f"pilot.retrieval must be one of {', '.join(PILOT_RETRIEVAL_CHOICES)}")
+
     return StudyConfig(
         split=ScenarioSplit(dev, held_out, frozen, split_data.get("frozen_on")),
         variant_seed=_int(variants_data["seed"], "variants.seed", 0),
@@ -207,4 +223,7 @@ def load_study_config(path: str | Path = DEFAULT_STUDY_CONFIG) -> StudyConfig:
         source=config_path.name,
         pilot_truncations=pilot_truncations,
         extra_detectors=extra,
+        pilot_variants=pilot_variants,
+        pilot_select=pilot_select,
+        pilot_retrieval=pilot_retrieval,
     )

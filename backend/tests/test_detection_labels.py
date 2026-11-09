@@ -46,8 +46,9 @@ def test_dev_labels_maps_rows(tmp_path: Path) -> None:
         GroundTruth(alert_id="c", scenario="shaw", time_label="dirb"),
     ])
     labels = dev_labels(store, "shaw", load_study_config())
-    assert labels == {"a": TruthLabels(True, True), "b": TruthLabels(False, False),
-                      "c": TruthLabels(None, True)}
+    assert labels == {"a": TruthLabels(True, True, "dirb"), "b": TruthLabels(False, False),
+                      "c": TruthLabels(None, True, "dirb")}
+    assert labels["b"].phase is None  # outside every interval: no phase
 
 
 def test_dev_labels_refuses_held_out_and_missing(tmp_path: Path) -> None:

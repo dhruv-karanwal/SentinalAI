@@ -176,3 +176,58 @@ def test_triage_cli_and_descriptive_check(tmp_path: Path, processed: Path,  # no
     report = (tmp_path / "tri" / "synthetic.triage.json").read_text(encoding="utf-8")
     assert '"phases_overlapped"' in report
     assert main(["triage", "--scenario", "wilson", "--study-config", str(cfg)]) == 2
+
+
+# --- B3 fixes: span cap and per-entity-kind gaps -----------------------------------------------
+
+
+def test_default_span_cap_is_one_hour() -> None:
+    assert tr.DEFAULT_MAX_SPAN_SECONDS == 3600
+    assert tr.TriageConfig().max_span_seconds == 3600
+    with pytest.raises(ValueError):
+        tr.TriageConfig(max_span_seconds=0)
+    with pytest.raises(ValueError):
+        tr.TriageConfig(entity_gap_seconds={"mac": 10})  # unknown entity kind
+
+
+def test_span_cap_splits_a_long_chain_into_bounded_segments() -> None:
+    chain = [mk(f"a{i}", i * 200) for i in range(40)]  # 0 .. 7800 s, every step within 300 s
+    cfg = tr.TriageConfig(max_span_seconds=3600)
+    segs = tr.split_by_span(sorted(chain, key=tr._time_key), cfg.max_span_seconds)
+    assert [len(s) for s in segs] == [19, 19, 2]  # 0..3600, 3800..7400, 7600..7800
+    for s in segs:
+        assert (s[-1].timestamp - s[0].timestamp).total_seconds() <= 3600
+    incs = tr.build_incidents(chain, "synthetic", cfg)
+    assert [len(i["alert_ids"]) for i in incs] == [19, 19, 2]
+    chains = {i["detail"]["chain_id"] for i in incs}
+    assert len(chains) == 1  # the unsplit chain is recorded, nothing is lost
+    assert [i["detail"]["segment"] for i in incs] == [[1, 3], [2, 3], [3, 3]]
+    assert sum(len(i["alert_ids"]) for i in incs) == len(chain)
+
+
+def test_no_span_cap_keeps_old_behaviour() -> None:
+    chain = [mk(f"a{i}", i * 200) for i in range(40)]
+    incs = tr.build_incidents(chain, "synthetic", tr.TriageConfig(max_span_seconds=None))
+    assert len(incs) == 1 and incs[0]["detail"]["segment"] == [1, 1]
+
+
+def test_per_entity_kind_gap_override() -> None:
+    # host link at 200 s; with a host gap of 100 s the two alerts split
+    a, b = mk("a", 0), mk("b", 200)
+    assert groups([a, b]) == [["a", "b"]]
+    got = tr.group_alerts([a, b], 300, {"host": 100})
+    assert sorted(sorted(x.alert_id for x in g) for g in got) == [["a"], ["b"]]
+    # the shared source ip keeps its own (default) gap and still links them
+    c = mk("c", 0, raw={"data": {"srcip": "192.168.1.9"}})
+    d = mk("d", 200, host="10.0.0.6", raw={"data": {"srcip": "192.168.1.9"}})
+    got = tr.group_alerts([c, d], 300, {"host": 100})
+    assert sorted(sorted(x.alert_id for x in g) for g in got) == [["c", "d"]]
+
+
+def test_summary_describes_the_largest_incident() -> None:
+    chain = [mk(f"a{i}", i * 200) for i in range(40)] + [mk("z", 0, host="10.0.0.9")]
+    s = tr.summarize(tr.build_incidents(chain, "synthetic", tr.TriageConfig(max_span_seconds=None)))
+    big = s["largest_incident"]
+    assert big["size"] == 40 and big["span_seconds"] == 7800.0
+    assert big["entities"] == ["host:10.0.0.5"] and big["detectors"] == {"wazuh": 40}
+    assert s["chains_split"] == 0

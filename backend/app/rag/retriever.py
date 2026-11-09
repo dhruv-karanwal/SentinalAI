@@ -1,7 +1,19 @@
 """ATT&CK retriever: index the chunks, search by text, evaluate on the frozen relevance set.
 
 ``search`` returns distinct techniques (a technique's chunks count once, at
-their best score), ranked by cosine similarity, ties by technique id.
+their best score), ties by technique id. Modes (C1 fix, 2026-11-10):
+
+- ``dense`` (the C1 original): cosine similarity of bge-small vectors;
+- ``lexical``: BM25 over the chunk texts (:mod:`app.rag.lexical`), only
+  techniques with at least one query term, score divided by the best;
+- ``hybrid``: ``alpha * dense' + (1 - alpha) * lexical'`` per technique,
+  where ``dense'`` is the min-max normalised cosine over every technique
+  and ``lexical'`` the BM25 score divided by the query's best (0 without a
+  term). ``alpha = 0.5`` (:data:`DEFAULT_ALPHA`), equal weights, chosen
+  before the run and not tuned on the relevance set.
+
+The chunks already hold the technique id, name and tactics in their text
+(:mod:`app.rag.chunks`), so both scores see them.
 
 Relevance evaluation (:func:`evaluate`) reads the hand-written set in
 ``experiments/rag/attack_relevance_set.json`` (committed before the first
@@ -19,18 +31,32 @@ from typing import Any
 from app.intel.attack import AttackKB
 from app.rag.chunks import attack_chunks
 from app.rag.embedding import Embedder
+from app.rag.lexical import Bm25Index
 from app.rag.vector_store import VectorItem, VectorStore
 
 ATTACK_COLLECTION = "attack"
 DEFAULT_RELEVANCE_SET = Path(__file__).resolve().parents[3] / "experiments" / "rag" / "attack_relevance_set.json"
 RECALL_KS = (1, 3, 5)
+MODES = ("dense", "lexical", "hybrid")
+DEFAULT_ALPHA = 0.5
 
 
 class AttackRetriever:
-    def __init__(self, store: VectorStore, embedder: Embedder, collection: str = ATTACK_COLLECTION):
+    def __init__(self, store: VectorStore, embedder: Embedder, collection: str = ATTACK_COLLECTION,
+                 *, mode: str = "dense", kb: AttackKB | None = None, alpha: float = DEFAULT_ALPHA):
+        if mode not in MODES:
+            raise ValueError(f"unknown retrieval mode {mode!r}; known: {', '.join(MODES)}")
+        if not 0.0 <= alpha <= 1.0:
+            raise ValueError("alpha must be in [0, 1]")
+        if mode != "dense" and kb is None:
+            raise ValueError(f"mode {mode!r} needs the ATT&CK KB for the lexical index")
         self.store = store
         self.embedder = embedder
         self.collection = collection
+        self.mode = mode
+        self.alpha = alpha
+        self._chunks = {c.chunk_id: c for c in attack_chunks(kb)} if kb is not None else {}
+        self._bm25 = Bm25Index({cid: c.text for cid, c in self._chunks.items()}) if kb is not None else None
 
     def index(self, kb: AttackKB, batch: int = 64) -> int:
         chunks = attack_chunks(kb)
@@ -47,6 +73,8 @@ class AttackRetriever:
     def search(self, text: str, k: int = 5) -> list[dict[str, Any]]:
         if not text.strip() or k < 1:
             return []
+        if self.mode != "dense":
+            return self._search_blended(text, k)
         hits = self.store.search(self.collection, self.embedder.embed_query(text)[0], k * 4)
         best: dict[str, dict[str, Any]] = {}
         for h in hits:
@@ -56,6 +84,39 @@ class AttackRetriever:
                              "score": h.score, "chunk_id": h.item_id, "text": h.text}
         ranked = sorted(best.values(), key=lambda r: (-r["score"], r["technique_id"]))
         return ranked[:k]
+
+    def _search_blended(self, text: str, k: int) -> list[dict[str, Any]]:
+        assert self._bm25 is not None
+        chunk_of: dict[str, str] = {}
+        lex: dict[str, float] = {}
+        for cid, score in self._bm25.scores(text).items():
+            tid = self._chunks[cid].technique_id
+            if score > lex.get(tid, -1.0):
+                lex[tid], chunk_of[tid] = score, cid
+        top_lex = max(lex.values(), default=0.0)
+        lex_n = {t: v / top_lex for t, v in lex.items()} if top_lex > 0 else {}
+        dense: dict[str, float] = {}
+        dense_chunk: dict[str, str] = {}
+        if self.mode == "hybrid":
+            n = self.store.count(self.collection)
+            for h in self.store.search(self.collection, self.embedder.embed_query(text)[0], n):
+                tid = str(h.meta["technique_id"])
+                if tid not in dense or h.score > dense[tid]:
+                    dense[tid], dense_chunk[tid] = h.score, h.item_id
+            lo, hi = min(dense.values(), default=0.0), max(dense.values(), default=0.0)
+            dense = {t: ((v - lo) / (hi - lo) if hi > lo else 0.0) for t, v in dense.items()}
+            scores = {t: self.alpha * dense.get(t, 0.0) + (1 - self.alpha) * lex_n.get(t, 0.0)
+                      for t in set(dense) | set(lex_n)}
+        else:
+            scores = lex_n
+        ranked = sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))[:k]
+        out = []
+        for tid, score in ranked:
+            # the excerpt: the chunk with the best dense score, else the best lexical one
+            c = self._chunks[dense_chunk[tid] if tid in dense_chunk else chunk_of[tid]]
+            out.append({"technique_id": tid, "name": c.name, "tactics": list(c.tactics),
+                        "score": round(score, 6), "chunk_id": cid, "text": c.text})
+        return out
 
 
 def load_relevance_set(path: str | Path = DEFAULT_RELEVANCE_SET) -> dict[str, Any]:
