@@ -1583,3 +1583,64 @@ Decisions taken (B3):
   refers to.
 
 Next: B4 ML detection baselines.
+
+## B4 checkpoint: ML detection baselines (committed on `phase3/wave-b-rest`)
+
+Done: `app/detection/features.py` (label-free, 12 features pinned by a
+test with the forbidden names), `app/detection/ml_baselines.py`
+(IsolationForest `n_estimators=200, contamination="auto"`;
+HistGradientBoostingClassifier defaults; both seeded with
+`variants.seed` = 20261031), CLI `ml-baselines`. Labels only via
+`dev_labels` (truth area). Encoders fitted on training only; unseen
+categories -> -1.
+
+Real output, `ml-baselines --scenarios russellmitchell shaw` (**detection
+baselines, dev scenarios, not paper results**; runtime 13.12 s):
+
+```
+features (12): detector, severity, has_severity, rule_id, category, aminer_component, attack_mapped, ioc_match, host_count_60s, host_count_600s, evidence_lines, evidence_chars
+
+time:russellmitchell  train 13206 (event attack 0, benign 13206, unavailable 0; time attack 0)  test 22726 (event attack 10957, benign 11769, unavailable 0; time attack 11797)
+  cutoff 2022-01-23T09:24:43+00:00
+  isolation_forest         event_label TP  10957 FP   2977 FN      0 TN   8792 prec 0.7863 recall 1.0000 F1 0.8804 FNR 0.0000
+  isolation_forest         time_label  TP  11342 FP   2592 FN    455 TN   8337 prec 0.8140 recall 0.9614 F1 0.8816 FNR 0.0386
+  hist_gradient_boosting   skipped: training split has a single event_label class
+
+time:shaw  train 26199 (event attack 0, benign 26199, unavailable 0; time attack 0)  test 27446 (event attack 6060, benign 21386, unavailable 0; time attack 6728)
+  cutoff 2022-01-28T14:10:10+00:00
+  isolation_forest         event_label TP   6060 FP   5133 FN      0 TN  16253 prec 0.5414 recall 1.0000 F1 0.7025 FNR 0.0000
+  isolation_forest         time_label  TP   6323 FP   4870 FN    405 TN  15848 prec 0.5649 recall 0.9398 F1 0.7057 FNR 0.0602
+  hist_gradient_boosting   skipped: training split has a single event_label class
+
+cross:russellmitchell->shaw  train 35932 (event attack 10957, benign 24975, unavailable 0; time attack 11797)  test 53645 (event attack 6060, benign 47585, unavailable 0; time attack 6728)
+  isolation_forest         event_label TP   3671 FP   8815 FN   2389 TN  38770 prec 0.2940 recall 0.6058 F1 0.3959 FNR 0.3942
+  isolation_forest         time_label  TP   3941 FP   8545 FN   2787 TN  38372 prec 0.3156 recall 0.5858 F1 0.4102 FNR 0.4142
+  hist_gradient_boosting   event_label TP   5284 FP    450 FN    776 TN  47135 prec 0.9215 recall 0.8719 F1 0.8960 FNR 0.1281
+  hist_gradient_boosting   time_label  TP   5303 FP    431 FN   1425 TN  46486 prec 0.9248 recall 0.7882 F1 0.8511 FNR 0.2118
+
+cross:shaw->russellmitchell  train 53645 (event attack 6060, benign 47585, unavailable 0; time attack 6728)  test 35932 (event attack 10957, benign 24975, unavailable 0; time attack 11797)
+  isolation_forest         event_label TP  10952 FP   2153 FN      5 TN  22822 prec 0.8357 recall 0.9995 F1 0.9103 FNR 0.0005
+  isolation_forest         time_label  TP  11254 FP   1851 FN    543 TN  22284 prec 0.8588 recall 0.9540 F1 0.9039 FNR 0.0460
+  hist_gradient_boosting   event_label TP  10388 FP     67 FN    569 TN  24908 prec 0.9936 recall 0.9481 F1 0.9703 FNR 0.0519
+  hist_gradient_boosting   time_label  TP  10443 FP     12 FN   1354 TN  24123 prec 0.9989 recall 0.8852 F1 0.9386 FNR 0.1148
+```
+
+**Finding (needs a user decision, not changed):** with the specified split
+(first 60% of the *timeline* trains), the training side of both dev
+scenarios holds **0 attack alerts** by either label: the attack phases sit
+in the last 40% of each timeline. The supervised model is therefore
+reported as skipped on the time splits, and the time-split IsolationForest
+numbers are a "train on benign only" setting. Alternatives (split by alert
+count, or a phase-stratified split) would change the split design, so they
+are left to the user.
+
+Decisions taken (B4):
+
+- Pool = investigation-eligible alerts (same as the study and the Sigma baseline).
+- Supervised target = event_label; time_label only as evaluation sensitivity.
+- `contamination="auto"` (scikit-learn's own threshold) so the base rate is never fed in.
+- XGBoost installed but not used (one supervised model asked; HistGB needs no extra dependency).
+- No scaler (trees are scale-invariant); `-1` + `has_severity` encodes a missing severity.
+- Window counts use strictly earlier timestamps on the same `host_ip`,
+  computed per scenario over its whole time-ordered pool.
+- mypy override: `ignore_missing_imports` for `sklearn` only (no stubs shipped).

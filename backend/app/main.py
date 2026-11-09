@@ -209,6 +209,18 @@ def build_parser() -> argparse.ArgumentParser:
     tri.add_argument("--study-config", type=Path, default=DEFAULT_STUDY_CONFIG)
     tri.add_argument("--data-dir", type=Path, default=DEFAULT_PLATFORM_DIR)
 
+    mlb = sub.add_parser("ml-baselines", help="B4: IsolationForest + HistGradientBoosting detection "
+                                              "baselines on dev scenarios")
+    mlb.add_argument("--scenarios", nargs="+", default=["russellmitchell", "shaw"],
+                     help="dev scenarios (held-out ones are refused)")
+    mlb.add_argument("--train-fraction", type=float, default=0.6,
+                     help="time split: share of the timeline that trains (default 0.6)")
+    mlb.add_argument("--processed-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    mlb.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR / "ml")
+    mlb.add_argument("--study-config", type=Path, default=DEFAULT_STUDY_CONFIG)
+    mlb.add_argument("--data-dir", type=Path, default=DEFAULT_PLATFORM_DIR,
+                     help="platform stores; labels come from their truth area")
+
     user = sub.add_parser("create-user", help="create or replace a platform user")
     user.add_argument("--username", required=True)
     user.add_argument("--role", required=True, choices=[r.value for r in Role])
@@ -594,6 +606,56 @@ def _triage(args: argparse.Namespace) -> int:
     return 0
 
 
+def _ml_baselines(args: argparse.Namespace) -> int:
+    from app.detection.labels import MissingTruthError
+    from app.detection.ml_baselines import run_ml_baselines
+    from app.platform.bootstrap import open_stores
+
+    try:
+        config = load_study_config(args.study_config)
+        for s in args.scenarios:
+            config.split.require_dev(s)
+        if not 0 < args.train_fraction < 1:
+            raise ValueError("--train-fraction must be between 0 and 1")
+        t0 = time.perf_counter()
+        report = run_ml_baselines(args.processed_dir, open_stores(args.data_dir).truth, config,
+                                  args.scenarios, args.train_fraction)
+        report["runtime_seconds"] = round(time.perf_counter() - t0, 2)
+    except (HeldOutScenarioError, ValueError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except MissingTruthError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(f"ML DETECTION BASELINES - {report['label']}")
+    print(f"features ({len(report['features'])}): {', '.join(report['features'])}")
+    for name, split in report["splits"].items():
+        bal = split["class_balance"]
+        print(f"\n{name}  train {bal['train']['n']} (event attack {bal['train']['event_label']['attack']}, "
+              f"benign {bal['train']['event_label']['benign']}, unavailable "
+              f"{bal['train']['event_label']['unavailable']}; time attack "
+              f"{bal['train']['time_label']['attack']})  test {bal['test']['n']} (event attack "
+              f"{bal['test']['event_label']['attack']}, benign {bal['test']['event_label']['benign']}, "
+              f"unavailable {bal['test']['event_label']['unavailable']}; time attack "
+              f"{bal['test']['time_label']['attack']})")
+        if split.get("cutoff"):
+            print(f"  cutoff {split['cutoff']}")
+        for model, res in split["models"].items():
+            if "skipped" in res:
+                print(f"  {model:24s} skipped: {res['skipped']}")
+                continue
+            for truth in ("event_label", "time_label"):
+                s = res[truth]
+                print(f"  {model:24s} {truth:11s} TP {s['tp']:>6d} FP {s['fp']:>6d} FN {s['fn']:>6d} "
+                      f"TN {s['tn']:>6d} prec {_fmt(s['precision'])} recall {_fmt(s['recall'])} "
+                      f"F1 {_fmt(s['f1'])} FNR {_fmt(s['fnr'])}")
+    print(f"\nruntime {report['runtime_seconds']} s")
+    out = Path(args.output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "ml_baselines.dev.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    return 0
+
+
 def _create_user(args: argparse.Namespace) -> int:
     """Password only from the environment (SENTINEL_NEW_USER_PASSWORD), never argv."""
     import os
@@ -641,6 +703,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _sigma(args)
     if args.command == "triage":
         return _triage(args)
+    if args.command == "ml-baselines":
+        return _ml_baselines(args)
     if args.command == "create-user":
         return _create_user(args)
     if args.command == "serve":
