@@ -1644,3 +1644,19 @@ Decisions taken (B4):
 - Window counts use strictly earlier timestamps on the same `host_ip`,
   computed per scenario over its whole time-ordered pool.
 - mypy override: `ignore_missing_imports` for `sklearn` only (no stubs shipped).
+
+## Wave B wrap-up (branch `phase3/wave-b-rest`)
+
+- Full run on the committed branch, real dev data present (Wave C work
+  stashed aside): `pytest -q` -> `400 passed, 4 skipped in 21.37s` (the 4
+  skips are the docker-compose infra tests); `mypy` -> `Success: no issues
+  found in 61 source files`.
+- Secret scan (no scanner installed and none may be installed offline, so a
+  regex scan: private keys, AWS/GitHub/Slack/Google/sk- keys, JWTs,
+  assigned secret literals, URLs with credentials, over every tracked file
+  and the added lines of `git diff main..HEAD`):
+  `python secret_scan.py main` ->
+  `backend/tests/test_agent_client.py:55: assigned secret literal: secret = "sk-test-not-a-real-key"`,
+  `scanned 123 tracked files and 2619 added diff lines (main..HEAD): 1 file hits, 0 diff hits`.
+  The one hit is the M5 test placeholder already on `main`, not a secret.
+  Tracked files named `*.env`, `*.pem`, `*.key`, `id_rsa`: 0.
