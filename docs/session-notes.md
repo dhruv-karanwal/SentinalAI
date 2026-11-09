@@ -1795,7 +1795,7 @@ the verifier, the headline choice is yours.
   as 1354f97.
 - `phase3/wave-c-code` (from main after the B merge): 69a7882 (relevance
   set), 001069b (C1 RAG), 72233ae (C2 verifier + graph), d2a9270 (C3
-  matched runner); PR: see the PR description / next note.
+  matched runner); PR https://github.com/dhruv-karanwal/SentinalAI/pull/6.
 
 ## Still blocked
 
