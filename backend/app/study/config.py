@@ -31,6 +31,9 @@ DETECTOR_NAMES = ("wazuh", "suricata", "aminer")
 SHUFFLED_REFERENCE_CHOICES = ("wazuh", "suricata", "aminer", "fused", "oracle")
 # Noise controls are count-matched to one detector.
 NOISE_REFERENCE_CHOICES = DETECTOR_NAMES
+# Platform detectors that are NOT study variables by default (Wave B2: sigma).
+# A study includes one only by listing it in variants.extra_detectors.
+EXTRA_DETECTOR_CHOICES = ("sigma",)
 TRUNCATION_CHOICES = ("spread", "earliest")
 # cite-top-k-detector-order ranking, frozen 2026-11-07 before any held-out run
 # (dev-derived from M3 triage precision). A config that says it is frozen
@@ -92,6 +95,7 @@ class StudyConfig:
     pilot_scenarios: tuple[str, ...]
     source: str
     pilot_truncations: tuple[str, ...] = ("spread",)
+    extra_detectors: tuple[str, ...] = ()
 
 
 def _names(value: Any, field: str, *, allow_empty: bool = False) -> tuple[str, ...]:
@@ -154,6 +158,8 @@ def load_study_config(path: str | Path = DEFAULT_STUDY_CONFIG) -> StudyConfig:
         raise ValueError(f"shuffled references in both lists: {', '.join(sorted(overlap))}")
     noise = _choices(variants_data["noise_reference"], "variants.noise_reference",
                      NOISE_REFERENCE_CHOICES)
+    extra = _choices(variants_data.get("extra_detectors", []), "variants.extra_detectors",
+                     EXTRA_DETECTOR_CHOICES)
 
     truncation = cases_data["truncation"]
     if truncation not in TRUNCATION_CHOICES:
@@ -200,4 +206,5 @@ def load_study_config(path: str | Path = DEFAULT_STUDY_CONFIG) -> StudyConfig:
         pilot_scenarios=pilot,
         source=config_path.name,
         pilot_truncations=pilot_truncations,
+        extra_detectors=extra,
     )

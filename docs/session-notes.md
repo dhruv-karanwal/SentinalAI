@@ -1407,3 +1407,256 @@ Next steps, in order:
    `data/raw/cicids2017/` (otherwise ML stays AIT-ADS dev only).
 2. Start Docker Desktop (and install the compose plugin if it is missing)
    when you want the `lite`/`full` profiles tested and measured.
+
+# 2026-11-09: offline build, Waves B2-B4 and Wave C code
+
+Network: none, except `git push` / `gh` for the PR steps. Every process ran
+with `HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1`. No downloads, installs or
+model calls. All numbers below are pasted from command output; every dev
+number is **dev scenario, not a paper result**.
+
+## Pre-flight
+
+- `git status`: clean, on `main`, up to date with `origin/main` (fetch worked).
+- Baseline: `pytest -q` -> `327 passed, 4 skipped in 14.76s`; `mypy` ->
+  `Success: no issues found in 53 source files`.
+- Offline import check (versions printed by `importlib.metadata`):
+  pySigma==2.0.2 (no pySigma backends or pipelines installed: none are used,
+  the evaluator is ours), scikit-learn==1.9.1, xgboost==3.2.0,
+  langgraph==1.2.20, langchain-core==1.7.6, fastembed==0.9.1,
+  onnxruntime==1.31.1, pgvector==0.5.1, psycopg==3.3.8, numpy==2.4.6,
+  scipy==1.17.1, joblib==1.6.0. All imports ok.
+  `TextEmbedding("BAAI/bge-small-en-v1.5", cache_dir=data/models/fastembed,
+  local_files_only=True)` -> `bge-small offline load ok, dim 384`.
+  **Nothing missing; nothing blocked by the pre-flight.**
+- Branch `phase3/wave-b-rest` from `main` (9630c81).
+- `data/platform/` confirmed git-ignored (`.gitignore:46: data/platform/`,
+  0 tracked files), 126 MB partial store deleted, replay re-run in the
+  background (`platform-ingest`, russellmitchell then shaw):
+  - russellmitchell: published 45,544, stored 45,544, duplicates 0,
+    rejected 0, by detector aminer 4,056 / suricata 9,186 / wazuh 32,302,
+    ground_truth_rows 45,544; **wall clock 351 s**.
+  - shaw: see the B3 checkpoint (it was still running at the B2 commit).
+
+## B2 checkpoint: Sigma engine (committed on `phase3/wave-b-rest`)
+
+Done: `app/detection/sigma_engine.py` (log-type parsers + our evaluator over
+pySigma's parsed conditions; mapping table and skip reasons in the module
+docstring), `sigma_report.py`, the label door `app/detection/labels.py`
+(`dev_labels`, truth area only, `require_dev` first),
+`TruthStore.for_scenario`, `Detector.SIGMA` (rule-based) and
+`AIT_ADS_DETECTORS`, CLI `sigma`. Study code iterates `AIT_ADS_DETECTORS`;
+a `sigma` variant exists only if `variants.extra_detectors` lists it (it
+does not). Frozen-sections hash test added
+(`FROZEN_SECTIONS_SHA256 = 3421f54b...93cd`).
+
+Real output, `python -m app.main sigma --scenario russellmitchell`:
+
+```
+rules: 256 total, 90 compiled, 166 skipped
+  skipped logsource_not_derivable:file_event: 8
+  skipped logsource_not_derivable:network_connection: 5
+  skipped logsource_not_derivable:process_creation: 123
+  skipped logsource_not_derivable:proxy: 29
+  skipped logsource_not_in_evidence:nginx: 1
+compiled by log type: {'apache_access': 13, 'apache_error': 2, 'auditd': 53, 'syslog': 22}
+source alerts 35932, without lines 9186, lines 26746, unclassified lines 86
+events by log type: {'apache_access': 10906, 'apache_error': 92, 'auditd': 97, 'syslog': 15613}
+sigma alerts: 6387 from 2 rules; runtime load 0.18 s, evaluate 19.33 s
+     6386 hits /   10906 events  Suspicious User-Agents Related To Recon Tools  (rules/web/webserver_generic/web_susp_useragents.yml)
+        1 hits /   10906 events  Source Code Enumeration Detection by Keyword  (rules/web/webserver_generic/web_source_code_enumeration.yml)
+
+dev detection baseline (dev scenario, not a paper result): verdict = pool alert flagged by some Sigma rule
+pool 35932, flagged 6387, event_label unavailable 0
+  event_label TP 6348 FP 39 FN 4609 TN 24936 prec 0.9939 recall 0.5794 F1 0.7320 FNR 0.4206
+  time_label  TP 6387 FP 0 FN 5410 TN 24135 prec 1.0000 recall 0.5414 F1 0.7025 FNR 0.4586
+```
+
+`python -m app.main sigma --scenario shaw --no-score` (engine only; the
+shaw dev baseline is in the B3 checkpoint):
+
+```
+source alerts 53645, without lines 16692, lines 36953, unclassified lines 65
+events by log type: {'apache_access': 6034, 'apache_error': 41, 'auditd': 234, 'syslog': 30587}
+sigma alerts: 1468 from 2 rules; runtime load 0.18 s, evaluate 35.21 s
+     1467 hits /    6034 events  Suspicious User-Agents Related To Recon Tools  (rules/web/webserver_generic/web_susp_useragents.yml)
+        1 hits /    6034 events  Source Code Enumeration Detection by Keyword  (rules/web/webserver_generic/web_source_code_enumeration.yml)
+```
+
+Caveat for every Sigma number: Sigma sees only the evidence lines of alerts
+another detector already raised, so it is a re-detection rate over the
+pool, never a detector comparison.
+
+Detector-iteration sites checked (grep `Detector`): `study/variants.py`
+(changed: `AIT_ADS_DETECTORS` + `extra_detectors`), `services/alert_quality.py`
+(changed: `AIT_ADS_DETECTORS`, so quality reports keep 3 detector keys),
+`study/baselines.py` (changed: a detector outside the frozen order ranks
+last instead of raising), `intel/attack.py` (changed: Sigma `attack.tNNNN`
+tags are native ids), unchanged and safe: `platform/enrichment.py`,
+`ingestion/ground_truth.py`, `ingestion/mappings.py`,
+`ingestion/alert_normalizer.py`, `agent/tools.py` (counts by value),
+`api/app.py` (string filter, GROUP BY), `evaluation/case_scoring.py` (no
+detector logic). No report code exists yet (Wave D).
+
+Decisions taken (B2):
+
+- `cs-uri-query` = the whole request target (path + query), raw, not
+  URL-decoded: SigmaHQ's webserver rules match path patterns in that field.
+- Keywords match as case-insensitive substrings of the whole line.
+- `product: linux` keyword rules and `service: syslog` run on syslog-format
+  lines only; `service: apache` on Apache error lines; other services on
+  syslog lines whose program tag equals the service name.
+- `proxy` rules skipped: the Apache reverse-proxy access log does not carry
+  forward-proxy fields (full `c-uri` with host).
+- Sigma runs over the investigation-eligible pool (no training-mode,
+  duplicate or aggregate alerts), the same pool the study uses.
+- One Sigma alert per (rule, source alert); `severity=None` (levels are words).
+- `Detector.SIGMA` is typed rule-based.
+
+Next: B3 triage and correlation.
+
+## B3 checkpoint: triage and correlation (committed on `phase3/wave-b-rest`)
+
+Replay finished: shaw published 70,782, stored 70,782, duplicates 0,
+rejected 0, by detector aminer 2,243 / suricata 16,708 / wazuh 51,831,
+ground_truth_rows 70,782; **wall clock 2,028 s** (russellmitchell: 351 s;
+shaw ran while other work read the same SQLite files, which may have slowed it).
+
+Shaw Sigma dev baseline (`sigma --scenario shaw`), completing B2:
+
+```
+pool 53645, flagged 1468, event_label unavailable 0
+  event_label TP 1468 FP 0 FN 4592 TN 47585 prec 1.0000 recall 0.2422 F1 0.3900 FNR 0.7578
+  time_label  TP 1468 FP 0 FN 5260 TN 46917 prec 1.0000 recall 0.2182 F1 0.3582 FNR 0.7818
+```
+
+Done: `app/detection/triage.py` (label-free), `triage_report.py` (the only
+B3 label reader), `Repository.iter_alert_models`, CLI `triage`, API
+`POST /incidents/build` (permission `incident.build`, audited, denied
+requests audited as `denied`). Tests: single alert, gap exactly at / just
+over, chaining, cross-detector merge through a shared IP, every severity
+row, RBAC deny, audit entry.
+
+Real output, `triage --scenario <s>` (gap 300 s, no sigma alerts added,
+0 IOC indicators):
+
+| | russellmitchell | shaw |
+|---|---|---|
+| stored alerts read | 45,544 | 70,782 |
+| excluded by selection (training mode, Suricata duplicates) | 9,586 | 17,100 |
+| alerts in incidents | 35,958 | 53,682 |
+| incidents | 837 | 1,175 |
+| size 1 / 2-9 / 10-99 / 100-999 / >=1000 | 167 / 304 / 303 / 62 / 1 | 478 / 219 / 337 / 139 / 2 |
+| largest incident | 11,208 alerts | 6,003 alerts |
+| severity High / Medium / Low | 4 / 12 / 821 | 1 / 47 / 1,127 |
+| rows hit | H2 4, M2 8, M3 4, L1 821 | H2 1, M2 18, M3 29, L1 1,127 |
+| cross-detector incidents | 16 | 34 |
+| runtime | 3.85 s | 6.8 s |
+
+**Descriptive dev check** (labels.csv phase intervals overlapped in time by
+>= 1 incident; dev scenario, not a paper result): russellmitchell 10/10,
+shaw 10/10. Per phase (incidents overlapping, by severity):
+russellmitchell network_scans 3 {Low 3}, service_scans 1 {High 1}, dirb 1
+{High 1}, wpscan 1 {High 1}, webshell 1 {High 1}, cracking 5 {High 1, Low 4},
+reverse_shell 1 {Medium 1}, privilege_escalation 1 {Medium 1}, service_stop
+3 {Low 3}, dnsteal 12 {Low 12}; shaw service_stop 2 {Low 2}, dnsteal 8
+{Low 8}, network_scans 2 {Low 2}, service_scans 1 {Medium 1}, wpscan 1
+{Medium 1}, dirb 1 {Medium 1}, webshell 1 {Medium 1}, cracking 13 {Low 11,
+Medium 2}, reverse_shell 3 {Low 1, Medium 2}, privilege_escalation 2
+{Medium 2}. Caveat: time overlap only; the single 11,208-alert
+russellmitchell incident spans several phases, so "overlapped" does not
+mean "detected".
+
+Decisions taken (B3):
+
+- Default gap 300 s, chosen before any result, not tuned; it is a parameter.
+- Entities: `host_ip` and the carried source IP (Wazuh `data.srcip`,
+  Suricata `data.src_ip`); destination IPs are not entities (they would
+  chain every inbound alert through the server).
+- Triage uses `DEFAULT_EVALUATION_SELECTION` (keeps aggregates: they are
+  detector output), not the investigation pool.
+- Level classes from each detector's own scale (Wazuh >= 12 high, 7-11
+  medium; Suricata 1 high, 2 medium; Sigma critical/high, medium).
+- IOC store is empty by default (feeds disabled); `--ioc-file` loads a
+  local list.
+- Rebuilding deletes a scenario's earlier incidents except ones a report
+  refers to.
+
+Next: B4 ML detection baselines.
+
+## B4 checkpoint: ML detection baselines (committed on `phase3/wave-b-rest`)
+
+Done: `app/detection/features.py` (label-free, 12 features pinned by a
+test with the forbidden names), `app/detection/ml_baselines.py`
+(IsolationForest `n_estimators=200, contamination="auto"`;
+HistGradientBoostingClassifier defaults; both seeded with
+`variants.seed` = 20261031), CLI `ml-baselines`. Labels only via
+`dev_labels` (truth area). Encoders fitted on training only; unseen
+categories -> -1.
+
+Real output, `ml-baselines --scenarios russellmitchell shaw` (**detection
+baselines, dev scenarios, not paper results**; runtime 13.12 s):
+
+```
+features (12): detector, severity, has_severity, rule_id, category, aminer_component, attack_mapped, ioc_match, host_count_60s, host_count_600s, evidence_lines, evidence_chars
+
+time:russellmitchell  train 13206 (event attack 0, benign 13206, unavailable 0; time attack 0)  test 22726 (event attack 10957, benign 11769, unavailable 0; time attack 11797)
+  cutoff 2022-01-23T09:24:43+00:00
+  isolation_forest         event_label TP  10957 FP   2977 FN      0 TN   8792 prec 0.7863 recall 1.0000 F1 0.8804 FNR 0.0000
+  isolation_forest         time_label  TP  11342 FP   2592 FN    455 TN   8337 prec 0.8140 recall 0.9614 F1 0.8816 FNR 0.0386
+  hist_gradient_boosting   skipped: training split has a single event_label class
+
+time:shaw  train 26199 (event attack 0, benign 26199, unavailable 0; time attack 0)  test 27446 (event attack 6060, benign 21386, unavailable 0; time attack 6728)
+  cutoff 2022-01-28T14:10:10+00:00
+  isolation_forest         event_label TP   6060 FP   5133 FN      0 TN  16253 prec 0.5414 recall 1.0000 F1 0.7025 FNR 0.0000
+  isolation_forest         time_label  TP   6323 FP   4870 FN    405 TN  15848 prec 0.5649 recall 0.9398 F1 0.7057 FNR 0.0602
+  hist_gradient_boosting   skipped: training split has a single event_label class
+
+cross:russellmitchell->shaw  train 35932 (event attack 10957, benign 24975, unavailable 0; time attack 11797)  test 53645 (event attack 6060, benign 47585, unavailable 0; time attack 6728)
+  isolation_forest         event_label TP   3671 FP   8815 FN   2389 TN  38770 prec 0.2940 recall 0.6058 F1 0.3959 FNR 0.3942
+  isolation_forest         time_label  TP   3941 FP   8545 FN   2787 TN  38372 prec 0.3156 recall 0.5858 F1 0.4102 FNR 0.4142
+  hist_gradient_boosting   event_label TP   5284 FP    450 FN    776 TN  47135 prec 0.9215 recall 0.8719 F1 0.8960 FNR 0.1281
+  hist_gradient_boosting   time_label  TP   5303 FP    431 FN   1425 TN  46486 prec 0.9248 recall 0.7882 F1 0.8511 FNR 0.2118
+
+cross:shaw->russellmitchell  train 53645 (event attack 6060, benign 47585, unavailable 0; time attack 6728)  test 35932 (event attack 10957, benign 24975, unavailable 0; time attack 11797)
+  isolation_forest         event_label TP  10952 FP   2153 FN      5 TN  22822 prec 0.8357 recall 0.9995 F1 0.9103 FNR 0.0005
+  isolation_forest         time_label  TP  11254 FP   1851 FN    543 TN  22284 prec 0.8588 recall 0.9540 F1 0.9039 FNR 0.0460
+  hist_gradient_boosting   event_label TP  10388 FP     67 FN    569 TN  24908 prec 0.9936 recall 0.9481 F1 0.9703 FNR 0.0519
+  hist_gradient_boosting   time_label  TP  10443 FP     12 FN   1354 TN  24123 prec 0.9989 recall 0.8852 F1 0.9386 FNR 0.1148
+```
+
+**Finding (needs a user decision, not changed):** with the specified split
+(first 60% of the *timeline* trains), the training side of both dev
+scenarios holds **0 attack alerts** by either label: the attack phases sit
+in the last 40% of each timeline. The supervised model is therefore
+reported as skipped on the time splits, and the time-split IsolationForest
+numbers are a "train on benign only" setting. Alternatives (split by alert
+count, or a phase-stratified split) would change the split design, so they
+are left to the user.
+
+Decisions taken (B4):
+
+- Pool = investigation-eligible alerts (same as the study and the Sigma baseline).
+- Supervised target = event_label; time_label only as evaluation sensitivity.
+- `contamination="auto"` (scikit-learn's own threshold) so the base rate is never fed in.
+- XGBoost installed but not used (one supervised model asked; HistGB needs no extra dependency).
+- No scaler (trees are scale-invariant); `-1` + `has_severity` encodes a missing severity.
+- Window counts use strictly earlier timestamps on the same `host_ip`,
+  computed per scenario over its whole time-ordered pool.
+- mypy override: `ignore_missing_imports` for `sklearn` only (no stubs shipped).
+
+## Wave B wrap-up (branch `phase3/wave-b-rest`)
+
+- Full run on the committed branch, real dev data present (Wave C work
+  stashed aside): `pytest -q` -> `400 passed, 4 skipped in 21.37s` (the 4
+  skips are the docker-compose infra tests); `mypy` -> `Success: no issues
+  found in 61 source files`.
+- Secret scan (no scanner installed and none may be installed offline, so a
+  regex scan: private keys, AWS/GitHub/Slack/Google/sk- keys, JWTs,
+  assigned secret literals, URLs with credentials, over every tracked file
+  and the added lines of `git diff main..HEAD`):
+  `python secret_scan.py main` ->
+  `backend/tests/test_agent_client.py:55: assigned secret literal: secret = "sk-test-not-a-real-key"`,
+  `scanned 123 tracked files and 2619 added diff lines (main..HEAD): 1 file hits, 0 diff hits`.
+  The one hit is the M5 test placeholder already on `main`, not a secret.
+  Tracked files named `*.env`, `*.pem`, `*.key`, `id_rsa`: 0.

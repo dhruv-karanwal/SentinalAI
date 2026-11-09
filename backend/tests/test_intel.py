@@ -18,7 +18,8 @@ T0 = datetime(2022, 1, 21, tzinfo=timezone.utc)
 
 def alert(detector: Detector, raw: dict[str, Any], lines: list[str] | None = None,
           host_ip: str | None = "10.0.0.5") -> Alert:
-    types = {Detector.WAZUH: DetectorType.RULE_BASED, Detector.SURICATA: DetectorType.SIGNATURE_BASED,
+    types = {Detector.WAZUH: DetectorType.RULE_BASED, Detector.SIGMA: DetectorType.RULE_BASED,
+             Detector.SURICATA: DetectorType.SIGNATURE_BASED,
              Detector.AMINER: DetectorType.ANOMALY_BASED}
     return Alert(alert_id=f"a-{len(str(raw))}", scenario="synthetic", detector=detector,
                  detector_type=types[detector], timestamp=T0, rule_id="1", host_ip=host_ip,
@@ -98,3 +99,11 @@ def test_feed_adapters_are_disabled_with_a_labelled_synthetic_sample() -> None:
             feed.fetch()
         sample = feed.offline_sample()
         assert sample and all("SYNTHETIC" in i.description and "offline-sample" in i.source for i in sample)
+
+
+def test_sigma_tags_are_native_technique_ids(kb: AttackKB) -> None:
+    sig = alert(Detector.SIGMA, {"sigma": {"tags": ["attack.initial-access", "attack.t1190",
+                                                    "attack.t1110.001", "cve.2021-1234"]}})
+    assert [(m["technique_id"], m["source"]) for m in map_alert(sig, kb)] == [
+        ("T1190", "native"), ("T1110.001", "native")]
+    assert map_alert(alert(Detector.SIGMA, {"sigma": {"tags": "attack.t1190"}}), kb) == []

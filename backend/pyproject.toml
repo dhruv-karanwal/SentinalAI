@@ -11,3 +11,8 @@ python_version = "3.11"
 strict = true
 plugins = ["pydantic.mypy"]
 files = ["app"]
+
+[[tool.mypy.overrides]]
+# scikit-learn ships no type information; everything else stays strict.
+module = ["sklearn", "sklearn.*"]
+ignore_missing_imports = true

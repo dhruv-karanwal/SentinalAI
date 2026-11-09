@@ -84,6 +84,14 @@ def _wazuh_level_key(entry: PoolEntry) -> tuple[object, ...]:
     return (1, 0, *_time_key(entry))
 
 
+def _order_rank(config: BaselineConfig, entry: PoolEntry) -> int:
+    """Rank in the frozen detector order; a detector outside it (a platform detector such as
+    sigma, present only if a study config opts in) ranks after every listed one."""
+    order = config.detector_order
+    value = entry.detector.value
+    return order.index(value) if value in order else len(order)
+
+
 def baseline_citations(name: str, view: CaseAlerts, config: BaselineConfig,
                        k: int | None = None) -> list[str]:
     """Alert ids cited by base rule ``name``; ``k`` defaults to the first configured k."""
@@ -94,7 +102,7 @@ def baseline_citations(name: str, view: CaseAlerts, config: BaselineConfig,
         "cite-none": lambda: [],
         "cite-top-k-wazuh-level": lambda: sorted(entries, key=_wazuh_level_key)[:k],
         "cite-top-k-detector-order": lambda: sorted(
-            entries, key=lambda e: (config.detector_order.index(e.detector.value), *_time_key(e)))[:k],
+            entries, key=lambda e: (_order_rank(config, e), *_time_key(e)))[:k],
         "cite-aminer-only": lambda: [e for e in entries if e.detector is Detector.AMINER],
     }
     if name not in rules:

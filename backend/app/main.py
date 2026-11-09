@@ -19,6 +19,7 @@ import dataclasses
 import json
 import re
 import sys
+import time
 from collections.abc import Sequence
 from datetime import timedelta, timezone, tzinfo
 from pathlib import Path
@@ -46,6 +47,7 @@ DEFAULT_LABELS = Path(__file__).resolve().parents[2] / "data" / "raw" / "ait_ads
 
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parents[2] / "data" / "processed"
 DEFAULT_PLATFORM_DIR = Path(__file__).resolve().parents[2] / "data" / "platform"
+DEFAULT_SIGMA_RULES = Path(__file__).resolve().parents[2] / "data" / "raw" / "sigma" / "repo"
 
 _OFFSET_RE = re.compile(r"([+-])(\d{2}):?(\d{2})")
 
@@ -179,6 +181,45 @@ def build_parser() -> argparse.ArgumentParser:
     plat.add_argument("--study-config", type=Path, default=DEFAULT_STUDY_CONFIG)
     plat.add_argument("--data-dir", type=Path, default=DEFAULT_PLATFORM_DIR,
                       help=f"SQLite fallback stores (default: {DEFAULT_PLATFORM_DIR})")
+
+    sig = sub.add_parser("sigma", help="Sigma rules over alert evidence lines (dev only) + dev "
+                                       "detection baseline")
+    sig.add_argument("--scenario", required=True, help="a dev scenario (held-out ones are refused)")
+    sig.add_argument("--rules-dir", type=Path, default=DEFAULT_SIGMA_RULES)
+    sig.add_argument("--processed-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    sig.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR / "sigma")
+    sig.add_argument("--study-config", type=Path, default=DEFAULT_STUDY_CONFIG)
+    sig.add_argument("--data-dir", type=Path, default=DEFAULT_PLATFORM_DIR,
+                     help="platform stores; the dev baseline reads labels from their truth area")
+    sig.add_argument("--no-score", action="store_true", help="skip the dev detection baseline")
+
+    tri = sub.add_parser("triage", help="B3: build incidents from the stored alerts of a dev "
+                                        "scenario (+ descriptive dev check)")
+    tri.add_argument("--scenario", required=True, help="a dev scenario (held-out ones are refused)")
+    tri.add_argument("--gap-seconds", type=_positive_int, default=300,
+                     help="max gap between linked alerts on one entity (default: 300)")
+    tri.add_argument("--include-sigma", action="store_true",
+                     help="add <scenario>.sigma.alerts.jsonl from --sigma-dir (written by `sigma`)")
+    tri.add_argument("--sigma-dir", type=Path, default=DEFAULT_OUTPUT_DIR / "sigma")
+    tri.add_argument("--ioc-file", type=Path, default=None,
+                     help="local indicator JSON (feeds are disabled; default: none)")
+    tri.add_argument("--labels", type=Path, default=DEFAULT_LABELS,
+                     help="labels.csv, read ONLY by the descriptive dev check")
+    tri.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR / "triage")
+    tri.add_argument("--study-config", type=Path, default=DEFAULT_STUDY_CONFIG)
+    tri.add_argument("--data-dir", type=Path, default=DEFAULT_PLATFORM_DIR)
+
+    mlb = sub.add_parser("ml-baselines", help="B4: IsolationForest + HistGradientBoosting detection "
+                                              "baselines on dev scenarios")
+    mlb.add_argument("--scenarios", nargs="+", default=["russellmitchell", "shaw"],
+                     help="dev scenarios (held-out ones are refused)")
+    mlb.add_argument("--train-fraction", type=float, default=0.6,
+                     help="time split: share of the timeline that trains (default 0.6)")
+    mlb.add_argument("--processed-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    mlb.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR / "ml")
+    mlb.add_argument("--study-config", type=Path, default=DEFAULT_STUDY_CONFIG)
+    mlb.add_argument("--data-dir", type=Path, default=DEFAULT_PLATFORM_DIR,
+                     help="platform stores; labels come from their truth area")
 
     user = sub.add_parser("create-user", help="create or replace a platform user")
     user.add_argument("--username", required=True)
@@ -470,6 +511,151 @@ def _platform_ingest(args: argparse.Namespace) -> int:
     return 0
 
 
+def _sigma(args: argparse.Namespace) -> int:
+    from app.detection.labels import MissingTruthError, dev_labels
+    from app.detection.sigma_report import run_sigma_scenario, sigma_dev_baseline
+    from app.platform.bootstrap import open_stores
+
+    try:
+        config = load_study_config(args.study_config)
+        report = run_sigma_scenario(args.processed_dir, args.scenario, config, args.rules_dir,
+                                    args.output_dir)
+    except (HeldOutScenarioError, ValueError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    rules, stats = report["rules"], report["stats"]
+    print(f"SIGMA over evidence lines - scenario {args.scenario} (dev scenario, not a paper result)")
+    print(f"rules: {rules['total']} total, {rules['compiled']} compiled, {rules['skipped']} skipped")
+    for reason, n in rules["skipped_by_reason"].items():
+        print(f"  skipped {reason}: {n}")
+    print(f"compiled by log type: {rules['compiled_by_log_type']}")
+    print(f"source alerts {stats['source_alerts']}, without lines {stats['alerts_without_lines']}, "
+          f"lines {stats['log_lines']}, unclassified lines {stats['lines_unclassified']}")
+    print(f"events by log type: {stats['events_by_log_type']}")
+    print(f"sigma alerts: {stats['sigma_alerts']} from {report['rules_with_hits']} rules; "
+          f"runtime load {report['runtime_seconds']['load_rules']} s, "
+          f"evaluate {report['runtime_seconds']['evaluate']} s")
+    for rid, info in report["per_rule"].items():
+        if info["hits"]:
+            print(f"  {info['hits']:>7d} hits / {info['events_evaluated']:>7d} events  "
+                  f"{info['title']}  ({info['file']})")
+    if args.no_score:
+        return 0
+    try:
+        labels = dev_labels(open_stores(args.data_dir).truth, args.scenario, config)
+    except MissingTruthError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    base = sigma_dev_baseline(report["_pool_ids"], set(report["_flagged_source_ids"]), labels)
+    print(f"\n{base['label']}: verdict = pool alert flagged by some Sigma rule")
+    print(f"pool {base['pool_alerts']}, flagged {base['flagged']}, event_label unavailable "
+          f"{base['event_label_unavailable']}")
+    for truth in ("event_label", "time_label"):
+        s = base[truth]
+        print(f"  {truth:11s} TP {s['tp']} FP {s['fp']} FN {s['fn']} TN {s['tn']} "
+              f"prec {_fmt(s['precision'])} recall {_fmt(s['recall'])} F1 {_fmt(s['f1'])} "
+              f"FNR {_fmt(s['fnr'])}")
+    if args.output_dir is not None:
+        (Path(args.output_dir) / f"{args.scenario}.sigma.dev_baseline.json").write_text(
+            json.dumps(base, indent=2) + "\n", encoding="utf-8")
+    return 0
+
+
+def _triage(args: argparse.Namespace) -> int:
+    from app.alert_pipeline import iter_alert_file
+    from app.detection.triage import TriageConfig, build_and_store
+    from app.detection.triage_report import phase_overlap
+    from app.intel.ioc import IocStore
+    from app.platform.bootstrap import open_stores
+
+    try:
+        config = load_study_config(args.study_config)
+        config.split.require_dev(args.scenario)
+        stores = open_stores(args.data_dir)
+        extra = []
+        if args.include_sigma:
+            extra = list(iter_alert_file(args.sigma_dir / f"{args.scenario}.sigma.alerts.jsonl"))
+        iocs = IocStore.load(args.ioc_file) if args.ioc_file else None
+        t0 = time.perf_counter()
+        summary = build_and_store(stores.repo, args.scenario, TriageConfig(args.gap_seconds),
+                                  extra, iocs)
+        summary["runtime_seconds"] = round(time.perf_counter() - t0, 2)
+        summary["ioc_indicators"] = len(iocs) if iocs else 0
+        incidents = stores.repo.list_incidents(args.scenario)
+        check = phase_overlap(incidents, args.labels, args.scenario, config)
+    except (HeldOutScenarioError, ValueError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except IngestionError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(f"TRIAGE - scenario {args.scenario} (dev scenario, not a paper result); "
+          f"gap {summary['gap_seconds']} s, sigma alerts added {summary['extra_alerts']}, "
+          f"IOC indicators {summary['ioc_indicators']}")
+    print(json.dumps({k: v for k, v in summary.items() if k != "size_distribution"}, indent=2))
+    print(f"\n{check['label']}: attack phases (labels.csv) overlapped in time by >= 1 incident: "
+          f"{check['phases_overlapped']}/{check['phases']}")
+    for ph in check["per_phase"]:
+        print(f"  {ph['phase']:28s} {ph['overlapping_incidents']:>6d} incidents "
+              f"{ph['overlapping_by_severity']}")
+    out = Path(args.output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / f"{args.scenario}.triage.json").write_text(
+        json.dumps({"summary": summary, "descriptive_dev_check": check}, indent=2) + "\n",
+        encoding="utf-8")
+    return 0
+
+
+def _ml_baselines(args: argparse.Namespace) -> int:
+    from app.detection.labels import MissingTruthError
+    from app.detection.ml_baselines import run_ml_baselines
+    from app.platform.bootstrap import open_stores
+
+    try:
+        config = load_study_config(args.study_config)
+        for s in args.scenarios:
+            config.split.require_dev(s)
+        if not 0 < args.train_fraction < 1:
+            raise ValueError("--train-fraction must be between 0 and 1")
+        t0 = time.perf_counter()
+        report = run_ml_baselines(args.processed_dir, open_stores(args.data_dir).truth, config,
+                                  args.scenarios, args.train_fraction)
+        report["runtime_seconds"] = round(time.perf_counter() - t0, 2)
+    except (HeldOutScenarioError, ValueError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except MissingTruthError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(f"ML DETECTION BASELINES - {report['label']}")
+    print(f"features ({len(report['features'])}): {', '.join(report['features'])}")
+    for name, split in report["splits"].items():
+        bal = split["class_balance"]
+        print(f"\n{name}  train {bal['train']['n']} (event attack {bal['train']['event_label']['attack']}, "
+              f"benign {bal['train']['event_label']['benign']}, unavailable "
+              f"{bal['train']['event_label']['unavailable']}; time attack "
+              f"{bal['train']['time_label']['attack']})  test {bal['test']['n']} (event attack "
+              f"{bal['test']['event_label']['attack']}, benign {bal['test']['event_label']['benign']}, "
+              f"unavailable {bal['test']['event_label']['unavailable']}; time attack "
+              f"{bal['test']['time_label']['attack']})")
+        if split.get("cutoff"):
+            print(f"  cutoff {split['cutoff']}")
+        for model, res in split["models"].items():
+            if "skipped" in res:
+                print(f"  {model:24s} skipped: {res['skipped']}")
+                continue
+            for truth in ("event_label", "time_label"):
+                s = res[truth]
+                print(f"  {model:24s} {truth:11s} TP {s['tp']:>6d} FP {s['fp']:>6d} FN {s['fn']:>6d} "
+                      f"TN {s['tn']:>6d} prec {_fmt(s['precision'])} recall {_fmt(s['recall'])} "
+                      f"F1 {_fmt(s['f1'])} FNR {_fmt(s['fnr'])}")
+    print(f"\nruntime {report['runtime_seconds']} s")
+    out = Path(args.output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "ml_baselines.dev.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    return 0
+
+
 def _create_user(args: argparse.Namespace) -> int:
     """Password only from the environment (SENTINEL_NEW_USER_PASSWORD), never argv."""
     import os
@@ -513,6 +699,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _cases(args)
     if args.command == "platform-ingest":
         return _platform_ingest(args)
+    if args.command == "sigma":
+        return _sigma(args)
+    if args.command == "triage":
+        return _triage(args)
+    if args.command == "ml-baselines":
+        return _ml_baselines(args)
     if args.command == "create-user":
         return _create_user(args)
     if args.command == "serve":

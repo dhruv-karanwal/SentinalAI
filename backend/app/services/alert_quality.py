@@ -34,8 +34,8 @@ from app.schemas.alert import (
     DEFAULT_EVALUATION_SELECTION,
     INVESTIGATION_SELECTION,
     Alert,
+    AIT_ADS_DETECTORS,
     AlertKind,
-    Detector,
     GroundTruth,
 )
 
@@ -46,7 +46,7 @@ class AlertQualityAccumulator:
         self.total = 0
         self.rejected_by_reason: Counter[str] = Counter()
         self.rejected_by_file: Counter[str] = Counter()
-        self.detectors: dict[str, Counter[str]] = {d.value: Counter() for d in Detector}
+        self.detectors: dict[str, Counter[str]] = {d.value: Counter() for d in AIT_ADS_DETECTORS}
         self.eve_keys: Counter[bytes] = Counter()
         self.fast_keys: Counter[bytes] = Counter()
         self.alert_ids: set[bytes] = set()

@@ -46,9 +46,9 @@ multi-agent comparison, the verifier, statistics.
 | M6 | Case selection options **done** (`run-agent --select reachable`, `--case-id`). 2-case smoke test + gated mini-pilot **blocked: no local model** (Ollama + `qwen2.5:7b-instruct` approved, download paused: slow internet) |
 | A | **Done, merged** (PR #3): replay collector, stream (in-memory / Kafka), enrichment, batched consumer, SQLite / PostgreSQL storage with migrations, separate truth area, FTS5 / OpenSearch, local / MinIO objects, FastAPI + JWT + RBAC + audit, Prometheus metrics, docker-compose `lite`/`full` |
 | B1 | **Done**: ATT&CK KB from local STIX + deterministic alert mapping (Wazuh native ids, then `RULE_TABLE`), IOC store + matcher, OTX/MISP/VirusTotal disabled stubs with a labelled synthetic sample |
-| B2 | **Next**: Sigma rule engine over normalized events (pySigma 2.0.2 parses all 256 approved rules; the evaluator is not written yet) |
-| B3 | Not started: triage dedup + grouping, deterministic Low/Medium/High rule, correlation into incidents (same host / IP / time) |
-| B4 | Not started: ML detection baselines (IsolationForest / scikit-learn / XGBoost) on AIT-ADS **dev scenarios only** (CICIDS2017 not available: its URL returns a registration page) |
+| B2 | **Done**: Sigma engine over alert evidence lines (`app/detection/sigma_engine.py`; 90/256 rules compile, the rest skipped by counted reason), `Detector.SIGMA` as a platform detector (not a study variable), single label door `app/detection/labels.py`, frozen-sections hash test |
+| B3 | **Done**: `app/detection/triage.py` (label-free): existing dedup kept, entities host/src-IP, union-find grouping with gap 300 s (inclusive), first-match severity table H1-L1, incidents via `put_incident` with timeline; CLI `triage`, API `POST /incidents/build` (RBAC `incident.build`, audited); descriptive dev check (labels.csv phase overlap) in `triage_report.py` only |
+| B4 | **Done**: ML detection baselines on AIT-ADS dev scenarios (`app/detection/features.py` label-free, 12 pinned features; `ml_baselines.py`: IsolationForest contamination=auto + HistGradientBoosting, seed = variants.seed; time split 60/40 of the timeline per scenario + cross-scenario both ways; labels only via `dev_labels`). CLI `ml-baselines`. XGBoost installed but unused. CICIDS2017 not available |
 | C | Not started: ATT&CK RAG (bge-small already local), LangGraph supervisor + agents, evidence verifier, matched-budget comparison; **GATE after the pilot** |
 | D | Not started: reports (JSON/PDF/CSV), approvals, React dashboard (needs the npm download), copilot, feedback script, Grafana JSON, security notes, Jira stub |
 | E | Only after the user says go |
@@ -101,6 +101,13 @@ S=../data/samples/synthetic_ait_ads
 # Wave A platform: replay a DEV scenario into the stores (SQLite fallback in data/platform/,
 # or PostgreSQL / OpenSearch / Kafka via SENTINEL_DB_URL / SENTINEL_SEARCH_URL / SENTINEL_KAFKA)
 ../.venv/Scripts/python.exe -m app.main platform-ingest --scenario russellmitchell
+# B2: Sigma rules over alert evidence lines (DEV only; writes data/processed/sigma/), then the
+# dev detection baseline with labels from the platform truth area (needs platform-ingest first)
+../.venv/Scripts/python.exe -m app.main sigma --scenario russellmitchell
+# B3: incidents from the stored alerts (needs platform-ingest; --include-sigma adds the sigma file)
+../.venv/Scripts/python.exe -m app.main triage --scenario russellmitchell --gap-seconds 300
+# B4: ML detection baselines (dev scenarios; labels from the truth area; writes data/processed/ml/)
+../.venv/Scripts/python.exe -m app.main ml-baselines --scenarios russellmitchell shaw
 # passwords and secrets only from the environment, never as arguments
 ../.venv/Scripts/python.exe -m app.main create-user --username alice --role analyst   # needs SENTINEL_NEW_USER_PASSWORD
 ../.venv/Scripts/python.exe -m app.main serve      # API on 127.0.0.1:8000; needs SENTINEL_JWT_SECRET
@@ -171,8 +178,20 @@ backend/app/
                           consumer.py, bootstrap.py (open_stores, ingest_scenario)
   api/                    auth.py (roles, PERMISSIONS, JWT, bcrypt), app.py (routes), server.py
   ops/metrics.py          Prometheus metrics (API + agent cost)
-  intel/attack.py         AttackKB.from_stix, Technique, map_alert, RULE_TABLE
+  intel/attack.py         AttackKB.from_stix, Technique, map_alert (native: Wazuh rule.mitre.id,
+                          Sigma attack.tNNNN tags), RULE_TABLE
   intel/ioc.py            Indicator, IocStore.match_alert, disabled feed adapters (FEEDS)
+  detection/sigma_engine.py  log-line parsers (apache_access/error, auditd, syslog), load_rules
+                          (RuleSet: compiled + skipped by reason), SigmaEngine.run -> sigma Alerts
+  detection/sigma_report.py  run_sigma_scenario (no labels), sigma_dev_baseline (labels)
+  detection/labels.py     dev_labels(TruthStore, scenario, config): the ONE label door of the
+                          detection layer (require_dev; truth area only)
+  detection/triage.py     TriageConfig (gap_seconds, selection), entities, group_alerts (union-find),
+                          level_class, SEVERITY_TABLE + severity(), build_incidents, build_and_store
+  detection/triage_report.py  phase_overlap: descriptive dev check (the only B3 label reader)
+  detection/features.py   FEATURE_NAMES (pinned), raw_features(alerts, iocs) (no labels; trailing
+                          per-host counts, strictly past), FeatureEncoder (train-only vocab, -1 unknown)
+  detection/ml_baselines.py  time_split, feature_rows, fit_and_score, run_ml_baselines
 backend/tests/            pytest, one file per module + test_pipeline.py (end to end)
 data/samples/             committed SYNTHETIC samples (see its README)
 data/raw/, data/processed/ git-ignored: local datasets and pipeline outputs
@@ -453,9 +472,27 @@ experiments/config/study.json  frozen split; variant seed, shuffled/noise refere
   dovecot authentication_success alerts dominates); Suricata and AMiner carry
   none. Map only native ids and `RULE_TABLE` rows; never guess.
 - pySigma 2.0.2 parses all 256 approved rules (rules/linux, rules/web) with 0
-  errors. Most need fields (process_creation, auditd key=value, webserver
-  cs-*/sc-*); AIT-ADS evidence is raw log lines, so the Sigma engine must
-  parse lines into fields per log type or run keyword-only rules.
+  errors, but ships no in-process backend: `sigma_engine.py` evaluates
+  `parsed_condition[i].parse()` itself. 166 rules are skipped by reason
+  (process_creation 123, proxy 29, file_event 8, network_connection 5,
+  nginx 1): their fields are not in these logs. Never add a field mapping
+  that the log line does not carry; the mapping table is the module docstring.
+- Sigma sees only lines another detector already alerted on (no AIT-LDSv2):
+  its dev numbers are a re-detection rate over the pool, labelled
+  "dev detection baseline", never a detector comparison.
+- ML features never include labels, phase, scenario, alert id, raw timestamps or source
+  file/line (`test_exact_feature_list_and_no_forbidden_feature`). Window counts look only at
+  strictly earlier timestamps. Encoders are fitted on the training split only; IsolationForest
+  uses `contamination="auto"` so the base rate is never an input. Numbers are labelled
+  "detection baselines, dev scenarios, not paper results". mypy ignores missing sklearn stubs only.
+- Triage severity is a first-match table (`SEVERITY_TABLE`, rows H1-H3, M1-M3, L1), each row
+  tested. Level classes are triage-only (Wazuh >= 12 high, 7-11 medium; Suricata 1 high, 2
+  medium; Sigma critical/high, medium); `Alert.severity` is never rescaled. A rebuild deletes the
+  scenario's incidents except those a report refers to. Report the gap with every incident number.
+- Study code iterates `AIT_ADS_DETECTORS`, never `Detector`: `Detector.SIGMA`
+  exists for the platform, and a study variant `sigma` appears only if
+  `variants.extra_detectors` lists it (it does not). `test_frozen_sections_are_unchanged`
+  pins a sha256 of `split` + the frozen detector order in study.json.
 - The CICIDS2017 MachineLearningCSV URL returns an HTML registration page,
   not the zip: check the content type of any dataset download.
 - The internet here can be slow (~100 kB/s): run downloads in the background

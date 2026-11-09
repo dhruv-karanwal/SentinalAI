@@ -59,7 +59,14 @@ from typing import Any
 from app.evaluation.metrics import TriageScores, triage_scores
 from app.ingestion.mappings import AIT_ADS_BENIGN_TIME_LABEL
 from app.ingestion.records import IngestionError, resolve_input_file
-from app.schemas.alert import INVESTIGATION_SELECTION, Alert, AlertSelection, Detector, GroundTruth
+from app.schemas.alert import (
+    AIT_ADS_DETECTORS,
+    INVESTIGATION_SELECTION,
+    Alert,
+    AlertSelection,
+    Detector,
+    GroundTruth,
+)
 from app.study.config import NOISE_REFERENCE_CHOICES, SHUFFLED_REFERENCE_CHOICES, StudyConfig
 
 BASE_VARIANTS = SHUFFLED_REFERENCE_CHOICES  # wazuh, suricata, aminer, fused, oracle
@@ -252,15 +259,17 @@ def _noise_variant(pool: AlertPool, reference: Variant, seed: int) -> Variant:
 
 def build_variants(pool: AlertPool, *, seed: int,
                    shuffled_references: Sequence[str] = ("fused",),
-                   noise_references: Sequence[str] = ()) -> dict[str, Variant]:
+                   noise_references: Sequence[str] = (),
+                   extra_detectors: Sequence[str] = ()) -> dict[str, Variant]:
     unknown = [r for r in shuffled_references if r not in BASE_VARIANTS]
     if unknown:
         raise ValueError(f"unknown shuffled reference variant(s): {', '.join(unknown)}")
     unknown = [r for r in noise_references if r not in NOISE_REFERENCE_CHOICES]
     if unknown:
         raise ValueError(f"unknown noise reference detector(s): {', '.join(unknown)}")
+    detectors = list(AIT_ADS_DETECTORS) + [Detector(d) for d in extra_detectors]
     variants: dict[str, Variant] = {}
-    for detector in Detector:
+    for detector in detectors:
         variants[detector.value] = Variant(
             detector.value, pool.scenario, f"pool alerts with detector == {detector.value}",
             tuple(e for e in pool.entries if e.detector is detector))
@@ -365,7 +374,8 @@ def experiment_variants(pool: AlertPool, config: StudyConfig,
     return build_variants(pool, seed=config.variant_seed,
                           shuffled_references=(config.shuffled_reference if shuffled_references is None
                                                else shuffled_references),
-                          noise_references=config.noise_reference)
+                          noise_references=config.noise_reference,
+                          extra_detectors=config.extra_detectors)
 
 
 def dev_triage_report(processed_dir: str | Path, scenario: str, config: StudyConfig, *,
