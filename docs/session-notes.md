@@ -1660,3 +1660,165 @@ Decisions taken (B4):
   `scanned 123 tracked files and 2619 added diff lines (main..HEAD): 1 file hits, 0 diff hits`.
   The one hit is the M5 test placeholder already on `main`, not a secret.
   Tracked files named `*.env`, `*.pem`, `*.key`, `id_rsa`: 0.
+
+## Wave C, C1 checkpoint: ATT&CK RAG (branch `phase3/wave-c-code` from `main` after the Wave B merge)
+
+Wave B merged: PR https://github.com/dhruv-karanwal/SentinalAI/pull/5,
+merge commit `1354f97`. `phase3/wave-c-code` was cut from that `main`.
+
+Order kept: the relevance set (`experiments/rag/attack_relevance_set.json`,
+25 hand-written queries) was committed first (`69a7882`), before any
+retrieval run; its sha256 (LF) `f86df5d4...5e8e2` is pinned by a test.
+
+Real output:
+
+```
+$ python -m app.main rag-index
+ATT&CK index: 706 techniques (bundle 20.1), 1118 chunks embedded with BAAI/bge-small-en-v1.5 (dim 384) in 84.6 s; collection 'attack'
+$ python -m app.main rag-eval
+Relevance set attack-relevance-v1: 25 queries (measured, local BAAI/bge-small-en-v1.5)
+  recall@1: 0.2800 (7/25)
+  recall@3: 0.4800 (12/25)
+  recall@5: 0.5600 (14/25)
+```
+
+Misses at 5 (per-query ranks in `data/processed/rag/relevance_eval.json`):
+q03 (dovecot login -> T1078), q05/q07/q08 (scanner user agents, port scan
+-> T1595/T1046), q06 (404 bursts), q11 (SQL injection -> T1190), q13 (DNS
+exfil), q14 (useradd), q17 (wget + chmod), q19 (reverse shell), q24 (ping
+sweep). The set was not edited after these results.
+
+Decisions taken (C1): exact cosine search over a SQLite table (1,118
+vectors; no ANN index needed); one chunk per technique unless the
+description exceeds 1,200 chars (split at paragraphs); `(Citation: ...)`
+markers removed; queries use bge's query instruction (`query_embed`).
+Note: tests for Wave C were written after part of the Wave C code (while
+the shaw replay ran), not strictly before it; all of them were in place
+and passing before any Wave C commit.
+
+## Wave C, C2 checkpoint: verifier and the multi-agent graph
+
+Done: `agent/verifier.py`, `agent/multi_tools.py`, `agent/graph.py`
+(LangGraph 1.2.20 `StateGraph`: supervisor, log_analysis, correlation,
+knowledge_retrieval, anomaly_analysis, investigation, report_generation,
+verifier). Tests (`tests/test_wave_c_graph.py`, FakeClient only): every
+normal edge walked in one scripted case; the three stop edges; token budget
+hard stop (total tokens <= budget); tool budget stop at exactly the limit;
+turn limit; forced report after the supervisor step limit; unparseable
+output (one repair per case); empty and unavailable retrieval; strict reply
+parsing; the verifier dropping a planted unsupported claim (and an unknown
+citation) with reasons; leak scan of every prompt, tool output, memory write
+and repository memory row. No real numbers exist for C2 (no model).
+
+Decisions taken (C2):
+
+- The graph uses the M5 `agent` budgets unchanged; pacing settings
+  (4 tool calls per agent turn, 8 supervisor steps) are not budgets.
+- An agent that keeps calling tools past its turn limit ends its turn
+  without a note (counted as `turns_without_note`); nothing is invented.
+- Memory session ids are an opaque hash of the toolkit salt; note text is
+  time-masked and capped at 2,000 characters.
+
+## Wave C, C3 checkpoint: matched-budget runner and dry-run estimate
+
+Done: `agent/matched.py` (`estimate_matched`, `run_matched`),
+`app/cli_wave_c.py` (`rag-index`, `rag-eval`, `pilot-estimate`,
+`run-matched`, registered by `main.py`). Both arms read the same `agent`
+budgets; both pass the same verifier; both are scored by `score_case`
+before and after the verifier, next to the same baselines on the same
+cases. Run records: tokens in/out, requests, tool calls, latency, parse
+status, status, budget hit, citations/claims kept and dropped.
+
+Real output, `python -m app.main pilot-estimate --select reachable` (no
+model was called; method printed by the command: upper bounds, cases x
+`max_tokens_per_case` per arm, prompts at 3 characters per token, tool
+calls cases x `max_tool_calls` per arm): 14 reachable-selection cases per
+(dev scenario, variant, truncation); per run token bound 1,120,000 and
+tool-call bound 336 (2 arms); first prompts about 10,630-10,690 tokens
+(single) and 6,030-6,080 (graph supervisor) per run.
+`TOTAL: 44 runs, 616 cases x 2 arms, token bound 49280000, tool-call bound 14784`
+(all 22 experiment variants x 2 truncations x 2 dev scenarios; choosing the
+pilot's variants is a user decision).
+
+`run-matched --scenario russellmitchell --variant fused --select reachable
+--limit 2 --dry-run` -> `2 cases x 2 arms; token bound 160000; tool-call
+bound 48`, `DRY RUN: no model was called`.
+
+No real pilot was run and Wave D was not started.
+
+## Wave C wrap-up
+
+- Full run on `phase3/wave-c-code`, real dev data present: `pytest -q` ->
+  `422 passed, 4 skipped in 19.14s` (4 infra skips); `mypy` -> `Success:
+  no issues found in 72 source files`.
+- Secret scan `python secret_scan.py main` ->
+  `scanned 138 tracked files and 2134 added diff lines (main..HEAD): 2 file hits, 0 diff hits`;
+  the two hits are the M5 test placeholder `sk-test-not-a-real-key` and the
+  Wave B note above quoting it. Not secrets.
+
+# Final report, 2026-11-09
+
+## Test and type-check output per branch
+
+| branch | pytest | mypy |
+|---|---|---|
+| `main` before (9630c81) | 327 passed, 4 skipped in 14.76s | no issues, 53 files |
+| `phase3/wave-b-rest` | 400 passed, 4 skipped in 21.37s | no issues, 61 files |
+| `phase3/wave-c-code` | 422 passed, 4 skipped in 19.14s | no issues, 72 files |
+
+## Real counts (dev scenario, not paper results) and the commands
+
+| command | result |
+|---|---|
+| `platform-ingest --scenario russellmitchell` | 45,544 stored, 0 rejected, 351 s |
+| `platform-ingest --scenario shaw` | 70,782 stored, 0 rejected, 2,028 s |
+| `sigma --scenario russellmitchell` | 256 rules: 90 compiled, 166 skipped; 6,387 Sigma alerts from 2 rules; dev detection baseline event_label P 0.9939 R 0.5794 F1 0.7320 |
+| `sigma --scenario shaw` | 1,468 Sigma alerts from 2 rules; event_label P 1.0000 R 0.2422 F1 0.3900 |
+| `triage --scenario russellmitchell` | 837 incidents, High 4 / Medium 12 / Low 821, largest 11,208; phases overlapped 10/10 (descriptive) |
+| `triage --scenario shaw` | 1,175 incidents, High 1 / Medium 47 / Low 1,127, largest 6,003; phases overlapped 10/10 (descriptive) |
+| `ml-baselines --scenarios russellmitchell shaw` | time splits: 0 attack alerts in training (HistGB skipped); IsolationForest event F1 0.8804 (rm), 0.7025 (shaw); cross HistGB event F1 0.8960 (rm->shaw), 0.9703 (shaw->rm) |
+| `rag-index` | 706 techniques, 1,118 chunks, bge-small dim 384, 84.6 s |
+| `rag-eval` | recall@1 0.28 (7/25), @3 0.48 (12/25), @5 0.56 (14/25) |
+| `pilot-estimate --select reachable` | 44 runs, 616 cases x 2 arms, token bound 49,280,000, tool-call bound 14,784 (no model called) |
+
+## Decisions taken
+
+Listed per checkpoint above (B2, B3, B4, C1, C2). The two that most need
+your eye: (1) B4's 60/40 timeline split has no attack alerts in training
+on either dev scenario; (2) matched runs report each arm before and after
+the verifier, the headline choice is yours.
+
+## Branches, commits, PRs
+
+- `phase3/wave-b-rest`: 3ea70fb (B2), fb1f1e8 (B3), f6ab3de (B4), b4ce5ad
+  (wrap-up); PR https://github.com/dhruv-karanwal/SentinalAI/pull/5, merged
+  as 1354f97.
+- `phase3/wave-c-code` (from main after the B merge): 69a7882 (relevance
+  set), 001069b (C1 RAG), 72233ae (C2 verifier + graph), d2a9270 (C3
+  matched runner); PR https://github.com/dhruv-karanwal/SentinalAI/pull/6.
+
+## Still blocked
+
+1. Ollama and `qwen2.5:7b-instruct` download (paused; needs the internet
+   and your go for that download).
+2. M6 2-case smoke test and the gated mini-pilot (need 1).
+3. Wave C real matched pilot and the GATE (need 1; choose the pilot's
+   variants and the headline verifier row first).
+4. npm packages and Docker images for Wave D (not started; Wave D not begun).
+5. CICIDS2017, if wanted (needs the registration form; download it yourself).
+Pre-flight found nothing missing.
+
+## Commands once the model is installed (in order, from `backend/`)
+
+```
+ollama pull qwen2.5:7b-instruct
+export SENTINEL_LLM_BASE_URL=http://127.0.0.1:11434/v1 SENTINEL_LLM_MODEL=qwen2.5:7b-instruct HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+../.venv/Scripts/python.exe -m app.main run-agent --scenario russellmitchell --variant fused --select reachable --limit 2 --dry-run
+../.venv/Scripts/python.exe -m app.main run-agent --scenario russellmitchell --variant fused --select reachable --limit 2
+../.venv/Scripts/python.exe -m app.main run-matched --scenario russellmitchell --variant fused --select reachable --limit 2 --dry-run
+../.venv/Scripts/python.exe -m app.main run-matched --scenario russellmitchell --variant fused --select reachable --limit 2
+../.venv/Scripts/python.exe -m app.main pilot-estimate --select reachable --variants <chosen variants>
+```
+
+then the pilot itself with `run-matched` per chosen (scenario, variant,
+truncation), and stop at the Wave C gate with the numbers.
