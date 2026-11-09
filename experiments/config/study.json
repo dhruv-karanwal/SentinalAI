@@ -32,7 +32,10 @@
   "pilot": {
     "scenarios": ["russellmitchell", "shaw"],
     "truncation": ["spread", "earliest"],
-    "note": "The pilot runs on dev scenarios only; held-out scenarios stay untouched. Both truncation rules are reported side by side."
+    "variants": ["wazuh", "suricata", "aminer", "fused", "oracle", "noise-wazuh"],
+    "select": "reachable",
+    "retrieval": "hybrid",
+    "note": "The pilot runs on dev scenarios only; held-out scenarios stay untouched. Both truncation rules are reported side by side; spread runs first. Variants, reachable-only cases and the arms (single, single+verifier, multi, multi+verifier) are the user's pilot decision of 2026-11-10; retrieval = the graph arm's search_attack mode (hybrid measured best on the frozen relevance set, C1 fix)."
   },
   "model": {
     "base_url": null,

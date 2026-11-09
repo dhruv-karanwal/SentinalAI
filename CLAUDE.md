@@ -51,9 +51,9 @@ multi-agent comparison, the verifier, statistics.
 | B2 | **Done**: Sigma engine over alert evidence lines (`app/detection/sigma_engine.py`; 90/256 rules compile, the rest skipped by counted reason), `Detector.SIGMA` as a platform detector (not a study variable), single label door `app/detection/labels.py`, frozen-sections hash test |
 | B3 | **Done**: `app/detection/triage.py` (label-free): existing dedup kept, entities host/src-IP, union-find grouping with gap 300 s (inclusive), first-match severity table H1-L1, incidents via `put_incident` with timeline; CLI `triage`, API `POST /incidents/build` (RBAC `incident.build`, audited); descriptive dev check (labels.csv phase overlap) in `triage_report.py` only. **Fix 2026-11-10:** span cap `max_span_seconds` (default 3600 s; `--no-span-cap` for the old behaviour) cuts long chains into segments with `chain_id` + `segment`; optional per-entity-kind gaps |
 | B4 | **Done**: ML detection baselines on AIT-ADS dev scenarios (`app/detection/features.py` label-free, 12 pinned features; `ml_baselines.py`: IsolationForest contamination=auto + HistGradientBoosting, seed = variants.seed; **fixes 2026-11-10:** cross-scenario both ways is the primary split, leave-one-phase-out per scenario replaces the 60/40 time split, permutation importances (HistGB, cross splits), ablation feature set `no_detector_rule_id`; labels only via `dev_labels`). CLI `ml-baselines`. XGBoost installed but unused. CICIDS2017 not available |
-| C1 | **Done**: ATT&CK RAG: `app/rag/` (chunks, offline bge-small via fastembed, SQLite vector table / pgvector, retriever), `search_attack` tool (`agent/rag_tool.py`), frozen relevance set `experiments/rag/attack_relevance_set.json` (25 queries, committed before the first run). Measured recall@1/3/5 = 0.28 / 0.48 / 0.56 |
+| C1 | **Done**: ATT&CK RAG: `app/rag/` (chunks, offline bge-small via fastembed, SQLite vector table / pgvector, retriever), `search_attack` tool (`agent/rag_tool.py`), frozen relevance set `experiments/rag/attack_relevance_set.json` (25 queries, committed before the first run). Measured recall@1/3/5 = 0.28 / 0.48 / 0.56 (dense). **Fix 2026-11-10:** BM25 (`rag/lexical.py`) + `mode` dense/lexical/hybrid (alpha 0.5 fixed a priori); hybrid measured 0.48 / 0.68 / 0.68 on the same set (small, already tried against) |
 | C2 | **Done**: evidence verifier (`agent/verifier.py`: drops and counts unsupported citations/claims), multi-agent tools + shared memory (`agent/multi_tools.py`: repository memory table + vector memory), LangGraph supervisor with six agents (`agent/graph.py`), same per-case budgets as M5 with a hard stop; FakeClient tests for every edge, budgets, failure paths, leaks |
-| C3 | **Done (code)**: matched-budget runner (`agent/matched.py`: single vs graph, same cases, same budgets, same verifier, scored before and after the verifier next to the same baselines), CLI `rag-index`, `rag-eval`, `pilot-estimate`, `run-matched` (`app/cli_wave_c.py`). **Real pilot not run (no model); GATE after it** |
+| C3 | **Done (code)**: matched-budget runner (`agent/matched.py`: single vs graph, same cases, same budgets, same verifier, scored before and after the verifier next to the same baselines), CLI `rag-index`, `rag-eval`, `pilot-estimate`, `run-matched`, `run-pilot` (`app/cli_wave_c.py`). **2026-11-10:** pilot config in study.json (`pilot.variants` = wazuh, suricata, aminer, fused, oracle, noise-wazuh; `select` reachable; `retrieval` hybrid; spread first): 12 runs, 168 cases x 2 arms = 336 case runs, token bound 13,440,000; resumable runs (`--resume`, `run-pilot` always). **Real pilot not run (no model); GATE after it** |
 | D | Not started: reports (JSON/PDF/CSV), approvals, React dashboard (needs the npm download), copilot, feedback script, Grafana JSON, security notes, Jira stub |
 | E | Only after the user says go |
 
@@ -119,6 +119,8 @@ S=../data/samples/synthetic_ait_ads
 # matched-budget pilot: bound only (no model), then the real run once a model is configured
 ../.venv/Scripts/python.exe -m app.main pilot-estimate --select reachable
 ../.venv/Scripts/python.exe -m app.main run-matched --scenario russellmitchell --variant fused --select reachable --limit 2 --dry-run
+# the whole pilot from study.json (spread first, resumable, progress in data/processed/runs/pilot-progress.jsonl)
+../.venv/Scripts/python.exe -m app.main run-pilot --truncations spread --dry-run
 # passwords and secrets only from the environment, never as arguments
 ../.venv/Scripts/python.exe -m app.main create-user --username alice --role analyst   # needs SENTINEL_NEW_USER_PASSWORD
 ../.venv/Scripts/python.exe -m app.main serve      # API on 127.0.0.1:8000; needs SENTINEL_JWT_SECRET
@@ -209,14 +211,18 @@ backend/app/
   rag/embedding.py        FastEmbedEmbedder (bge-small, local_files_only, offline env), EmbeddingUnavailable
   rag/vector_store.py     VectorStore: SqliteVectorStore (data/platform/vectors.db) | PgVectorStore
                           (SENTINEL_DB_URL); open_vector_store
-  rag/retriever.py        AttackRetriever.index / .search (distinct techniques), load_relevance_set, evaluate
+  rag/lexical.py          tokenize, Bm25Index (k1 1.5, b 0.75)
+  rag/retriever.py        AttackRetriever(mode dense|lexical|hybrid, kb, alpha).index / .search (distinct
+                          techniques), MODES, DEFAULT_ALPHA, load_relevance_set, evaluate
   agent/rag_tool.py       AttackSearchTool (`search_attack`): KB excerpts only, never echoes the query
   agent/verifier.py       verify_answer(cited, claims, alerts) -> VerifiedAnswer (kept + dropped, reasons)
   agent/multi_tools.py    CaseMemory (memory table + vector memory, opaque session id), MultiAgentToolkit
   agent/graph.py          AGENTS, AGENT_TOOLS, GRAPH_EDGES, PROMPTS (GRAPH_PROMPT_VERSION), run_graph
                           -> GraphRun (trace, notes, budget_hit, verification, raw vs verified output)
-  agent/matched.py        estimate_matched (dry-run bound + method), run_matched (both arms, run log)
-  cli_wave_c.py           rag-index, rag-eval, pilot-estimate, run-matched (registered by main.py)
+  agent/matched.py        estimate_matched (dry-run bound + method), matched_hash (+ retrieval mode),
+                          resume_run_id, run_matched (both arms, run log, resume via per-case checkpoints)
+  cli_wave_c.py           rag-index, rag-eval (all modes), pilot-estimate, run-matched, run-pilot
+                          (registered by main.py)
 backend/tests/            pytest, one file per module + test_pipeline.py (end to end)
 data/samples/             committed SYNTHETIC samples (see its README)
 data/raw/, data/processed/ git-ignored: local datasets and pipeline outputs
@@ -508,6 +514,12 @@ experiments/config/study.json  frozen split; variant seed, shuffled/noise refere
 - Matched runs score each arm twice, before and after the verifier (`single`, `single+verifier`,
   `graph`, `graph+verifier`); which is the headline is the user's call. Matched-run numbers on
   dev scenarios are pilot material; FakeClient runs are plumbing checks, never results.
+  Verifier reporting (user decision 2026-11-10): report both rows for every arm; the headline is
+  after the verifier, and the before-verifier unsupported-claim rate is the hallucination measure.
+- Resumable runs live in `runs/matched-<config hash[:16]>/`; `cases/<n>.checkpoint.json` holds the
+  arm summaries and score inputs, `scores.json` marks completion. Anything that changes the config
+  hash (study.json bytes, prompts, budgets, model ids, retrieval mode, cases) starts a new directory.
+  One writer per run directory.
 - Multi-agent graph budgets are the M5 numbers (`agent` section of study.json) over the whole
   graph: tokens checked before every request, tool calls across agents, one repair per case.
   `GraphSettings` (turn tool calls, supervisor steps) only paces inside the budget. Changing a

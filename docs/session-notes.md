@@ -1822,3 +1822,108 @@ export SENTINEL_LLM_BASE_URL=http://127.0.0.1:11434/v1 SENTINEL_LLM_MODEL=qwen2.
 
 then the pilot itself with `run-matched` per chosen (scenario, variant,
 truncation), and stop at the Wave C gate with the numbers.
+
+# Session 2026-11-10: offline fixes (`phase3/wave-b-fixes`)
+
+All numbers below: **dev scenario, not a paper result**. Commands run from `backend/`.
+
+## B4 fix: cross-scenario primary, leave-one-phase-out, importances, ablation
+
+`ml-baselines --scenarios russellmitchell shaw` (61.65 s). The 60/40 timeline split is gone
+(it had no attack alert in training on either dev scenario). Event-label F1, HistGradientBoosting
+(IsolationForest in the JSON and the command output):
+
+| split | all 12 features | no detector / rule_id (10) |
+|---|---|---|
+| cross rm -> shaw (primary) | 0.8960 (P 0.9215 R 0.8719) | 0.9173 (P 0.9688 R 0.8710) |
+| cross shaw -> rm (primary) | 0.9703 (P 0.9936 R 0.9481) | 0.9699 (P 0.9933 R 0.9476) |
+| LOPO rm, pooled over 10 phases | 0.8565 (R 0.7557) | 0.8560 |
+| LOPO shaw, pooled over 10 phases | 0.1794 (R 0.0985) | 0.1796 |
+
+IsolationForest event F1: cross rm->shaw 0.3959, shaw->rm 0.9103; LOPO rm 0.9864, shaw 0.9854.
+
+Permutation importance (HistGB, test F1 drop, 5 repeats): `host_count_60s` dominates
+everywhere (0.7158 rm->shaw, 0.4615 shaw->rm; 0.5032 / 0.5283 in the ablation); detector
+0.0297 (rm->shaw) and every other feature <= 0.03. Removing detector and rule_id does not
+lower F1 (it rises 0.896 -> 0.917 on rm->shaw), so the cross-scenario F1 is **not** detector
+or rule identity; it is mostly the 60-second per-host alert rate, i.e. burst intensity (dirb /
+wpscan floods). That is the honest reading of 0.896 / 0.970.
+
+LOPO reading: tests only alerts inside the held-out phase, so pooled P is near 1 by construction
+(most in-window alerts are attacks) and says nothing about quiet-period false positives.
+HistGB misses whole phases it has not seen: shaw dirb recall 0.0066 (4,522 alerts) when dirb is
+held out, rm privilege_escalation 0.0000. Per-phase rows are in the command output and
+`data/processed/ml/ml_baselines.dev.json`. Checked: dirb has 4,522 pool alerts in both
+scenarios (coincidence; the two truth sets share 0 alert ids).
+
+## B3 fix: span cap
+
+`triage --gap-seconds 300 --no-span-cap` (old behaviour) vs `--max-span-seconds 3600` (new default):
+
+| scenario | incidents | High/Medium/Low | buckets 1 / 2-9 / 10-99 / 100-999 / >=1000 | chains split | largest |
+|---|---|---|---|---|---|
+| rm before | 837 | 4 / 12 / 821 | 167 / 304 / 303 / 62 / 1 | 0 | 11,208 |
+| rm after | 843 | 4 / 12 / 827 | 167 / 305 / 308 / 62 / 1 | 6 | 11,208 |
+| shaw before | 1,175 | 1 / 47 / 1,127 | 478 / 219 / 337 / 139 / 2 | 0 | 6,003 |
+| shaw after | 1,191 | 1 / 47 / 1,143 | 478 / 220 / 348 / 143 / 2 | 15 | 6,003 |
+
+Phases overlapped (descriptive): 10/10 both scenarios, before and after.
+
+The largest incidents are **not** long chains: rm 11,208 alerts in 221.7 s (2022-01-24
+03:56:47-04:00:28; host 10.143.2.4 in 10,891 alerts, src ip 172.19.131.174 in 7,694; Wazuh 31101
+x 7,105, AMiner 5 x 3,169, Wazuh 31151 x 550; 16 entities, severity High via H2), shaw 6,003
+in 96 s (one host, one source ip). The span cap cannot split them and a per-entity gap would
+not either (the alerts are seconds apart). Decision (conservative): no count cap, since a cut
+by count is arbitrary; such bursts are summarised at the report/UI layer. Open question for
+you: do you want a burst rule (e.g. group by (source ip, rule) inside an incident) in Wave D?
+
+## C1 fix: hybrid retrieval
+
+The chunks already held id, name and tactics. Added BM25 (`app/rag/lexical.py`, k1 1.5,
+b 0.75, fixed) and modes dense / lexical / hybrid (alpha 0.5, equal weights, fixed before the
+run). The 25-query relevance set is unchanged (sha256 test passes). `rag-eval`:
+
+| mode | recall@1 | recall@3 | recall@5 |
+|---|---|---|---|
+| dense (before) | 0.2800 (7/25) | 0.4800 (12/25) | 0.5600 (14/25) |
+| lexical | 0.3200 (8/25) | 0.5200 (13/25) | 0.6400 (16/25) |
+| hybrid alpha 0.5 | 0.4800 (12/25) | 0.6800 (17/25) | 0.6800 (17/25) |
+
+Caveat: 25 queries, and the set was already tried against with the dense retriever, so the
+improvement is optimistic. Still missed by every mode: q03, q05, q07, q08, q11, q13, q19 (scan,
+exploit-public-app, DNS exfiltration, shell queries). Decision: the graph arm's `search_attack`
+uses hybrid in the pilot (`pilot.retrieval`), recorded in the run config hash and manifest.
+
+## Pilot configuration and resumable runs
+
+study.json `pilot`: variants wazuh, suricata, aminer, fused, oracle, noise-wazuh; select
+reachable; retrieval hybrid; truncation [spread, earliest] with spread run first. The four score
+rows (single, single+verifier, graph, graph+verifier) already existed in `run_matched`; the
+verifier reporting rule is now in CLAUDE.md. New: `--resume` (stable `matched-<hash16>` dir,
+per-case checkpoints, completed runs skipped without a model call) and `run-pilot` (whole plan,
+progress log `pilot-progress.jsonl`). Tests: an interrupted run resumed equals an
+uninterrupted one on every score row and the baselines.
+
+`pilot-estimate --truncations spread` (no model called):
+`TOTAL: 12 runs, 168 cases x 2 arms = 336 case runs, token bound 13440000, tool-call bound 4032`
+(14 reachable cases per scenario and variant; first prompts about 10,630-10,690 tokens single,
+6,030-6,080 graph supervisor).
+
+## Downloads and infra (2026-11-10)
+
+- Ollama: winget stalled at 0 bytes for 18 min; an earlier full-length partial (1,689,667,936
+  bytes) failed the manifest sha256 (got 55d9a627..., expected 106ef3d2...), so it was not used.
+  Switched to a resumable `curl -C -` download of the official release, verified against the
+  winget manifest hash before a silent per-user install, then `ollama pull qwen2.5:7b-instruct`.
+- Docker: `docker compose` is not wired into the CLI; standalone `docker-compose.exe` v5.1.3
+  validates `--profile lite config` and `--profile full config` (placeholder env values).
+  Docker Desktop does not start: its log says `cannot find registry key "SOFTWARE\Docker
+  Inc.\Docker Desktop"` (not installed/registered; needs a reinstall with admin rights by you).
+  No images pulled.
+
+## `phase3/wave-b-fixes` wrap-up
+
+- `pytest -q` -> `439 passed, 4 skipped in 29.77s` (4 infra skips); `mypy` -> `Success: no
+  issues found in 73 source files`.
+- Ollama installer download measured at about 65 kB/s (8,110,080 bytes in about 2 minutes):
+  about 7 hours for the 1.69 GB installer before the model pull can start.
