@@ -1927,3 +1927,50 @@ uninterrupted one on every score row and the baselines.
   issues found in 73 source files`.
 - Ollama installer download measured at about 65 kB/s (8,110,080 bytes in about 2 minutes):
   about 7 hours for the 1.69 GB installer before the model pull can start.
+
+# Session 2026-11-10: Wave D offline parts (`phase3/wave-d-offline`)
+
+Done (tests first, `tests/test_wave_d.py`, 26 tests, FakeClient only):
+
+- `app/outputs/reports.py`: deterministic, label-free report body (incident, timeline, citations
+  with evidence excerpts, ATT&CK techniques from the B1 mapping, playbook recommendations,
+  optional agent findings after the verifier, notice); CSV and PDF (reportlab 5.1.0, already
+  installed; `invariant=1`). Timeline and citations capped at 500 rows (omitted count recorded).
+- `app/outputs/playbooks.py`: 10 rows (technique prefix -> actions), each tested; fallback is
+  manual review only.
+- `app/outputs/approvals.py` + migration `0002_approval_execution.sql`: pending -> approved /
+  rejected once, reviewer != requester, reason required; `execute` refuses anything not approved
+  and runs once; the executor is **simulated** (no connectors). New permission `action.execute`
+  (manager, admin). Executives stay read-only.
+- API: `POST /reports`, `GET /reports/{id}/download?format=json|pdf|csv`, `POST/GET /approvals`,
+  `POST /approvals/{id}/decision`, `POST /approvals/{id}/execute`, `POST /copilot/ask`; every
+  write audited (refused executions as `action.execute.refused`).
+- Feedback: existing API kept; `feedback-report` CLI + `app/outputs/feedback_report.py`
+  (counts, disputed targets; no retraining, never a study label).
+- Copilot: `agent/copilot.py` reuses `CaseToolkit` + `investigate` + the verifier unchanged; the
+  analyst question is appended to the brief only, so the M5 prompt and hash do not change. 503
+  when no model client is configured.
+- `infra/grafana/` provisioning (Prometheus datasource, file provider) + `dashboards/sentinel.json`
+  (7 panels over the metrics `app/ops/metrics.py` exports; a test checks every metric name).
+- `docs/security-notes.md` (covered / not covered / compliance as documentation only).
+- `app/outputs/jira.py`: disabled stub, SYNTHETIC sample payload.
+
+Real-data check (dev scenario platform stores, not a paper result): report of the largest
+incident, built from the stored alerts:
+
+| scenario | incident | alerts | timeline rows (omitted) | techniques (alerts) | recommendations | load / build / PDF |
+|---|---|---|---|---|---|---|
+| russellmitchell | inc-b0c532dc8af417f75e6a61ed | 11,208 | 500 (10,708) | T1021.004 10, T1055 8, T1083 2, T1190 30, T1595.002 550 | block_source_ip (T1190, T1595), manual_review (T1190) | 0.74 / 0.03 / 0.91 s, 93,661 bytes |
+| shaw | inc-921f9256c4e2449c4e4d40c6 | 6,003 | 500 (5,503) | T1055 14, T1083 2, T1190 3, T1595.002 368 | same three | 0.56 / 0.02 / 1.27 s, 94,527 bytes |
+
+The PDF was not inspected visually (no poppler on this machine); its validity is tested (`%PDF`,
+size, deterministic header) and its content is the JSON body above.
+
+Decisions taken (Wave D):
+- Executor simulated (no connectors approved); four-eyes rule on decisions (requester cannot decide).
+- `manual_review` needs no approval and cannot be requested as one.
+- Copilot answers return real alert ids (analysts already have `read.raw`); executives cannot ask.
+- Not started: the React dashboard (waits for the pilot report and your go; npm then).
+
+`pytest -q` -> `465 passed, 4 skipped in 33.84s`; `mypy` -> `Success: no issues found in 80
+source files`.

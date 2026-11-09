@@ -54,7 +54,7 @@ multi-agent comparison, the verifier, statistics.
 | C1 | **Done**: ATT&CK RAG: `app/rag/` (chunks, offline bge-small via fastembed, SQLite vector table / pgvector, retriever), `search_attack` tool (`agent/rag_tool.py`), frozen relevance set `experiments/rag/attack_relevance_set.json` (25 queries, committed before the first run). Measured recall@1/3/5 = 0.28 / 0.48 / 0.56 (dense). **Fix 2026-11-10:** BM25 (`rag/lexical.py`) + `mode` dense/lexical/hybrid (alpha 0.5 fixed a priori); hybrid measured 0.48 / 0.68 / 0.68 on the same set (small, already tried against) |
 | C2 | **Done**: evidence verifier (`agent/verifier.py`: drops and counts unsupported citations/claims), multi-agent tools + shared memory (`agent/multi_tools.py`: repository memory table + vector memory), LangGraph supervisor with six agents (`agent/graph.py`), same per-case budgets as M5 with a hard stop; FakeClient tests for every edge, budgets, failure paths, leaks |
 | C3 | **Done (code)**: matched-budget runner (`agent/matched.py`: single vs graph, same cases, same budgets, same verifier, scored before and after the verifier next to the same baselines), CLI `rag-index`, `rag-eval`, `pilot-estimate`, `run-matched`, `run-pilot` (`app/cli_wave_c.py`). **2026-11-10:** pilot config in study.json (`pilot.variants` = wazuh, suricata, aminer, fused, oracle, noise-wazuh; `select` reachable; `retrieval` hybrid; spread first): 12 runs, 168 cases x 2 arms = 336 case runs, token bound 13,440,000; resumable runs (`--resume`, `run-pilot` always). **Real pilot not run (no model); GATE after it** |
-| D | Not started: reports (JSON/PDF/CSV), approvals, React dashboard (needs the npm download), copilot, feedback script, Grafana JSON, security notes, Jira stub |
+| D | **Offline parts done (2026-11-10)**: `app/outputs/` reports (JSON body, CSV, PDF via reportlab; timeline, citations, ATT&CK techniques, playbook recommendations), approval workflow + gated simulated executor (`action.execute`, four-eyes, once only, migration 0002), feedback API + `feedback-report` (no retraining), `POST /copilot/ask` (M5 tools + verifier), Grafana dashboard JSON, `docs/security-notes.md`, Jira disabled stub. **React dashboard not started** (after the pilot gate and your go; npm then) |
 | E | Only after the user says go |
 
 **Where we stopped (2026-11-09) and what comes next:** see the last section of
@@ -222,6 +222,12 @@ backend/app/
   agent/matched.py        estimate_matched (dry-run bound + method), matched_hash (+ retrieval mode),
                           resume_run_id, run_matched (both arms, run log, resume via per-case checkpoints)
   cli_wave_c.py           rag-index, rag-eval (all modes), pilot-estimate, run-matched, run-pilot
+  agent/copilot.py        CopilotToolkit (CaseToolkit + analyst question in the brief), ask() -> verified answer
+  outputs/playbooks.py    PLAYBOOK rows (technique prefix -> actions), STATE_CHANGING, recommend()
+  outputs/reports.py      build_report (label-free, deterministic, MAX_ROWS 500), render_csv, render_pdf
+  outputs/approvals.py    ApprovalService.request / decide / execute (simulated), ApprovalError
+  outputs/feedback_report.py  feedback_report(repo): counts, disputed targets; CLI feedback-report
+  outputs/jira.py         JiraAdapter (disabled stub, SYNTHETIC sample payload)
                           (registered by main.py)
 backend/tests/            pytest, one file per module + test_pipeline.py (end to end)
 data/samples/             committed SYNTHETIC samples (see its README)
@@ -231,7 +237,8 @@ data/samples/synthetic_attack_stix.json SYNTHETIC 3-technique ATT&CK bundle for 
 data/raw/mitre/, data/raw/sigma/repo/ approved local ATT&CK bundle and SigmaHQ rules (git-ignored)
 data/models/fastembed/    local bge-small-en-v1.5 ONNX embedding model (git-ignored)
 data/platform/            SQLite fallback stores core.db, truth.db, search.db, objects/ (git-ignored)
-docker-compose.yml, infra/ lite/full profiles, Postgres role init, Prometheus config
+docker-compose.yml, infra/ lite/full profiles, Postgres role init, Prometheus config, Grafana
+                          provisioning + dashboards/sentinel.json (metrics of app/ops/metrics.py)
 .env.example              names of every secret; the real .env is git-ignored
 docs/                     architecture.md, research-methodology.md, session-notes.md
 experiments/config/study.json  frozen split; variant seed, shuffled/noise references; cases; baselines (k list, frozen order); pilot (scenarios, truncations); model (endpoint, null = none); agent (budgets)
@@ -541,6 +548,11 @@ experiments/config/study.json  frozen split; variant seed, shuffled/noise refere
   (a cut by count is arbitrary); summarise them at the report/UI layer.
 - Leave-one-phase-out tests only alerts inside the held-out phase (alerts outside every
   phase only train), so its pooled scores say nothing about quiet-period false positives.
+- Wave D: nothing executes without an approved approval row; the executor is simulated (no
+  connectors). Only `STATE_CHANGING` playbook actions can be requested; the requester cannot decide;
+  a decision needs a reason; execution happens once (`executed_utc`). Executives are read-only.
+  Reports and copilot answers are platform outputs, never study results, and hold no labels
+  (`LABEL_WORDS` scan in tests/test_wave_d.py). Feedback never retrains anything.
 - Triage severity is a first-match table (`SEVERITY_TABLE`, rows H1-H3, M1-M3, L1), each row
   tested. Level classes are triage-only (Wazuh >= 12 high, 7-11 medium; Suricata 1 high, 2
   medium; Sigma critical/high, medium); `Alert.severity` is never rescaled. A rebuild deletes the

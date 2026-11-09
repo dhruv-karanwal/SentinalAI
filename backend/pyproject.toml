@@ -13,6 +13,6 @@ plugins = ["pydantic.mypy"]
 files = ["app"]
 
 [[tool.mypy.overrides]]
-# scikit-learn ships no type information; everything else stays strict.
-module = ["sklearn", "sklearn.*"]
+# scikit-learn and reportlab ship no type information; everything else stays strict.
+module = ["sklearn", "sklearn.*", "reportlab", "reportlab.*"]
 ignore_missing_imports = true
