@@ -50,7 +50,8 @@ multi-agent comparison, the verifier, statistics.
 | B3 | **Done**: `app/detection/triage.py` (label-free): existing dedup kept, entities host/src-IP, union-find grouping with gap 300 s (inclusive), first-match severity table H1-L1, incidents via `put_incident` with timeline; CLI `triage`, API `POST /incidents/build` (RBAC `incident.build`, audited); descriptive dev check (labels.csv phase overlap) in `triage_report.py` only |
 | B4 | **Done**: ML detection baselines on AIT-ADS dev scenarios (`app/detection/features.py` label-free, 12 pinned features; `ml_baselines.py`: IsolationForest contamination=auto + HistGradientBoosting, seed = variants.seed; time split 60/40 of the timeline per scenario + cross-scenario both ways; labels only via `dev_labels`). CLI `ml-baselines`. XGBoost installed but unused. CICIDS2017 not available |
 | C1 | **Done**: ATT&CK RAG: `app/rag/` (chunks, offline bge-small via fastembed, SQLite vector table / pgvector, retriever), `search_attack` tool (`agent/rag_tool.py`), frozen relevance set `experiments/rag/attack_relevance_set.json` (25 queries, committed before the first run). Measured recall@1/3/5 = 0.28 / 0.48 / 0.56 |
-| C2-C3 | Next: verifier + LangGraph supervisor with six agents; matched-budget runner + dry-run pilot estimate. **GATE after the real pilot** (not run: no model) |
+| C2 | **Done**: evidence verifier (`agent/verifier.py`: drops and counts unsupported citations/claims), multi-agent tools + shared memory (`agent/multi_tools.py`: repository memory table + vector memory), LangGraph supervisor with six agents (`agent/graph.py`), same per-case budgets as M5 with a hard stop; FakeClient tests for every edge, budgets, failure paths, leaks |
+| C3 | Next: matched-budget runner + dry-run pilot estimate. **GATE after the real pilot** (not run: no model) |
 | D | Not started: reports (JSON/PDF/CSV), approvals, React dashboard (needs the npm download), copilot, feedback script, Grafana JSON, security notes, Jira stub |
 | E | Only after the user says go |
 
@@ -199,6 +200,10 @@ backend/app/
                           (SENTINEL_DB_URL); open_vector_store
   rag/retriever.py        AttackRetriever.index / .search (distinct techniques), load_relevance_set, evaluate
   agent/rag_tool.py       AttackSearchTool (`search_attack`): KB excerpts only, never echoes the query
+  agent/verifier.py       verify_answer(cited, claims, alerts) -> VerifiedAnswer (kept + dropped, reasons)
+  agent/multi_tools.py    CaseMemory (memory table + vector memory, opaque session id), MultiAgentToolkit
+  agent/graph.py          AGENTS, AGENT_TOOLS, GRAPH_EDGES, PROMPTS (GRAPH_PROMPT_VERSION), run_graph
+                          -> GraphRun (trace, notes, budget_hit, verification, raw vs verified output)
 backend/tests/            pytest, one file per module + test_pipeline.py (end to end)
 data/samples/             committed SYNTHETIC samples (see its README)
 data/raw/, data/processed/ git-ignored: local datasets and pipeline outputs
@@ -487,6 +492,11 @@ experiments/config/study.json  frozen split; variant seed, shuffled/noise refere
 - Sigma sees only lines another detector already alerted on (no AIT-LDSv2):
   its dev numbers are a re-detection rate over the pool, labelled
   "dev detection baseline", never a detector comparison.
+- Multi-agent graph budgets are the M5 numbers (`agent` section of study.json) over the whole
+  graph: tokens checked before every request, tool calls across agents, one repair per case.
+  `GraphSettings` (turn tool calls, supervisor steps) only paces inside the budget. Changing a
+  graph prompt changes `PROMPTS_SHA256`; bump `GRAPH_PROMPT_VERSION`. Graph modules are in
+  `TOOL_PATH_MODULES` (no truth access); the leak test scans prompts, tool outputs and memory writes.
 - The local ATT&CK bundle (v20.1) has no `x_mitre_detection` text: chunks hold name, tactics and
   description. The relevance set is frozen (sha256 pinned in tests/test_rag.py); a new set is a new
   versioned file, never an edit. Retrieval numbers are measured, never estimated.

@@ -1695,3 +1695,26 @@ markers removed; queries use bge's query instruction (`query_embed`).
 Note: tests for Wave C were written after part of the Wave C code (while
 the shaw replay ran), not strictly before it; all of them were in place
 and passing before any Wave C commit.
+
+## Wave C, C2 checkpoint: verifier and the multi-agent graph
+
+Done: `agent/verifier.py`, `agent/multi_tools.py`, `agent/graph.py`
+(LangGraph 1.2.20 `StateGraph`: supervisor, log_analysis, correlation,
+knowledge_retrieval, anomaly_analysis, investigation, report_generation,
+verifier). Tests (`tests/test_wave_c_graph.py`, FakeClient only): every
+normal edge walked in one scripted case; the three stop edges; token budget
+hard stop (total tokens <= budget); tool budget stop at exactly the limit;
+turn limit; forced report after the supervisor step limit; unparseable
+output (one repair per case); empty and unavailable retrieval; strict reply
+parsing; the verifier dropping a planted unsupported claim (and an unknown
+citation) with reasons; leak scan of every prompt, tool output, memory write
+and repository memory row. No real numbers exist for C2 (no model).
+
+Decisions taken (C2):
+
+- The graph uses the M5 `agent` budgets unchanged; pacing settings
+  (4 tool calls per agent turn, 8 supervisor steps) are not budgets.
+- An agent that keeps calling tools past its turn limit ends its turn
+  without a note (counted as `turns_without_note`); nothing is invented.
+- Memory session ids are an opaque hash of the toolkit salt; note text is
+  time-masked and capped at 2,000 characters.
