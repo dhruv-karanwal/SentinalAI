@@ -299,6 +299,11 @@ class TruthStore:
     def _s(self) -> str:
         return "truth." if self.db.dialect == "postgres" else ""
 
+    def for_scenario(self, scenario: str) -> list[dict[str, Any]]:
+        """Every ground-truth row of one scenario (bulk read for dev scoring)."""
+        return self.db.query(f"SELECT * FROM {self._s}ground_truth WHERE scenario = ? "
+                             "ORDER BY alert_id", (scenario,))
+
     def get(self, alert_ids: Sequence[str]) -> dict[str, dict[str, Any]]:
         out: dict[str, dict[str, Any]] = {}
         for aid in alert_ids:

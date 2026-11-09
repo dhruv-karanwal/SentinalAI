@@ -122,3 +122,38 @@ def test_config_is_immutable() -> None:
     assert isinstance(config, StudyConfig)
     with pytest.raises(AttributeError):
         config.split.dev = ("fox",)  # type: ignore[misc]
+
+
+# sha256 of the frozen sections of experiments/config/study.json (canonical JSON,
+# sorted keys): the whole "split" and the frozen detector order. Committed
+# 2026-11-09 (Wave B-rest). If this test fails, a frozen section changed: revert it.
+FROZEN_SECTIONS_SHA256 = "3421f54bdb2646ba2fa871df6664664e7ad008598e82ee90149d02c89bbe93cd"
+
+
+def frozen_sections_digest(path: Path = DEFAULT_STUDY_CONFIG) -> str:
+    import hashlib
+    data = json.loads(path.read_text(encoding="utf-8"))
+    frozen = {"split": data["split"],
+              "baselines.detector_order": {k: data["baselines"][k] for k in
+                                           ("detector_order", "detector_order_frozen",
+                                            "detector_order_frozen_on")}}
+    return hashlib.sha256(json.dumps(frozen, sort_keys=True, separators=(",", ":"))
+                          .encode()).hexdigest()
+
+
+def test_frozen_sections_are_unchanged() -> None:
+    assert frozen_sections_digest() == FROZEN_SECTIONS_SHA256
+
+
+def test_frozen_digest_detects_a_change(tmp_path: Path) -> None:
+    changed = write_config(tmp_path, split__held_out=["fox", "harrison", "santos", "wardbeck",
+                                                      "wheeler"])
+    assert frozen_sections_digest(changed) != FROZEN_SECTIONS_SHA256
+
+
+def test_extra_detectors_default_empty_and_validated(tmp_path: Path) -> None:
+    assert load_study_config().extra_detectors == ()
+    assert load_study_config(write_config(tmp_path, variants__extra_detectors=["sigma"])
+                             ).extra_detectors == ("sigma",)
+    with pytest.raises(ValueError, match="extra_detectors"):
+        load_study_config(write_config(tmp_path, variants__extra_detectors=["wazuh"]))

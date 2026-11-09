@@ -1407,3 +1407,110 @@ Next steps, in order:
    `data/raw/cicids2017/` (otherwise ML stays AIT-ADS dev only).
 2. Start Docker Desktop (and install the compose plugin if it is missing)
    when you want the `lite`/`full` profiles tested and measured.
+
+# 2026-11-09: offline build, Waves B2-B4 and Wave C code
+
+Network: none, except `git push` / `gh` for the PR steps. Every process ran
+with `HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1`. No downloads, installs or
+model calls. All numbers below are pasted from command output; every dev
+number is **dev scenario, not a paper result**.
+
+## Pre-flight
+
+- `git status`: clean, on `main`, up to date with `origin/main` (fetch worked).
+- Baseline: `pytest -q` -> `327 passed, 4 skipped in 14.76s`; `mypy` ->
+  `Success: no issues found in 53 source files`.
+- Offline import check (versions printed by `importlib.metadata`):
+  pySigma==2.0.2 (no pySigma backends or pipelines installed: none are used,
+  the evaluator is ours), scikit-learn==1.9.1, xgboost==3.2.0,
+  langgraph==1.2.20, langchain-core==1.7.6, fastembed==0.9.1,
+  onnxruntime==1.31.1, pgvector==0.5.1, psycopg==3.3.8, numpy==2.4.6,
+  scipy==1.17.1, joblib==1.6.0. All imports ok.
+  `TextEmbedding("BAAI/bge-small-en-v1.5", cache_dir=data/models/fastembed,
+  local_files_only=True)` -> `bge-small offline load ok, dim 384`.
+  **Nothing missing; nothing blocked by the pre-flight.**
+- Branch `phase3/wave-b-rest` from `main` (9630c81).
+- `data/platform/` confirmed git-ignored (`.gitignore:46: data/platform/`,
+  0 tracked files), 126 MB partial store deleted, replay re-run in the
+  background (`platform-ingest`, russellmitchell then shaw):
+  - russellmitchell: published 45,544, stored 45,544, duplicates 0,
+    rejected 0, by detector aminer 4,056 / suricata 9,186 / wazuh 32,302,
+    ground_truth_rows 45,544; **wall clock 351 s**.
+  - shaw: see the B3 checkpoint (it was still running at the B2 commit).
+
+## B2 checkpoint: Sigma engine (committed on `phase3/wave-b-rest`)
+
+Done: `app/detection/sigma_engine.py` (log-type parsers + our evaluator over
+pySigma's parsed conditions; mapping table and skip reasons in the module
+docstring), `sigma_report.py`, the label door `app/detection/labels.py`
+(`dev_labels`, truth area only, `require_dev` first),
+`TruthStore.for_scenario`, `Detector.SIGMA` (rule-based) and
+`AIT_ADS_DETECTORS`, CLI `sigma`. Study code iterates `AIT_ADS_DETECTORS`;
+a `sigma` variant exists only if `variants.extra_detectors` lists it (it
+does not). Frozen-sections hash test added
+(`FROZEN_SECTIONS_SHA256 = 3421f54b...93cd`).
+
+Real output, `python -m app.main sigma --scenario russellmitchell`:
+
+```
+rules: 256 total, 90 compiled, 166 skipped
+  skipped logsource_not_derivable:file_event: 8
+  skipped logsource_not_derivable:network_connection: 5
+  skipped logsource_not_derivable:process_creation: 123
+  skipped logsource_not_derivable:proxy: 29
+  skipped logsource_not_in_evidence:nginx: 1
+compiled by log type: {'apache_access': 13, 'apache_error': 2, 'auditd': 53, 'syslog': 22}
+source alerts 35932, without lines 9186, lines 26746, unclassified lines 86
+events by log type: {'apache_access': 10906, 'apache_error': 92, 'auditd': 97, 'syslog': 15613}
+sigma alerts: 6387 from 2 rules; runtime load 0.18 s, evaluate 19.33 s
+     6386 hits /   10906 events  Suspicious User-Agents Related To Recon Tools  (rules/web/webserver_generic/web_susp_useragents.yml)
+        1 hits /   10906 events  Source Code Enumeration Detection by Keyword  (rules/web/webserver_generic/web_source_code_enumeration.yml)
+
+dev detection baseline (dev scenario, not a paper result): verdict = pool alert flagged by some Sigma rule
+pool 35932, flagged 6387, event_label unavailable 0
+  event_label TP 6348 FP 39 FN 4609 TN 24936 prec 0.9939 recall 0.5794 F1 0.7320 FNR 0.4206
+  time_label  TP 6387 FP 0 FN 5410 TN 24135 prec 1.0000 recall 0.5414 F1 0.7025 FNR 0.4586
+```
+
+`python -m app.main sigma --scenario shaw --no-score` (engine only; the
+shaw dev baseline is in the B3 checkpoint):
+
+```
+source alerts 53645, without lines 16692, lines 36953, unclassified lines 65
+events by log type: {'apache_access': 6034, 'apache_error': 41, 'auditd': 234, 'syslog': 30587}
+sigma alerts: 1468 from 2 rules; runtime load 0.18 s, evaluate 35.21 s
+     1467 hits /    6034 events  Suspicious User-Agents Related To Recon Tools  (rules/web/webserver_generic/web_susp_useragents.yml)
+        1 hits /    6034 events  Source Code Enumeration Detection by Keyword  (rules/web/webserver_generic/web_source_code_enumeration.yml)
+```
+
+Caveat for every Sigma number: Sigma sees only the evidence lines of alerts
+another detector already raised, so it is a re-detection rate over the
+pool, never a detector comparison.
+
+Detector-iteration sites checked (grep `Detector`): `study/variants.py`
+(changed: `AIT_ADS_DETECTORS` + `extra_detectors`), `services/alert_quality.py`
+(changed: `AIT_ADS_DETECTORS`, so quality reports keep 3 detector keys),
+`study/baselines.py` (changed: a detector outside the frozen order ranks
+last instead of raising), `intel/attack.py` (changed: Sigma `attack.tNNNN`
+tags are native ids), unchanged and safe: `platform/enrichment.py`,
+`ingestion/ground_truth.py`, `ingestion/mappings.py`,
+`ingestion/alert_normalizer.py`, `agent/tools.py` (counts by value),
+`api/app.py` (string filter, GROUP BY), `evaluation/case_scoring.py` (no
+detector logic). No report code exists yet (Wave D).
+
+Decisions taken (B2):
+
+- `cs-uri-query` = the whole request target (path + query), raw, not
+  URL-decoded: SigmaHQ's webserver rules match path patterns in that field.
+- Keywords match as case-insensitive substrings of the whole line.
+- `product: linux` keyword rules and `service: syslog` run on syslog-format
+  lines only; `service: apache` on Apache error lines; other services on
+  syslog lines whose program tag equals the service name.
+- `proxy` rules skipped: the Apache reverse-proxy access log does not carry
+  forward-proxy fields (full `c-uri` with host).
+- Sigma runs over the investigation-eligible pool (no training-mode,
+  duplicate or aggregate alerts), the same pool the study uses.
+- One Sigma alert per (rule, source alert); `severity=None` (levels are words).
+- `Detector.SIGMA` is typed rule-based.
+
+Next: B3 triage and correlation.

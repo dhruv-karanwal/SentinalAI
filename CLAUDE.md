@@ -46,7 +46,7 @@ multi-agent comparison, the verifier, statistics.
 | M6 | Case selection options **done** (`run-agent --select reachable`, `--case-id`). 2-case smoke test + gated mini-pilot **blocked: no local model** (Ollama + `qwen2.5:7b-instruct` approved, download paused: slow internet) |
 | A | **Done, merged** (PR #3): replay collector, stream (in-memory / Kafka), enrichment, batched consumer, SQLite / PostgreSQL storage with migrations, separate truth area, FTS5 / OpenSearch, local / MinIO objects, FastAPI + JWT + RBAC + audit, Prometheus metrics, docker-compose `lite`/`full` |
 | B1 | **Done**: ATT&CK KB from local STIX + deterministic alert mapping (Wazuh native ids, then `RULE_TABLE`), IOC store + matcher, OTX/MISP/VirusTotal disabled stubs with a labelled synthetic sample |
-| B2 | **Next**: Sigma rule engine over normalized events (pySigma 2.0.2 parses all 256 approved rules; the evaluator is not written yet) |
+| B2 | **Done**: Sigma engine over alert evidence lines (`app/detection/sigma_engine.py`; 90/256 rules compile, the rest skipped by counted reason), `Detector.SIGMA` as a platform detector (not a study variable), single label door `app/detection/labels.py`, frozen-sections hash test |
 | B3 | Not started: triage dedup + grouping, deterministic Low/Medium/High rule, correlation into incidents (same host / IP / time) |
 | B4 | Not started: ML detection baselines (IsolationForest / scikit-learn / XGBoost) on AIT-ADS **dev scenarios only** (CICIDS2017 not available: its URL returns a registration page) |
 | C | Not started: ATT&CK RAG (bge-small already local), LangGraph supervisor + agents, evidence verifier, matched-budget comparison; **GATE after the pilot** |
@@ -101,6 +101,9 @@ S=../data/samples/synthetic_ait_ads
 # Wave A platform: replay a DEV scenario into the stores (SQLite fallback in data/platform/,
 # or PostgreSQL / OpenSearch / Kafka via SENTINEL_DB_URL / SENTINEL_SEARCH_URL / SENTINEL_KAFKA)
 ../.venv/Scripts/python.exe -m app.main platform-ingest --scenario russellmitchell
+# B2: Sigma rules over alert evidence lines (DEV only; writes data/processed/sigma/), then the
+# dev detection baseline with labels from the platform truth area (needs platform-ingest first)
+../.venv/Scripts/python.exe -m app.main sigma --scenario russellmitchell
 # passwords and secrets only from the environment, never as arguments
 ../.venv/Scripts/python.exe -m app.main create-user --username alice --role analyst   # needs SENTINEL_NEW_USER_PASSWORD
 ../.venv/Scripts/python.exe -m app.main serve      # API on 127.0.0.1:8000; needs SENTINEL_JWT_SECRET
@@ -171,8 +174,14 @@ backend/app/
                           consumer.py, bootstrap.py (open_stores, ingest_scenario)
   api/                    auth.py (roles, PERMISSIONS, JWT, bcrypt), app.py (routes), server.py
   ops/metrics.py          Prometheus metrics (API + agent cost)
-  intel/attack.py         AttackKB.from_stix, Technique, map_alert, RULE_TABLE
+  intel/attack.py         AttackKB.from_stix, Technique, map_alert (native: Wazuh rule.mitre.id,
+                          Sigma attack.tNNNN tags), RULE_TABLE
   intel/ioc.py            Indicator, IocStore.match_alert, disabled feed adapters (FEEDS)
+  detection/sigma_engine.py  log-line parsers (apache_access/error, auditd, syslog), load_rules
+                          (RuleSet: compiled + skipped by reason), SigmaEngine.run -> sigma Alerts
+  detection/sigma_report.py  run_sigma_scenario (no labels), sigma_dev_baseline (labels)
+  detection/labels.py     dev_labels(TruthStore, scenario, config): the ONE label door of the
+                          detection layer (require_dev; truth area only)
 backend/tests/            pytest, one file per module + test_pipeline.py (end to end)
 data/samples/             committed SYNTHETIC samples (see its README)
 data/raw/, data/processed/ git-ignored: local datasets and pipeline outputs
@@ -453,9 +462,18 @@ experiments/config/study.json  frozen split; variant seed, shuffled/noise refere
   dovecot authentication_success alerts dominates); Suricata and AMiner carry
   none. Map only native ids and `RULE_TABLE` rows; never guess.
 - pySigma 2.0.2 parses all 256 approved rules (rules/linux, rules/web) with 0
-  errors. Most need fields (process_creation, auditd key=value, webserver
-  cs-*/sc-*); AIT-ADS evidence is raw log lines, so the Sigma engine must
-  parse lines into fields per log type or run keyword-only rules.
+  errors, but ships no in-process backend: `sigma_engine.py` evaluates
+  `parsed_condition[i].parse()` itself. 166 rules are skipped by reason
+  (process_creation 123, proxy 29, file_event 8, network_connection 5,
+  nginx 1): their fields are not in these logs. Never add a field mapping
+  that the log line does not carry; the mapping table is the module docstring.
+- Sigma sees only lines another detector already alerted on (no AIT-LDSv2):
+  its dev numbers are a re-detection rate over the pool, labelled
+  "dev detection baseline", never a detector comparison.
+- Study code iterates `AIT_ADS_DETECTORS`, never `Detector`: `Detector.SIGMA`
+  exists for the platform, and a study variant `sigma` appears only if
+  `variants.extra_detectors` lists it (it does not). `test_frozen_sections_are_unchanged`
+  pins a sha256 of `split` + the frozen detector order in study.json.
 - The CICIDS2017 MachineLearningCSV URL returns an HTML registration page,
   not the zip: check the content type of any dataset download.
 - The internet here can be slow (~100 kB/s): run downloads in the background

@@ -46,6 +46,7 @@ DEFAULT_LABELS = Path(__file__).resolve().parents[2] / "data" / "raw" / "ait_ads
 
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parents[2] / "data" / "processed"
 DEFAULT_PLATFORM_DIR = Path(__file__).resolve().parents[2] / "data" / "platform"
+DEFAULT_SIGMA_RULES = Path(__file__).resolve().parents[2] / "data" / "raw" / "sigma" / "repo"
 
 _OFFSET_RE = re.compile(r"([+-])(\d{2}):?(\d{2})")
 
@@ -179,6 +180,17 @@ def build_parser() -> argparse.ArgumentParser:
     plat.add_argument("--study-config", type=Path, default=DEFAULT_STUDY_CONFIG)
     plat.add_argument("--data-dir", type=Path, default=DEFAULT_PLATFORM_DIR,
                       help=f"SQLite fallback stores (default: {DEFAULT_PLATFORM_DIR})")
+
+    sig = sub.add_parser("sigma", help="Sigma rules over alert evidence lines (dev only) + dev "
+                                       "detection baseline")
+    sig.add_argument("--scenario", required=True, help="a dev scenario (held-out ones are refused)")
+    sig.add_argument("--rules-dir", type=Path, default=DEFAULT_SIGMA_RULES)
+    sig.add_argument("--processed-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    sig.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR / "sigma")
+    sig.add_argument("--study-config", type=Path, default=DEFAULT_STUDY_CONFIG)
+    sig.add_argument("--data-dir", type=Path, default=DEFAULT_PLATFORM_DIR,
+                     help="platform stores; the dev baseline reads labels from their truth area")
+    sig.add_argument("--no-score", action="store_true", help="skip the dev detection baseline")
 
     user = sub.add_parser("create-user", help="create or replace a platform user")
     user.add_argument("--username", required=True)
@@ -470,6 +482,56 @@ def _platform_ingest(args: argparse.Namespace) -> int:
     return 0
 
 
+def _sigma(args: argparse.Namespace) -> int:
+    from app.detection.labels import MissingTruthError, dev_labels
+    from app.detection.sigma_report import run_sigma_scenario, sigma_dev_baseline
+    from app.platform.bootstrap import open_stores
+
+    try:
+        config = load_study_config(args.study_config)
+        report = run_sigma_scenario(args.processed_dir, args.scenario, config, args.rules_dir,
+                                    args.output_dir)
+    except (HeldOutScenarioError, ValueError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    rules, stats = report["rules"], report["stats"]
+    print(f"SIGMA over evidence lines - scenario {args.scenario} (dev scenario, not a paper result)")
+    print(f"rules: {rules['total']} total, {rules['compiled']} compiled, {rules['skipped']} skipped")
+    for reason, n in rules["skipped_by_reason"].items():
+        print(f"  skipped {reason}: {n}")
+    print(f"compiled by log type: {rules['compiled_by_log_type']}")
+    print(f"source alerts {stats['source_alerts']}, without lines {stats['alerts_without_lines']}, "
+          f"lines {stats['log_lines']}, unclassified lines {stats['lines_unclassified']}")
+    print(f"events by log type: {stats['events_by_log_type']}")
+    print(f"sigma alerts: {stats['sigma_alerts']} from {report['rules_with_hits']} rules; "
+          f"runtime load {report['runtime_seconds']['load_rules']} s, "
+          f"evaluate {report['runtime_seconds']['evaluate']} s")
+    for rid, info in report["per_rule"].items():
+        if info["hits"]:
+            print(f"  {info['hits']:>7d} hits / {info['events_evaluated']:>7d} events  "
+                  f"{info['title']}  ({info['file']})")
+    if args.no_score:
+        return 0
+    try:
+        labels = dev_labels(open_stores(args.data_dir).truth, args.scenario, config)
+    except MissingTruthError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    base = sigma_dev_baseline(report["_pool_ids"], set(report["_flagged_source_ids"]), labels)
+    print(f"\n{base['label']}: verdict = pool alert flagged by some Sigma rule")
+    print(f"pool {base['pool_alerts']}, flagged {base['flagged']}, event_label unavailable "
+          f"{base['event_label_unavailable']}")
+    for truth in ("event_label", "time_label"):
+        s = base[truth]
+        print(f"  {truth:11s} TP {s['tp']} FP {s['fp']} FN {s['fn']} TN {s['tn']} "
+              f"prec {_fmt(s['precision'])} recall {_fmt(s['recall'])} F1 {_fmt(s['f1'])} "
+              f"FNR {_fmt(s['fnr'])}")
+    if args.output_dir is not None:
+        (Path(args.output_dir) / f"{args.scenario}.sigma.dev_baseline.json").write_text(
+            json.dumps(base, indent=2) + "\n", encoding="utf-8")
+    return 0
+
+
 def _create_user(args: argparse.Namespace) -> int:
     """Password only from the environment (SENTINEL_NEW_USER_PASSWORD), never argv."""
     import os
@@ -513,6 +575,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _cases(args)
     if args.command == "platform-ingest":
         return _platform_ingest(args)
+    if args.command == "sigma":
+        return _sigma(args)
     if args.command == "create-user":
         return _create_user(args)
     if args.command == "serve":

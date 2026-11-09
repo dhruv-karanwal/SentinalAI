@@ -99,3 +99,14 @@ def test_matched_k_rounds_half_up_and_is_at_least_one() -> None:
     assert matched_k(2.49) == 2
     assert matched_k(2.5) == 3
     assert matched_k(7.0) == 7
+
+
+def test_detector_outside_the_frozen_order_ranks_last() -> None:
+    from types import SimpleNamespace
+
+    from app.schemas.alert import Detector
+    from app.study.baselines import _order_rank
+    cfg = BaselineConfig(top_k=(5,), detector_order=("aminer", "wazuh", "suricata"), quote_chars=60)
+    rank = [_order_rank(cfg, SimpleNamespace(detector=d))  # type: ignore[arg-type]
+            for d in (Detector.AMINER, Detector.SURICATA, Detector.SIGMA)]
+    assert rank == [0, 2, 3]

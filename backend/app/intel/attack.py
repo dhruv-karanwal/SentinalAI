@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -105,7 +106,17 @@ class AttackKB:
         return self.techniques.get(technique_id.split(".")[0])
 
 
+_SIGMA_TAG = re.compile(r"^attack\.(t\d{4}(?:\.\d{3})?)$")
+
+
 def _native_ids(alert: Alert) -> list[str]:
+    if alert.detector is Detector.SIGMA:
+        # Sigma rules carry their own ATT&CK tags (attack.t1190): native ids, like Wazuh's
+        # rule.mitre.id. Tactic tags (attack.execution) are not technique ids and are ignored.
+        sigma = alert.raw_alert.get("sigma")
+        tags = sigma.get("tags") if isinstance(sigma, dict) else None
+        matches = (_SIGMA_TAG.match(str(t)) for t in tags) if isinstance(tags, list) else ()
+        return [m.group(1).upper() for m in matches if m]
     if alert.detector is not Detector.WAZUH:
         return []
     rule = alert.raw_alert.get("rule")

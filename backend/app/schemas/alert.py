@@ -57,6 +57,18 @@ class Detector(StrEnum):
     WAZUH = "wazuh"
     SURICATA = "suricata"
     AMINER = "aminer"
+    # Wave B2: SigmaHQ rules evaluated over alert evidence log lines
+    # (app.detection.sigma_engine). An additional source for the platform,
+    # NOT a study variable: it is not in AIT_ADS_DETECTORS, so variants,
+    # quality reports and baselines never see it unless a study config
+    # lists it explicitly (variants.extra_detectors).
+    SIGMA = "sigma"
+
+
+# The detectors whose alerts the AIT-ADS dataset ships. Study code iterates
+# this tuple, never ``Detector`` itself, so adding a platform detector cannot
+# change a study output.
+AIT_ADS_DETECTORS: tuple[Detector, ...] = (Detector.WAZUH, Detector.SURICATA, Detector.AMINER)
 
 
 class DetectorType(StrEnum):
@@ -73,6 +85,8 @@ DETECTOR_TYPES: dict[Detector, DetectorType] = {
     Detector.WAZUH: DetectorType.RULE_BASED,
     Detector.SURICATA: DetectorType.SIGNATURE_BASED,
     Detector.AMINER: DetectorType.ANOMALY_BASED,
+    # Sigma rules are field/keyword rules over log events: rule-based.
+    Detector.SIGMA: DetectorType.RULE_BASED,
 }
 
 

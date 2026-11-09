@@ -200,3 +200,18 @@ def test_cli(processed: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     assert "DEV-SCENARIO NUMBERS" in out and "oracle" in out
     assert main(["variants", "--scenario", "fox", "--processed-dir", str(processed),
                  "--no-output"]) == 2
+
+
+def test_study_variants_never_include_sigma_unless_listed(pool: AlertPool, tmp_path: Path) -> None:
+    from app.study.variants import experiment_variants
+    config = load_study_config()
+    assert config.extra_detectors == ()
+    names = set(experiment_variants(pool, config))
+    assert "sigma" not in names and not any("sigma" in n for n in names)
+    assert "sigma" not in build_variants(pool, seed=SEED)
+    data = json.loads(DEFAULT_STUDY_CONFIG.read_text(encoding="utf-8"))
+    data["variants"]["extra_detectors"] = ["sigma"]
+    path = tmp_path / "study_sigma.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    listed = experiment_variants(pool, load_study_config(path))
+    assert "sigma" in listed and listed["sigma"].entries == ()  # no sigma alerts in the AIT-ADS pool
