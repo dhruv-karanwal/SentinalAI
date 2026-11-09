@@ -1974,3 +1974,12 @@ Decisions taken (Wave D):
 
 `pytest -q` -> `465 passed, 4 skipped in 33.84s`; `mypy` -> `Success: no issues found in 80
 source files`.
+
+## PRs, 2026-11-10
+
+- `phase3/wave-b-fixes`: a432036 (B4 + B3), 365b7d0 (C1 + pilot config + resume);
+  https://github.com/dhruv-karanwal/SentinalAI/pull/7, merged as de44f5a.
+- `phase3/wave-d-offline`: Wave D offline commit;
+  https://github.com/dhruv-karanwal/SentinalAI/pull/8, merged as 8634902.
+- Model work (M6 smoke test, pilot) not started: Ollama installer still downloading
+  (56,352,768 of 1,689,667,936 bytes at 02:58 IST).

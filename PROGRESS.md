@@ -3,7 +3,7 @@
 Read this first every session; update it in every commit that changes project state.
 Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
 
-**Last update:** 2026-11-10, branch `phase3/wave-d-offline`.
+**Last update:** 2026-11-10 03:00 IST, `main` after PR #8.
 
 ## Done
 - M1-M5, Wave A (platform), B1-B4 (detection layer), Wave C code (RAG, LangGraph graph,
@@ -19,15 +19,15 @@ Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
   Merged: PR #7.
 - Wave D offline parts (`phase3/wave-d-offline`): reports JSON/CSV/PDF, playbooks, approvals +
   simulated gated executor, copilot route, feedback report, Grafana JSON, security notes, Jira stub.
-  465 passed, 4 skipped; mypy clean (80 files).
+  465 passed, 4 skipped; mypy clean (80 files). Merged: PR #8.
 
 ## In progress
-- PR for `phase3/wave-d-offline`; then wait for the model download.
+- Waiting for the model: Ollama installer download (background, resumable), then the 7B pull.
 
 ## Downloads (background, approved 2026-11-10)
 | item | status | log |
 |------|--------|-----|
-| Ollama installer (curl -C -, sha256-checked) then `qwen2.5:7b-instruct` | running, ~65 kB/s (installer ~7 h) | `data/processed/downloads/ollama.log`, `curl-ollama.err`, `pull-7b.log` |
+| Ollama installer (curl -C -, sha256-checked) then `qwen2.5:7b-instruct` | running: 56 MB of 1,690 MB at 02:58 IST, 40-85 kB/s (installer alone 6-11 h) | `data/processed/downloads/ollama.log`, `curl-ollama.err`, `pull-7b.log` |
 | Docker Desktop + `pgvector/pgvector:pg16` (lite only) | **blocked**: Docker Desktop not registered (`cannot find registry key "SOFTWARE\Docker Inc.\Docker Desktop"`); reinstall needs admin (you) | `data/processed/downloads/docker.log` |
 | npm (frontend) | not started: only when the dashboard starts (after the pilot gate) | — |
 
@@ -38,6 +38,12 @@ config` cleanly (with placeholder env values).
 ## Blocked
 - Model smoke test (M6) and the matched pilot: waiting for the model download.
 - Wave E: only after the user says go. React frontend: only after the pilot report and a go.
+
+## Fallback rule (user decision)
+If `qwen2.5:7b-instruct` is not usable 3 h after the download started (started 2026-11-10 02:27
+IST), pull `qwen2.5:3b-instruct` instead and record that the pilot used the smaller model. The
+installer alone will take longer than 3 h at this speed, so check the rule as soon as Ollama is
+installed: if the 7B pull would still take hours, start the 3B pull.
 
 ## Next steps (in order)
 1. When `ollama list` shows the model: M6 smoke test (run-agent, run-matched, limit 2),
