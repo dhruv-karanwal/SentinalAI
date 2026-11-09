@@ -19,6 +19,7 @@ import dataclasses
 import json
 import re
 import sys
+import time
 from collections.abc import Sequence
 from datetime import timedelta, timezone, tzinfo
 from pathlib import Path
@@ -191,6 +192,22 @@ def build_parser() -> argparse.ArgumentParser:
     sig.add_argument("--data-dir", type=Path, default=DEFAULT_PLATFORM_DIR,
                      help="platform stores; the dev baseline reads labels from their truth area")
     sig.add_argument("--no-score", action="store_true", help="skip the dev detection baseline")
+
+    tri = sub.add_parser("triage", help="B3: build incidents from the stored alerts of a dev "
+                                        "scenario (+ descriptive dev check)")
+    tri.add_argument("--scenario", required=True, help="a dev scenario (held-out ones are refused)")
+    tri.add_argument("--gap-seconds", type=_positive_int, default=300,
+                     help="max gap between linked alerts on one entity (default: 300)")
+    tri.add_argument("--include-sigma", action="store_true",
+                     help="add <scenario>.sigma.alerts.jsonl from --sigma-dir (written by `sigma`)")
+    tri.add_argument("--sigma-dir", type=Path, default=DEFAULT_OUTPUT_DIR / "sigma")
+    tri.add_argument("--ioc-file", type=Path, default=None,
+                     help="local indicator JSON (feeds are disabled; default: none)")
+    tri.add_argument("--labels", type=Path, default=DEFAULT_LABELS,
+                     help="labels.csv, read ONLY by the descriptive dev check")
+    tri.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR / "triage")
+    tri.add_argument("--study-config", type=Path, default=DEFAULT_STUDY_CONFIG)
+    tri.add_argument("--data-dir", type=Path, default=DEFAULT_PLATFORM_DIR)
 
     user = sub.add_parser("create-user", help="create or replace a platform user")
     user.add_argument("--username", required=True)
@@ -532,6 +549,51 @@ def _sigma(args: argparse.Namespace) -> int:
     return 0
 
 
+def _triage(args: argparse.Namespace) -> int:
+    from app.alert_pipeline import iter_alert_file
+    from app.detection.triage import TriageConfig, build_and_store
+    from app.detection.triage_report import phase_overlap
+    from app.intel.ioc import IocStore
+    from app.platform.bootstrap import open_stores
+
+    try:
+        config = load_study_config(args.study_config)
+        config.split.require_dev(args.scenario)
+        stores = open_stores(args.data_dir)
+        extra = []
+        if args.include_sigma:
+            extra = list(iter_alert_file(args.sigma_dir / f"{args.scenario}.sigma.alerts.jsonl"))
+        iocs = IocStore.load(args.ioc_file) if args.ioc_file else None
+        t0 = time.perf_counter()
+        summary = build_and_store(stores.repo, args.scenario, TriageConfig(args.gap_seconds),
+                                  extra, iocs)
+        summary["runtime_seconds"] = round(time.perf_counter() - t0, 2)
+        summary["ioc_indicators"] = len(iocs) if iocs else 0
+        incidents = stores.repo.list_incidents(args.scenario)
+        check = phase_overlap(incidents, args.labels, args.scenario, config)
+    except (HeldOutScenarioError, ValueError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except IngestionError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(f"TRIAGE - scenario {args.scenario} (dev scenario, not a paper result); "
+          f"gap {summary['gap_seconds']} s, sigma alerts added {summary['extra_alerts']}, "
+          f"IOC indicators {summary['ioc_indicators']}")
+    print(json.dumps({k: v for k, v in summary.items() if k != "size_distribution"}, indent=2))
+    print(f"\n{check['label']}: attack phases (labels.csv) overlapped in time by >= 1 incident: "
+          f"{check['phases_overlapped']}/{check['phases']}")
+    for ph in check["per_phase"]:
+        print(f"  {ph['phase']:28s} {ph['overlapping_incidents']:>6d} incidents "
+              f"{ph['overlapping_by_severity']}")
+    out = Path(args.output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / f"{args.scenario}.triage.json").write_text(
+        json.dumps({"summary": summary, "descriptive_dev_check": check}, indent=2) + "\n",
+        encoding="utf-8")
+    return 0
+
+
 def _create_user(args: argparse.Namespace) -> int:
     """Password only from the environment (SENTINEL_NEW_USER_PASSWORD), never argv."""
     import os
@@ -577,6 +639,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _platform_ingest(args)
     if args.command == "sigma":
         return _sigma(args)
+    if args.command == "triage":
+        return _triage(args)
     if args.command == "create-user":
         return _create_user(args)
     if args.command == "serve":

@@ -90,6 +90,11 @@ class FeedbackBody(BaseModel):
     notes: str | None = Field(default=None, max_length=4000)
 
 
+class BuildBody(BaseModel):
+    scenario: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9_\-]+$")
+    gap_seconds: int = Field(default=300, ge=1, le=86400)
+
+
 class StatusBody(BaseModel):
     status: str = Field(pattern=r"^(open|investigating|contained|closed)$")
 
@@ -212,6 +217,17 @@ def create_app(services: Services, *, metrics: Any | None = None) -> FastAPI:
     def list_incidents(p: Annotated[Principal, Depends(need("read"))], scenario: str | None = None,
                        severity: str | None = None) -> dict[str, Any]:
         return {"incidents": repo.list_incidents(scenario, severity)}
+
+    @app.post("/incidents/build")
+    def build_incidents(body: BuildBody,
+                        p: Annotated[Principal, Depends(need("incident.build"))]) -> dict[str, Any]:
+        """Triage + correlation (Wave B3) over the scenario's stored alerts; label-free."""
+        from app.detection.triage import TriageConfig, build_and_store
+
+        summary = build_and_store(repo, body.scenario, TriageConfig(gap_seconds=body.gap_seconds))
+        repo.audit(p.username, p.role.value, "incident.build", body.scenario,
+                   {"gap_seconds": body.gap_seconds, "incidents": summary["incidents"]})
+        return summary
 
     @app.get("/incidents/{incident_id}")
     def get_incident(incident_id: str, p: Annotated[Principal, Depends(need("read"))]) -> dict[str, Any]:

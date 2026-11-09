@@ -1514,3 +1514,72 @@ Decisions taken (B2):
 - `Detector.SIGMA` is typed rule-based.
 
 Next: B3 triage and correlation.
+
+## B3 checkpoint: triage and correlation (committed on `phase3/wave-b-rest`)
+
+Replay finished: shaw published 70,782, stored 70,782, duplicates 0,
+rejected 0, by detector aminer 2,243 / suricata 16,708 / wazuh 51,831,
+ground_truth_rows 70,782; **wall clock 2,028 s** (russellmitchell: 351 s;
+shaw ran while other work read the same SQLite files, which may have slowed it).
+
+Shaw Sigma dev baseline (`sigma --scenario shaw`), completing B2:
+
+```
+pool 53645, flagged 1468, event_label unavailable 0
+  event_label TP 1468 FP 0 FN 4592 TN 47585 prec 1.0000 recall 0.2422 F1 0.3900 FNR 0.7578
+  time_label  TP 1468 FP 0 FN 5260 TN 46917 prec 1.0000 recall 0.2182 F1 0.3582 FNR 0.7818
+```
+
+Done: `app/detection/triage.py` (label-free), `triage_report.py` (the only
+B3 label reader), `Repository.iter_alert_models`, CLI `triage`, API
+`POST /incidents/build` (permission `incident.build`, audited, denied
+requests audited as `denied`). Tests: single alert, gap exactly at / just
+over, chaining, cross-detector merge through a shared IP, every severity
+row, RBAC deny, audit entry.
+
+Real output, `triage --scenario <s>` (gap 300 s, no sigma alerts added,
+0 IOC indicators):
+
+| | russellmitchell | shaw |
+|---|---|---|
+| stored alerts read | 45,544 | 70,782 |
+| excluded by selection (training mode, Suricata duplicates) | 9,586 | 17,100 |
+| alerts in incidents | 35,958 | 53,682 |
+| incidents | 837 | 1,175 |
+| size 1 / 2-9 / 10-99 / 100-999 / >=1000 | 167 / 304 / 303 / 62 / 1 | 478 / 219 / 337 / 139 / 2 |
+| largest incident | 11,208 alerts | 6,003 alerts |
+| severity High / Medium / Low | 4 / 12 / 821 | 1 / 47 / 1,127 |
+| rows hit | H2 4, M2 8, M3 4, L1 821 | H2 1, M2 18, M3 29, L1 1,127 |
+| cross-detector incidents | 16 | 34 |
+| runtime | 3.85 s | 6.8 s |
+
+**Descriptive dev check** (labels.csv phase intervals overlapped in time by
+>= 1 incident; dev scenario, not a paper result): russellmitchell 10/10,
+shaw 10/10. Per phase (incidents overlapping, by severity):
+russellmitchell network_scans 3 {Low 3}, service_scans 1 {High 1}, dirb 1
+{High 1}, wpscan 1 {High 1}, webshell 1 {High 1}, cracking 5 {High 1, Low 4},
+reverse_shell 1 {Medium 1}, privilege_escalation 1 {Medium 1}, service_stop
+3 {Low 3}, dnsteal 12 {Low 12}; shaw service_stop 2 {Low 2}, dnsteal 8
+{Low 8}, network_scans 2 {Low 2}, service_scans 1 {Medium 1}, wpscan 1
+{Medium 1}, dirb 1 {Medium 1}, webshell 1 {Medium 1}, cracking 13 {Low 11,
+Medium 2}, reverse_shell 3 {Low 1, Medium 2}, privilege_escalation 2
+{Medium 2}. Caveat: time overlap only; the single 11,208-alert
+russellmitchell incident spans several phases, so "overlapped" does not
+mean "detected".
+
+Decisions taken (B3):
+
+- Default gap 300 s, chosen before any result, not tuned; it is a parameter.
+- Entities: `host_ip` and the carried source IP (Wazuh `data.srcip`,
+  Suricata `data.src_ip`); destination IPs are not entities (they would
+  chain every inbound alert through the server).
+- Triage uses `DEFAULT_EVALUATION_SELECTION` (keeps aggregates: they are
+  detector output), not the investigation pool.
+- Level classes from each detector's own scale (Wazuh >= 12 high, 7-11
+  medium; Suricata 1 high, 2 medium; Sigma critical/high, medium).
+- IOC store is empty by default (feeds disabled); `--ioc-file` loads a
+  local list.
+- Rebuilding deletes a scenario's earlier incidents except ones a report
+  refers to.
+
+Next: B4 ML detection baselines.

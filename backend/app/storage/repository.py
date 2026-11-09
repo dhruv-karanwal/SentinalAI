@@ -14,7 +14,7 @@ Two classes on purpose:
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from typing import Any
 
 from app.schemas.alert import Alert, GroundTruth
@@ -79,6 +79,18 @@ class Repository:
         rows = self.db.query(f"SELECT * FROM alerts{clause} ORDER BY ts, alert_id LIMIT ? OFFSET ?",
                              (*params, int(limit), int(offset)))
         return [self._alert_row(r) for r in rows]
+
+    def iter_alert_models(self, scenario: str, batch: int = 5000) -> Iterator[Alert]:
+        """Every stored alert of a scenario as ``Alert``, in (ts, alert_id) order, paged."""
+        offset = 0
+        while True:
+            rows = self.db.query("SELECT record FROM alerts WHERE scenario = ? "
+                                 "ORDER BY ts, alert_id LIMIT ? OFFSET ?", (scenario, batch, offset))
+            for r in rows:
+                yield Alert.model_validate(decode_json(r["record"]))
+            if len(rows) < batch:
+                return
+            offset += batch
 
     def count_alerts(self, scenario: str | None = None) -> dict[str, int]:
         clause, params = (" WHERE scenario = ?", (scenario,)) if scenario else ("", ())
