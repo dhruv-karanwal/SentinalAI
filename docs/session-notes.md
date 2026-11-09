@@ -1660,3 +1660,38 @@ Decisions taken (B4):
   `scanned 123 tracked files and 2619 added diff lines (main..HEAD): 1 file hits, 0 diff hits`.
   The one hit is the M5 test placeholder already on `main`, not a secret.
   Tracked files named `*.env`, `*.pem`, `*.key`, `id_rsa`: 0.
+
+## Wave C, C1 checkpoint: ATT&CK RAG (branch `phase3/wave-c-code` from `main` after the Wave B merge)
+
+Wave B merged: PR https://github.com/dhruv-karanwal/SentinalAI/pull/5,
+merge commit `1354f97`. `phase3/wave-c-code` was cut from that `main`.
+
+Order kept: the relevance set (`experiments/rag/attack_relevance_set.json`,
+25 hand-written queries) was committed first (`69a7882`), before any
+retrieval run; its sha256 (LF) `f86df5d4...5e8e2` is pinned by a test.
+
+Real output:
+
+```
+$ python -m app.main rag-index
+ATT&CK index: 706 techniques (bundle 20.1), 1118 chunks embedded with BAAI/bge-small-en-v1.5 (dim 384) in 84.6 s; collection 'attack'
+$ python -m app.main rag-eval
+Relevance set attack-relevance-v1: 25 queries (measured, local BAAI/bge-small-en-v1.5)
+  recall@1: 0.2800 (7/25)
+  recall@3: 0.4800 (12/25)
+  recall@5: 0.5600 (14/25)
+```
+
+Misses at 5 (per-query ranks in `data/processed/rag/relevance_eval.json`):
+q03 (dovecot login -> T1078), q05/q07/q08 (scanner user agents, port scan
+-> T1595/T1046), q06 (404 bursts), q11 (SQL injection -> T1190), q13 (DNS
+exfil), q14 (useradd), q17 (wget + chmod), q19 (reverse shell), q24 (ping
+sweep). The set was not edited after these results.
+
+Decisions taken (C1): exact cosine search over a SQLite table (1,118
+vectors; no ANN index needed); one chunk per technique unless the
+description exceeds 1,200 chars (split at paragraphs); `(Citation: ...)`
+markers removed; queries use bge's query instruction (`query_embed`).
+Note: tests for Wave C were written after part of the Wave C code (while
+the shaw replay ran), not strictly before it; all of them were in place
+and passing before any Wave C commit.

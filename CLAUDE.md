@@ -49,7 +49,8 @@ multi-agent comparison, the verifier, statistics.
 | B2 | **Done**: Sigma engine over alert evidence lines (`app/detection/sigma_engine.py`; 90/256 rules compile, the rest skipped by counted reason), `Detector.SIGMA` as a platform detector (not a study variable), single label door `app/detection/labels.py`, frozen-sections hash test |
 | B3 | **Done**: `app/detection/triage.py` (label-free): existing dedup kept, entities host/src-IP, union-find grouping with gap 300 s (inclusive), first-match severity table H1-L1, incidents via `put_incident` with timeline; CLI `triage`, API `POST /incidents/build` (RBAC `incident.build`, audited); descriptive dev check (labels.csv phase overlap) in `triage_report.py` only |
 | B4 | **Done**: ML detection baselines on AIT-ADS dev scenarios (`app/detection/features.py` label-free, 12 pinned features; `ml_baselines.py`: IsolationForest contamination=auto + HistGradientBoosting, seed = variants.seed; time split 60/40 of the timeline per scenario + cross-scenario both ways; labels only via `dev_labels`). CLI `ml-baselines`. XGBoost installed but unused. CICIDS2017 not available |
-| C | Not started: ATT&CK RAG (bge-small already local), LangGraph supervisor + agents, evidence verifier, matched-budget comparison; **GATE after the pilot** |
+| C1 | **Done**: ATT&CK RAG: `app/rag/` (chunks, offline bge-small via fastembed, SQLite vector table / pgvector, retriever), `search_attack` tool (`agent/rag_tool.py`), frozen relevance set `experiments/rag/attack_relevance_set.json` (25 queries, committed before the first run). Measured recall@1/3/5 = 0.28 / 0.48 / 0.56 |
+| C2-C3 | Next: verifier + LangGraph supervisor with six agents; matched-budget runner + dry-run pilot estimate. **GATE after the real pilot** (not run: no model) |
 | D | Not started: reports (JSON/PDF/CSV), approvals, React dashboard (needs the npm download), copilot, feedback script, Grafana JSON, security notes, Jira stub |
 | E | Only after the user says go |
 
@@ -192,6 +193,12 @@ backend/app/
   detection/features.py   FEATURE_NAMES (pinned), raw_features(alerts, iocs) (no labels; trailing
                           per-host counts, strictly past), FeatureEncoder (train-only vocab, -1 unknown)
   detection/ml_baselines.py  time_split, feature_rows, fit_and_score, run_ml_baselines
+  rag/chunks.py           attack_chunks(kb): id + name + tactics + description (+ detection if any)
+  rag/embedding.py        FastEmbedEmbedder (bge-small, local_files_only, offline env), EmbeddingUnavailable
+  rag/vector_store.py     VectorStore: SqliteVectorStore (data/platform/vectors.db) | PgVectorStore
+                          (SENTINEL_DB_URL); open_vector_store
+  rag/retriever.py        AttackRetriever.index / .search (distinct techniques), load_relevance_set, evaluate
+  agent/rag_tool.py       AttackSearchTool (`search_attack`): KB excerpts only, never echoes the query
 backend/tests/            pytest, one file per module + test_pipeline.py (end to end)
 data/samples/             committed SYNTHETIC samples (see its README)
 data/raw/, data/processed/ git-ignored: local datasets and pipeline outputs
@@ -480,6 +487,11 @@ experiments/config/study.json  frozen split; variant seed, shuffled/noise refere
 - Sigma sees only lines another detector already alerted on (no AIT-LDSv2):
   its dev numbers are a re-detection rate over the pool, labelled
   "dev detection baseline", never a detector comparison.
+- The local ATT&CK bundle (v20.1) has no `x_mitre_detection` text: chunks hold name, tactics and
+  description. The relevance set is frozen (sha256 pinned in tests/test_rag.py); a new set is a new
+  versioned file, never an edit. Retrieval numbers are measured, never estimated.
+- bge-small loads only from `data/models/fastembed` with `local_files_only=True`; a missing cache
+  raises `EmbeddingUnavailable` (never a download). Unit tests use the `HashEmbedder` test double.
 - ML features never include labels, phase, scenario, alert id, raw timestamps or source
   file/line (`test_exact_feature_list_and_no_forbidden_feature`). Window counts look only at
   strictly earlier timestamps. Encoders are fitted on the training split only; IsolationForest
