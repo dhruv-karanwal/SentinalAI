@@ -1718,3 +1718,30 @@ Decisions taken (C2):
   without a note (counted as `turns_without_note`); nothing is invented.
 - Memory session ids are an opaque hash of the toolkit salt; note text is
   time-masked and capped at 2,000 characters.
+
+## Wave C, C3 checkpoint: matched-budget runner and dry-run estimate
+
+Done: `agent/matched.py` (`estimate_matched`, `run_matched`),
+`app/cli_wave_c.py` (`rag-index`, `rag-eval`, `pilot-estimate`,
+`run-matched`, registered by `main.py`). Both arms read the same `agent`
+budgets; both pass the same verifier; both are scored by `score_case`
+before and after the verifier, next to the same baselines on the same
+cases. Run records: tokens in/out, requests, tool calls, latency, parse
+status, status, budget hit, citations/claims kept and dropped.
+
+Real output, `python -m app.main pilot-estimate --select reachable` (no
+model was called; method printed by the command: upper bounds, cases x
+`max_tokens_per_case` per arm, prompts at 3 characters per token, tool
+calls cases x `max_tool_calls` per arm): 14 reachable-selection cases per
+(dev scenario, variant, truncation); per run token bound 1,120,000 and
+tool-call bound 336 (2 arms); first prompts about 10,630-10,690 tokens
+(single) and 6,030-6,080 (graph supervisor) per run.
+`TOTAL: 44 runs, 616 cases x 2 arms, token bound 49280000, tool-call bound 14784`
+(all 22 experiment variants x 2 truncations x 2 dev scenarios; choosing the
+pilot's variants is a user decision).
+
+`run-matched --scenario russellmitchell --variant fused --select reachable
+--limit 2 --dry-run` -> `2 cases x 2 arms; token bound 160000; tool-call
+bound 48`, `DRY RUN: no model was called`.
+
+No real pilot was run and Wave D was not started.

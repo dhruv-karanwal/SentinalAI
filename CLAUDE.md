@@ -51,15 +51,16 @@ multi-agent comparison, the verifier, statistics.
 | B4 | **Done**: ML detection baselines on AIT-ADS dev scenarios (`app/detection/features.py` label-free, 12 pinned features; `ml_baselines.py`: IsolationForest contamination=auto + HistGradientBoosting, seed = variants.seed; time split 60/40 of the timeline per scenario + cross-scenario both ways; labels only via `dev_labels`). CLI `ml-baselines`. XGBoost installed but unused. CICIDS2017 not available |
 | C1 | **Done**: ATT&CK RAG: `app/rag/` (chunks, offline bge-small via fastembed, SQLite vector table / pgvector, retriever), `search_attack` tool (`agent/rag_tool.py`), frozen relevance set `experiments/rag/attack_relevance_set.json` (25 queries, committed before the first run). Measured recall@1/3/5 = 0.28 / 0.48 / 0.56 |
 | C2 | **Done**: evidence verifier (`agent/verifier.py`: drops and counts unsupported citations/claims), multi-agent tools + shared memory (`agent/multi_tools.py`: repository memory table + vector memory), LangGraph supervisor with six agents (`agent/graph.py`), same per-case budgets as M5 with a hard stop; FakeClient tests for every edge, budgets, failure paths, leaks |
-| C3 | Next: matched-budget runner + dry-run pilot estimate. **GATE after the real pilot** (not run: no model) |
+| C3 | **Done (code)**: matched-budget runner (`agent/matched.py`: single vs graph, same cases, same budgets, same verifier, scored before and after the verifier next to the same baselines), CLI `rag-index`, `rag-eval`, `pilot-estimate`, `run-matched` (`app/cli_wave_c.py`). **Real pilot not run (no model); GATE after it** |
 | D | Not started: reports (JSON/PDF/CSV), approvals, React dashboard (needs the npm download), copilot, feedback script, Grafana JSON, security notes, Jira stub |
 | E | Only after the user says go |
 
-**Where we stopped (2026-11-07) and what comes next:** see the last section of
-`docs/session-notes.md` ("Where we left off"). In short: build B2 (Sigma), B3
-and B4 offline; then the Wave C code with FakeClient tests; resume the paused
-downloads (Ollama + model, npm, Docker images) when the internet allows; then
-run the M6 smoke test and the Wave C pilot and stop at the gate.
+**Where we stopped (2026-11-09) and what comes next:** see the last section of
+`docs/session-notes.md` ("Final report, 2026-11-09"). In short: Waves B2-B4 and
+the Wave C code are done offline; resume the paused downloads (Ollama + model,
+npm, Docker images) when the internet allows; then run the M6 smoke test, the
+matched-budget Wave C pilot, and stop at the gate. Open question: the B4 60/40
+timeline split has no attack alerts in training on either dev scenario.
 
 Nested rules: `backend/CLAUDE.md`, `infra/CLAUDE.md` (and `frontend/CLAUDE.md`
 once the frontend exists). This file is the index.
@@ -110,6 +111,12 @@ S=../data/samples/synthetic_ait_ads
 ../.venv/Scripts/python.exe -m app.main triage --scenario russellmitchell --gap-seconds 300
 # B4: ML detection baselines (dev scenarios; labels from the truth area; writes data/processed/ml/)
 ../.venv/Scripts/python.exe -m app.main ml-baselines --scenarios russellmitchell shaw
+# Wave C: ATT&CK index (local bge-small, offline) + recall on the frozen relevance set
+../.venv/Scripts/python.exe -m app.main rag-index
+../.venv/Scripts/python.exe -m app.main rag-eval
+# matched-budget pilot: bound only (no model), then the real run once a model is configured
+../.venv/Scripts/python.exe -m app.main pilot-estimate --select reachable
+../.venv/Scripts/python.exe -m app.main run-matched --scenario russellmitchell --variant fused --select reachable --limit 2 --dry-run
 # passwords and secrets only from the environment, never as arguments
 ../.venv/Scripts/python.exe -m app.main create-user --username alice --role analyst   # needs SENTINEL_NEW_USER_PASSWORD
 ../.venv/Scripts/python.exe -m app.main serve      # API on 127.0.0.1:8000; needs SENTINEL_JWT_SECRET
@@ -204,6 +211,8 @@ backend/app/
   agent/multi_tools.py    CaseMemory (memory table + vector memory, opaque session id), MultiAgentToolkit
   agent/graph.py          AGENTS, AGENT_TOOLS, GRAPH_EDGES, PROMPTS (GRAPH_PROMPT_VERSION), run_graph
                           -> GraphRun (trace, notes, budget_hit, verification, raw vs verified output)
+  agent/matched.py        estimate_matched (dry-run bound + method), run_matched (both arms, run log)
+  cli_wave_c.py           rag-index, rag-eval, pilot-estimate, run-matched (registered by main.py)
 backend/tests/            pytest, one file per module + test_pipeline.py (end to end)
 data/samples/             committed SYNTHETIC samples (see its README)
 data/raw/, data/processed/ git-ignored: local datasets and pipeline outputs
@@ -492,6 +501,9 @@ experiments/config/study.json  frozen split; variant seed, shuffled/noise refere
 - Sigma sees only lines another detector already alerted on (no AIT-LDSv2):
   its dev numbers are a re-detection rate over the pool, labelled
   "dev detection baseline", never a detector comparison.
+- Matched runs score each arm twice, before and after the verifier (`single`, `single+verifier`,
+  `graph`, `graph+verifier`); which is the headline is the user's call. Matched-run numbers on
+  dev scenarios are pilot material; FakeClient runs are plumbing checks, never results.
 - Multi-agent graph budgets are the M5 numbers (`agent` section of study.json) over the whole
   graph: tokens checked before every request, tool calls across agents, one repair per case.
   `GraphSettings` (turn tool calls, supervisor steps) only paces inside the budget. Changing a

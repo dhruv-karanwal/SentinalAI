@@ -221,6 +221,10 @@ def build_parser() -> argparse.ArgumentParser:
     mlb.add_argument("--data-dir", type=Path, default=DEFAULT_PLATFORM_DIR,
                      help="platform stores; labels come from their truth area")
 
+    from app.cli_wave_c import add_parsers as add_wave_c_parsers
+
+    add_wave_c_parsers(sub, DEFAULT_STUDY_CONFIG, _positive_int)
+
     user = sub.add_parser("create-user", help="create or replace a platform user")
     user.add_argument("--username", required=True)
     user.add_argument("--role", required=True, choices=[r.value for r in Role])
@@ -705,6 +709,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _triage(args)
     if args.command == "ml-baselines":
         return _ml_baselines(args)
+    from app.cli_wave_c import COMMANDS as WAVE_C_COMMANDS
+    from app.cli_wave_c import dispatch as wave_c_dispatch
+
+    if args.command in WAVE_C_COMMANDS:
+        return wave_c_dispatch(args)
     if args.command == "create-user":
         return _create_user(args)
     if args.command == "serve":
