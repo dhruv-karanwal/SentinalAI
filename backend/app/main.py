@@ -222,6 +222,11 @@ def build_parser() -> argparse.ArgumentParser:
     mlb.add_argument("--data-dir", type=Path, default=DEFAULT_PLATFORM_DIR,
                      help="platform stores; labels come from their truth area")
 
+    fbr = sub.add_parser("feedback-report", help="Wave D: offline summary of analyst feedback "
+                                                 "(no retraining)")
+    fbr.add_argument("--data-dir", type=Path, default=DEFAULT_PLATFORM_DIR)
+    fbr.add_argument("--output", type=Path, default=DEFAULT_OUTPUT_DIR / "feedback" / "feedback_report.json")
+
     from app.cli_wave_c import add_parsers as add_wave_c_parsers
 
     add_wave_c_parsers(sub, DEFAULT_STUDY_CONFIG, _positive_int)
@@ -676,6 +681,26 @@ def _ml_baselines(args: argparse.Namespace) -> int:
     return 0
 
 
+def _feedback_report(args: argparse.Namespace) -> int:
+    from app.outputs.feedback_report import feedback_report
+    from app.platform.bootstrap import open_stores
+
+    try:
+        report = feedback_report(open_stores(args.data_dir).repo)
+    except OSError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(f"FEEDBACK REPORT - {report['note']}")
+    print(f"entries {report['total']}, targets {report['targets']}, by verdict {report['by_verdict']}")
+    for t, c in report["by_target_type"].items():
+        print(f"  {t:10s} {c}")
+    for d in report["most_disputed"]:
+        print(f"  disputed {d['target']}: {d['verdicts']}")
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    return 0
+
+
 def _create_user(args: argparse.Namespace) -> int:
     """Password only from the environment (SENTINEL_NEW_USER_PASSWORD), never argv."""
     import os
@@ -725,6 +750,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _triage(args)
     if args.command == "ml-baselines":
         return _ml_baselines(args)
+    if args.command == "feedback-report":
+        return _feedback_report(args)
     from app.cli_wave_c import COMMANDS as WAVE_C_COMMANDS
     from app.cli_wave_c import dispatch as wave_c_dispatch
 

@@ -14,4 +14,10 @@
 - Triage (`detection/triage.py`) is label-free and must stay so (it is in `LABEL_FREE`); the descriptive phase-overlap check lives in `triage_report.py` and runs only from the CLI after incidents are built. `Repository.iter_alert_models(scenario)` pages stored alerts (5000 per query).
 - Sigma alerts: detector `sigma`, id `sigma-` + sha256(rule id, source alert id)[:32], `severity=None` (Sigma levels are words; never mapped), level/tags in `raw_alert["sigma"]`. They are an extra source, never a study variable.
 - Python edit scripts on Windows: `Path.write_text` writes CRLF; the repo has `core.autocrlf=true`, so that is harmless, but never embed `\n` escapes in a bash heredoc that feeds Python (they turn into real newlines). Write the script with the Write tool.
+- Wave D: `app/outputs/` (reports, playbooks, approvals, feedback_report, jira) and `agent/copilot.py`
+  (in `TOOL_PATH_MODULES`). Routes: `POST /reports`, `GET /reports/{id}/download?format=json|pdf|csv`,
+  `POST /approvals`, `GET /approvals`, `POST /approvals/{id}/decision`, `POST /approvals/{id}/execute`,
+  `POST /copilot/ask` (503 without `services.extras["copilot_client"]`; set from SENTINEL_LLM_* in
+  `services_from_env`). PDFs and CSVs go to the object store under `reports/<report_id>.{pdf,csv}`.
+  mypy ignores missing reportlab stubs only.
 - Wave C: `app/rag/` (no labels anywhere; KB content only), `agent/{rag_tool,verifier,multi_tools,graph,matched}.py`, CLI in `app/cli_wave_c.py` (main.py only registers it). Every agent test uses FakeClient; `pilot-estimate` and `run-matched --dry-run` never call a model. Real matched runs need the user's explicit approval for that run (model download and endpoint).

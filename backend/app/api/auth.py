@@ -38,6 +38,7 @@ PERMISSIONS: dict[str, frozenset[Role]] = {
     "report.create": frozenset({Role.ANALYST, Role.MANAGER, Role.ADMIN}),
     "approval.request": frozenset({Role.ANALYST, Role.MANAGER, Role.ADMIN}),
     "approval.decide": frozenset({Role.MANAGER, Role.ADMIN}),
+    "action.execute": frozenset({Role.MANAGER, Role.ADMIN}),
     "copilot.ask": frozenset({Role.ANALYST, Role.MANAGER, Role.ADMIN}),
     "audit.read": frozenset({Role.MANAGER, Role.ADMIN}),
     "user.manage": frozenset({Role.ADMIN}),

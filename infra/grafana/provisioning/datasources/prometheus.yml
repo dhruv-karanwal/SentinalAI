@@ -1,0 +1,10 @@
+# Wave D: Prometheus from the `full` compose profile (service name `prometheus`).
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    uid: sentinel-prom
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false

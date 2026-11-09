@@ -16,6 +16,7 @@ Every non-GET request writes ``audit_log`` (user, role, action, target).
 """
 
 
+import json
 import os
 import time
 from collections.abc import Callable
@@ -24,7 +25,7 @@ from pathlib import Path
 from typing import Annotated, Any, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
@@ -69,7 +70,15 @@ def services_from_env() -> Services:
                                    os.environ["SENTINEL_MINIO_SECRET_KEY"])
     else:
         objects = LocalObjectStore(data_dir / "objects")
-    return Services(Repository(db), index, objects, jwt_secret())
+    services = Services(Repository(db), index, objects, jwt_secret())
+    if os.environ.get("SENTINEL_LLM_BASE_URL") and os.environ.get("SENTINEL_LLM_MODEL"):
+        from app.agent.client import OpenAICompatibleClient
+        from app.agent.config import api_key, load_agent_settings
+
+        settings = load_agent_settings()
+        services.extras["copilot_client"] = OpenAICompatibleClient(settings.model,
+                                                                   api_key=api_key(settings.model))
+    return services
 
 
 class LoginBody(BaseModel):
@@ -94,6 +103,25 @@ class BuildBody(BaseModel):
     scenario: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9_\-]+$")
     gap_seconds: int = Field(default=300, ge=1, le=86400)
     max_span_seconds: Optional[int] = Field(default=3600, ge=1, le=604800)
+
+
+class ReportBody(BaseModel):
+    incident_id: str = Field(min_length=1, max_length=200)
+
+
+class ApprovalBody(BaseModel):
+    incident_id: str = Field(min_length=1, max_length=200)
+    action: dict[str, Any]
+
+
+class DecisionBody(BaseModel):
+    approved: bool
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class CopilotBody(BaseModel):
+    incident_id: str = Field(min_length=1, max_length=200)
+    question: str = Field(min_length=1, max_length=2000)
 
 
 class StatusBody(BaseModel):
@@ -258,6 +286,122 @@ def create_app(services: Services, *, metrics: Any | None = None) -> FastAPI:
         if rep is None:
             raise HTTPException(404, "no such report")
         return rep
+
+    def _incident_alerts(incident: dict[str, Any]) -> list[Any]:
+        return [a for a in (repo.alert_model(i) for i in incident["alert_ids"]) if a is not None]
+
+    @app.post("/reports", status_code=201)
+    def create_report(body: ReportBody,
+                      p: Annotated[Principal, Depends(need("report.create"))]) -> dict[str, Any]:
+        from app.outputs.reports import build_report, render_csv, render_pdf
+
+        inc = repo.get_incident(body.incident_id)
+        if inc is None:
+            raise HTTPException(404, "no such incident")
+        report = build_report(inc, _incident_alerts(inc))
+        rid = repo.put_report(body.incident_id, report)
+        key = f"reports/{rid}"
+        services.objects.put(f"{key}.pdf", render_pdf(report), "application/pdf")
+        services.objects.put(f"{key}.csv", render_csv(report).encode("utf-8"), "text/csv")
+        repo.db.execute("UPDATE reports SET object_key = ? WHERE report_id = ?", (key, rid))
+        repo.audit(p.username, p.role.value, "report.create", rid, {"incident_id": body.incident_id})
+        return {"report_id": rid, "incident_id": body.incident_id, "object_key": key,
+                "formats": ["json", "pdf", "csv"]}
+
+    @app.get("/reports/{report_id}/download")
+    def download_report(report_id: str, p: Annotated[Principal, Depends(need("read"))],
+                        format: Annotated[str, Query(pattern="^(json|pdf|csv)$")] = "json") -> Response:
+        from app.outputs.reports import render_csv, render_pdf
+
+        rep = repo.get_report(report_id)
+        if rep is None:
+            raise HTTPException(404, "no such report")
+        if format == "json":
+            return Response(json.dumps(rep["body"], indent=2), media_type="application/json")
+        key = f"{rep['object_key']}.{format}" if rep.get("object_key") else None
+        if key and services.objects.exists(key):
+            data = services.objects.get(key)
+        else:
+            data = render_pdf(rep["body"]) if format == "pdf" else render_csv(rep["body"]).encode("utf-8")
+        media = "application/pdf" if format == "pdf" else "text/csv"
+        return Response(data, media_type=media, headers={
+            "Content-Disposition": f'attachment; filename="{report_id}.{format}"'})
+
+    @app.post("/approvals", status_code=201)
+    def request_approval(body: ApprovalBody,
+                         p: Annotated[Principal, Depends(need("approval.request"))]) -> dict[str, Any]:
+        from app.outputs.approvals import ApprovalService
+
+        try:
+            aid = ApprovalService(repo).request(body.incident_id, body.action, p.username)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        repo.audit(p.username, p.role.value, "approval.request", f"approval:{aid}",
+                   {"incident_id": body.incident_id, "action": body.action})
+        return {"id": aid, "status": "pending"}
+
+    @app.get("/approvals")
+    def list_approvals(p: Annotated[Principal, Depends(need("read"))],
+                       status: Annotated[str | None, Query(pattern="^(pending|approved|rejected)$")] = None
+                       ) -> dict[str, Any]:
+        return {"approvals": repo.list_approvals(status)}
+
+    @app.post("/approvals/{approval_id}/decision")
+    def decide_approval(approval_id: int, body: DecisionBody,
+                        p: Annotated[Principal, Depends(need("approval.decide"))]) -> dict[str, Any]:
+        from app.outputs.approvals import ApprovalError, ApprovalService
+
+        try:
+            ApprovalService(repo).decide(approval_id, body.approved, p.username, body.reason)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except (ApprovalError, ValueError) as exc:
+            raise HTTPException(409, str(exc)) from exc
+        status = "approved" if body.approved else "rejected"
+        repo.audit(p.username, p.role.value, "approval.decide", f"approval:{approval_id}",
+                   {"status": status, "reason": body.reason})
+        return {"id": approval_id, "status": status}
+
+    @app.post("/approvals/{approval_id}/execute")
+    def execute_approval(approval_id: int,
+                         p: Annotated[Principal, Depends(need("action.execute"))]) -> dict[str, Any]:
+        from app.outputs.approvals import ApprovalError, ApprovalService
+
+        try:
+            result = ApprovalService(repo).execute(approval_id, p.username)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ApprovalError as exc:
+            repo.audit(p.username, p.role.value, "action.execute.refused", f"approval:{approval_id}",
+                       {"reason": str(exc)})
+            raise HTTPException(409, str(exc)) from exc
+        repo.audit(p.username, p.role.value, "action.execute", f"approval:{approval_id}",
+                   {"mode": result["mode"], "action": result["action"]})
+        return result
+
+    @app.post("/copilot/ask")
+    def copilot_ask(body: CopilotBody,
+                    p: Annotated[Principal, Depends(need("copilot.ask"))]) -> dict[str, Any]:
+        from app.agent.config import load_agent_settings
+        from app.agent.copilot import ask
+
+        client = services.extras.get("copilot_client")
+        if client is None:
+            raise HTTPException(503, "no model endpoint configured for the copilot")
+        inc = repo.get_incident(body.incident_id)
+        if inc is None:
+            raise HTTPException(404, "no such incident")
+        settings = services.extras.get("copilot_settings") or load_agent_settings()
+        try:
+            answer = ask(client, _incident_alerts(inc), body.question, settings,
+                         salt=f"copilot:{body.incident_id}:{body.question}")
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        repo.audit(p.username, p.role.value, "copilot.ask", body.incident_id,
+                   {"status": answer["status"], "tool_calls": answer["tool_calls"]})
+        return answer
 
     @app.post("/feedback", status_code=201)
     def add_feedback(body: FeedbackBody,

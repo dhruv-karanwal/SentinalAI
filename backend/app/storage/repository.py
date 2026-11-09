@@ -220,8 +220,19 @@ class Repository:
         clause, params = (" WHERE status = ?", (status,)) if status else ("", ())
         rows = self.db.query(f"SELECT * FROM approvals{clause} ORDER BY id", params)
         return [{**r, "action": decode_json(r["action"]), "created_utc": str(r["created_utc"]),
-                 "decided_utc": None if r["decided_utc"] is None else str(r["decided_utc"])}
+                 "decided_utc": None if r["decided_utc"] is None else str(r["decided_utc"]),
+                 "executed_utc": None if r.get("executed_utc") is None else str(r["executed_utc"])}
                 for r in rows]
+
+    def mark_executed(self, approval_id: int, executor: str) -> bool:
+        """Record the execution of an approved action once; False if it was not approved or ran before."""
+        with self.db.transaction():
+            rows = self.db.query("SELECT status, executed_utc FROM approvals WHERE id = ?", (approval_id,))
+            if not rows or rows[0]["status"] != "approved" or rows[0]["executed_utc"] is not None:
+                return False
+            self.db.execute("UPDATE approvals SET executed_utc = ?, executed_by = ? WHERE id = ? "
+                            "AND executed_utc IS NULL", (utc_now(), executor, approval_id))
+        return True
 
     def get_approval(self, approval_id: int) -> dict[str, Any] | None:
         rows = [a for a in self.list_approvals() if a["id"] == approval_id]

@@ -3,7 +3,7 @@
 Read this first every session; update it in every commit that changes project state.
 Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
 
-**Last update:** 2026-11-10, branch `phase3/wave-b-fixes`.
+**Last update:** 2026-11-10, branch `phase3/wave-d-offline`.
 
 ## Done
 - M1-M5, Wave A (platform), B1-B4 (detection layer), Wave C code (RAG, LangGraph graph,
@@ -16,9 +16,13 @@ Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
 - C1 fix: hybrid BM25 + dense retrieval, recall@1/3/5 0.28/0.48/0.56 -> 0.48/0.68/0.68
   (frozen 25-query set, already tried against). Pilot config in study.json, resumable
   `run-matched --resume` and `run-pilot`; pilot-estimate: 336 case runs, 13.44M token bound.
+  Merged: PR #7.
+- Wave D offline parts (`phase3/wave-d-offline`): reports JSON/CSV/PDF, playbooks, approvals +
+  simulated gated executor, copilot route, feedback report, Grafana JSON, security notes, Jira stub.
+  465 passed, 4 skipped; mypy clean (80 files).
 
 ## In progress
-- PR for `phase3/wave-b-fixes`, then `phase3/wave-d-offline`.
+- PR for `phase3/wave-d-offline`; then wait for the model download.
 
 ## Downloads (background, approved 2026-11-10)
 | item | status | log |
@@ -36,10 +40,12 @@ config` cleanly (with placeholder env values).
 - Wave E: only after the user says go. React frontend: only after the pilot report and a go.
 
 ## Next steps (in order)
-1. Finish `phase3/wave-b-fixes`, PR, merge.
-2. `phase3/wave-d-offline`: reports, approvals, feedback, copilot route, Grafana JSON,
-   security notes, Jira stub.
-3. When `ollama list` shows the model: smoke test, throughput, pilot estimate, pilot, GATE.
+1. When `ollama list` shows the model: M6 smoke test (run-agent, run-matched, limit 2),
+   transcripts failure analysis, throughput -> pilot wall-time estimate.
+2. If the estimate is <= 8 h: `run-pilot --truncations spread --confirm` in the background
+   (resumable); else stop and report options.
+3. Pilot report, then GATE (no Wave E, no React frontend until you say go).
+4. Docker: reinstall Docker Desktop (admin) if you want the `lite` profile.
 
 ## Resume commands (from `backend/`)
 ```bash
