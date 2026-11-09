@@ -23,10 +23,16 @@ from app.study.config import StudyConfig
 
 @dataclass(frozen=True)
 class TruthLabels:
-    """``event_attack``: None when no verified event label exists for the alert."""
+    """``event_attack``: None when no verified event label exists for the alert.
+
+    ``phase``: the labels.csv attack phase whose interval holds the alert
+    (``time_label``), None outside every interval. Used only to build
+    leave-one-phase-out folds and per-phase scores (B4), never as a feature.
+    """
 
     event_attack: bool | None
     time_attack: bool
+    phase: str | None = None
 
 
 class MissingTruthError(Exception):
@@ -44,5 +50,6 @@ def dev_labels(truth: TruthStore, scenario: str, config: StudyConfig) -> dict[st
     for r in rows:
         available = bool(r["event_label_available"])
         event = (r["event_label"] is not None) if available else None
-        out[str(r["alert_id"])] = TruthLabels(event, r["time_label"] != "false_positive")
+        inside = r["time_label"] != "false_positive"
+        out[str(r["alert_id"])] = TruthLabels(event, inside, str(r["time_label"]) if inside else None)
     return out

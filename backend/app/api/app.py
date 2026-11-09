@@ -21,7 +21,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
@@ -93,6 +93,7 @@ class FeedbackBody(BaseModel):
 class BuildBody(BaseModel):
     scenario: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9_\-]+$")
     gap_seconds: int = Field(default=300, ge=1, le=86400)
+    max_span_seconds: Optional[int] = Field(default=3600, ge=1, le=604800)
 
 
 class StatusBody(BaseModel):
@@ -224,7 +225,8 @@ def create_app(services: Services, *, metrics: Any | None = None) -> FastAPI:
         """Triage + correlation (Wave B3) over the scenario's stored alerts; label-free."""
         from app.detection.triage import TriageConfig, build_and_store
 
-        summary = build_and_store(repo, body.scenario, TriageConfig(gap_seconds=body.gap_seconds))
+        summary = build_and_store(repo, body.scenario, TriageConfig(gap_seconds=body.gap_seconds,
+                                                                 max_span_seconds=body.max_span_seconds))
         repo.audit(p.username, p.role.value, "incident.build", body.scenario,
                    {"gap_seconds": body.gap_seconds, "incidents": summary["incidents"]})
         return summary

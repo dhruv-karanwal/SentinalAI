@@ -2,6 +2,8 @@
 
 Context for AI assistants working in this repository.
 
+**Read PROGRESS.md at the start of every session and update it at every commit.**
+
 ## Project
 
 **SentinelAI — Autonomous AI-Powered Security Operations Center (SOC).** A
@@ -47,8 +49,8 @@ multi-agent comparison, the verifier, statistics.
 | A | **Done, merged** (PR #3): replay collector, stream (in-memory / Kafka), enrichment, batched consumer, SQLite / PostgreSQL storage with migrations, separate truth area, FTS5 / OpenSearch, local / MinIO objects, FastAPI + JWT + RBAC + audit, Prometheus metrics, docker-compose `lite`/`full` |
 | B1 | **Done**: ATT&CK KB from local STIX + deterministic alert mapping (Wazuh native ids, then `RULE_TABLE`), IOC store + matcher, OTX/MISP/VirusTotal disabled stubs with a labelled synthetic sample |
 | B2 | **Done**: Sigma engine over alert evidence lines (`app/detection/sigma_engine.py`; 90/256 rules compile, the rest skipped by counted reason), `Detector.SIGMA` as a platform detector (not a study variable), single label door `app/detection/labels.py`, frozen-sections hash test |
-| B3 | **Done**: `app/detection/triage.py` (label-free): existing dedup kept, entities host/src-IP, union-find grouping with gap 300 s (inclusive), first-match severity table H1-L1, incidents via `put_incident` with timeline; CLI `triage`, API `POST /incidents/build` (RBAC `incident.build`, audited); descriptive dev check (labels.csv phase overlap) in `triage_report.py` only |
-| B4 | **Done**: ML detection baselines on AIT-ADS dev scenarios (`app/detection/features.py` label-free, 12 pinned features; `ml_baselines.py`: IsolationForest contamination=auto + HistGradientBoosting, seed = variants.seed; time split 60/40 of the timeline per scenario + cross-scenario both ways; labels only via `dev_labels`). CLI `ml-baselines`. XGBoost installed but unused. CICIDS2017 not available |
+| B3 | **Done**: `app/detection/triage.py` (label-free): existing dedup kept, entities host/src-IP, union-find grouping with gap 300 s (inclusive), first-match severity table H1-L1, incidents via `put_incident` with timeline; CLI `triage`, API `POST /incidents/build` (RBAC `incident.build`, audited); descriptive dev check (labels.csv phase overlap) in `triage_report.py` only. **Fix 2026-11-10:** span cap `max_span_seconds` (default 3600 s; `--no-span-cap` for the old behaviour) cuts long chains into segments with `chain_id` + `segment`; optional per-entity-kind gaps |
+| B4 | **Done**: ML detection baselines on AIT-ADS dev scenarios (`app/detection/features.py` label-free, 12 pinned features; `ml_baselines.py`: IsolationForest contamination=auto + HistGradientBoosting, seed = variants.seed; **fixes 2026-11-10:** cross-scenario both ways is the primary split, leave-one-phase-out per scenario replaces the 60/40 time split, permutation importances (HistGB, cross splits), ablation feature set `no_detector_rule_id`; labels only via `dev_labels`). CLI `ml-baselines`. XGBoost installed but unused. CICIDS2017 not available |
 | C1 | **Done**: ATT&CK RAG: `app/rag/` (chunks, offline bge-small via fastembed, SQLite vector table / pgvector, retriever), `search_attack` tool (`agent/rag_tool.py`), frozen relevance set `experiments/rag/attack_relevance_set.json` (25 queries, committed before the first run). Measured recall@1/3/5 = 0.28 / 0.48 / 0.56 |
 | C2 | **Done**: evidence verifier (`agent/verifier.py`: drops and counts unsupported citations/claims), multi-agent tools + shared memory (`agent/multi_tools.py`: repository memory table + vector memory), LangGraph supervisor with six agents (`agent/graph.py`), same per-case budgets as M5 with a hard stop; FakeClient tests for every edge, budgets, failure paths, leaks |
 | C3 | **Done (code)**: matched-budget runner (`agent/matched.py`: single vs graph, same cases, same budgets, same verifier, scored before and after the verifier next to the same baselines), CLI `rag-index`, `rag-eval`, `pilot-estimate`, `run-matched` (`app/cli_wave_c.py`). **Real pilot not run (no model); GATE after it** |
@@ -59,8 +61,8 @@ multi-agent comparison, the verifier, statistics.
 `docs/session-notes.md` ("Final report, 2026-11-09"). In short: Waves B2-B4 and
 the Wave C code are done offline; resume the paused downloads (Ollama + model,
 npm, Docker images) when the internet allows; then run the M6 smoke test, the
-matched-budget Wave C pilot, and stop at the gate. Open question: the B4 60/40
-timeline split has no attack alerts in training on either dev scenario.
+matched-budget Wave C pilot, and stop at the gate. The B4 60/40 split question is
+resolved (replaced by leave-one-phase-out, 2026-11-10).
 
 Nested rules: `backend/CLAUDE.md`, `infra/CLAUDE.md` (and `frontend/CLAUDE.md`
 once the frontend exists). This file is the index.
@@ -195,12 +197,14 @@ backend/app/
   detection/sigma_report.py  run_sigma_scenario (no labels), sigma_dev_baseline (labels)
   detection/labels.py     dev_labels(TruthStore, scenario, config): the ONE label door of the
                           detection layer (require_dev; truth area only)
-  detection/triage.py     TriageConfig (gap_seconds, selection), entities, group_alerts (union-find),
+  detection/triage.py     TriageConfig (gap_seconds, selection, max_span_seconds, entity_gap_seconds),
+                          entities, group_alerts (union-find), split_by_span,
                           level_class, SEVERITY_TABLE + severity(), build_incidents, build_and_store
   detection/triage_report.py  phase_overlap: descriptive dev check (the only B3 label reader)
   detection/features.py   FEATURE_NAMES (pinned), raw_features(alerts, iocs) (no labels; trailing
                           per-host counts, strictly past), FeatureEncoder (train-only vocab, -1 unknown)
-  detection/ml_baselines.py  time_split, feature_rows, fit_and_score, run_ml_baselines
+  detection/ml_baselines.py  FEATURE_SETS (all, no_detector_rule_id), feature_rows, fit_and_score
+                          (importances), lopo_folds, lopo_scores, run_ml_baselines
   rag/chunks.py           attack_chunks(kb): id + name + tactics + description (+ detection if any)
   rag/embedding.py        FastEmbedEmbedder (bge-small, local_files_only, offline env), EmbeddingUnavailable
   rag/vector_store.py     VectorStore: SqliteVectorStore (data/platform/vectors.db) | PgVectorStore
@@ -519,6 +523,12 @@ experiments/config/study.json  frozen split; variant seed, shuffled/noise refere
   strictly earlier timestamps. Encoders are fitted on the training split only; IsolationForest
   uses `contamination="auto"` so the base rate is never an input. Numbers are labelled
   "detection baselines, dev scenarios, not paper results". mypy ignores missing sklearn stubs only.
+- The largest dev incidents are dense single-source bursts, not long chains: russellmitchell
+  11,208 alerts in 222 s (one attacker IP, web host 10.143.2.4, Wazuh 31101 + AMiner),
+  shaw 6,003 in 96 s. The span cap (3600 s) cannot split them and no count cap is applied
+  (a cut by count is arbitrary); summarise them at the report/UI layer.
+- Leave-one-phase-out tests only alerts inside the held-out phase (alerts outside every
+  phase only train), so its pooled scores say nothing about quiet-period false positives.
 - Triage severity is a first-match table (`SEVERITY_TABLE`, rows H1-H3, M1-M3, L1), each row
   tested. Level classes are triage-only (Wazuh >= 12 high, 7-11 medium; Suricata 1 high, 2
   medium; Sigma critical/high, medium); `Alert.severity` is never rescaled. A rebuild deletes the
