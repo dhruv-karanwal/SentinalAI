@@ -196,6 +196,10 @@ def create_app(services: Services, *, metrics: Any | None = None) -> FastAPI:
         repo.audit(p.username, p.role.value, "user.create", body.username, {"role": body.role.value})
         return {"username": body.username, "role": body.role.value}
 
+    @app.get("/scenarios")
+    def list_scenarios(p: Annotated[Principal, Depends(need("read"))]) -> dict[str, Any]:
+        return {"scenarios": repo.list_scenarios()}
+
     @app.get("/alerts")
     def list_alerts(p: Annotated[Principal, Depends(need("read"))], scenario: str | None = None,
                     detector: str | None = None, host_ip: str | None = None, since: str | None = None,

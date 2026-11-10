@@ -3,7 +3,7 @@
 Read this first every session; update it in every commit that changes project state.
 Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
 
-**Last update:** 2026-11-10 03:00 IST, `main` after PR #8.
+**Last update:** 2026-11-10 16:30 IST, branch `phase3/wave-d-ui` (not pushed).
 
 ## Done
 - M1-M5, Wave A (platform), B1-B4 (detection layer), Wave C code (RAG, LangGraph graph,
@@ -21,9 +21,12 @@ Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
   simulated gated executor, copilot route, feedback report, Grafana JSON, security notes, Jira stub.
   465 passed, 4 skipped; mypy clean (80 files). Merged: PR #8.
 
-- UI design spec `frontend/DESIGN.md` (branch `phase3/wave-d-ui`, 2026-11-10): users, screens,
-  contrast-measured tokens (dark + light), components, states, checklist, per the user's UI
-  design brief. No markup, no npm yet.
+- Analyst console (branch `phase3/wave-d-ui`, 2026-11-10, user's go before the pilot gate):
+  `frontend/DESIGN.md` then the React console: Incidents (split pane, time strip, evidence),
+  Alerts, Approvals, Reports, Ask, Audit, Sign in; dark + light, keyboard, windowed tables.
+  Backend: `GET /scenarios`, verifier detail in copilot answers. 466 passed, 4 skipped; mypy
+  clean; frontend 17 tests, tsc clean, build 311 kB. Per-screen checklist: `docs/session-notes.md`.
+  Open: colour-blind simulation, Findings/Ask with a real model answer, report downloads.
 
 ## In progress
 - Waiting for the model: Ollama installer download (background, resumable), then the 7B pull.
@@ -33,7 +36,7 @@ Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
 |------|--------|-----|
 | Ollama installer (curl -C -, sha256-checked) then `qwen2.5:7b-instruct` | running: 56 MB of 1,690 MB at 02:58 IST, 40-85 kB/s (installer alone 6-11 h) | `data/processed/downloads/ollama.log`, `curl-ollama.err`, `pull-7b.log` |
 | Docker Desktop + `pgvector/pgvector:pg16` (lite only) | **blocked**: Docker Desktop not registered (`cannot find registry key "SOFTWARE\Docker Inc.\Docker Desktop"`); reinstall needs admin (you) | `data/processed/downloads/docker.log` |
-| npm (frontend) | not started: only when the dashboard starts (after the pilot gate) | — |
+| npm (frontend) | done 2026-11-10: 23 packages, 69 MB | — |
 
 Docker: the CLI at `D:\Docker\Docker\resources\bin` has no `compose` plugin wired in; the
 standalone `docker-compose.exe` (v5.1.3) runs `--profile lite config` and `--profile full
@@ -41,9 +44,7 @@ config` cleanly (with placeholder env values).
 
 ## Blocked
 - Model smoke test (M6) and the matched pilot: waiting for the model download.
-- Wave E: only after the user says go. React frontend code: the design brief arrived
-  (2026-11-10) and DESIGN.md is committed, but the standing gate (pilot report + go) and the npm
-  download have not been lifted explicitly: asked the user.
+- Wave E: only after the user says go.
 
 ## Fallback rule (user decision)
 If `qwen2.5:7b-instruct` is not usable 3 h after the download started (started 2026-11-10 02:27
@@ -56,7 +57,8 @@ installed: if the 7B pull would still take hours, start the 3B pull.
    transcripts failure analysis, throughput -> pilot wall-time estimate.
 2. If the estimate is <= 8 h: `run-pilot --truncations spread --confirm` in the background
    (resumable); else stop and report options.
-3. Pilot report, then GATE (no Wave E, no React frontend until you say go).
+3. Pilot report, then GATE (no Wave E until you say go). With a model: check the console's
+   Findings and Ask views against a real answer.
 4. Docker: reinstall Docker Desktop (admin) if you want the `lite` profile.
 
 ## Resume commands (from `backend/`)

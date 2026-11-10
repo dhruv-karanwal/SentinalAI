@@ -9,7 +9,8 @@ so the investigation prompt and its config hash do not change.
 
 The answer is the final reply's findings; cited ids and claims go through
 :func:`verify_answer` against the incident's alerts, and only the kept ones
-are returned (the dropped counts are reported). Copilot answers are a demo
+are returned as support; the dropped citations and claims are returned separately, each
+claim with the verifier's reason, so the console can mark them instead of hiding them. Copilot answers are a demo
 feature: they are never study results and never execute anything.
 """
 
@@ -58,6 +59,10 @@ def ask(client: ChatClient, alerts: Sequence[Alert], question: str, settings: Ag
     return {"status": run.status, "parse_status": run.parse_status, "verdict": run.verdict,
             "answer": [str(f.get("summary", "")) for f in findings],
             "cited_alert_ids": checked.cited, "verification": checked.summary(),
+            "claims": [{"record_id": c.record_id, "kind": c.kind, "field": c.field, "value": c.value}
+                       for c in checked.claims],
+            "dropped_citations": list(checked.dropped_citations),
+            "dropped_claims": list(checked.dropped_claims),
             "tool_calls": run.tool_calls, "input_tokens": run.input_tokens,
             "output_tokens": run.output_tokens, "error": run.error,
             "note": "copilot answer: verified citations only; a demo feature, not a study result"}

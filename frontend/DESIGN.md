@@ -21,34 +21,43 @@ disabled-and-mysterious); a 403 from the API is shown as an error state, never s
 ## 2. Screens and information hierarchy
 
 Shell on every screen: left rail (text labels with a 16 px icon: Incidents, Alerts, Approvals,
-Reports, Ask, Audit) and a slim top bar (scenario / data source selector, user and role, theme
-toggle, density toggle). No breadcrumbs. Skip link to main content is the first tab stop.
+Reports, Ask, Audit; Ask and Audit only for roles that may use them) and a slim top bar (data
+source selector with its stored alert count, user and role, density toggle, theme toggle,
+shortcut list, sign out). No breadcrumbs. Skip link to main content is the first tab stop.
 
 1. **Incidents** (landing page). Split pane.
    - Left: incident table. Default sort: severity (High first), then status (open first), then
-     `last_ts` descending. Columns: severity, status, incident id, first seen (UTC), duration,
-     alerts (count), detectors, entities (host / source IP).
+     `last_ts` descending; the top row is selected on load. Columns: severity, status, last seen
+     (UTC), alerts, duration, first entity (+n). The id, first seen and detectors are in the
+     detail (the list pane is about 590 px wide at 1366 px). Filters: severity buttons with
+     counts, status, text filter on id / host / IP.
    - Right: incident detail for the selected row.
      1. Header: severity, status control, id (copy), time range, alert count, triage gap used.
      2. Time-axis strip (section 6).
-     3. Findings (when a run or copilot answer exists): each finding with its cited alert ids as
-        links; dropped citations and dropped claims listed with the verifier's reason.
-     4. Alerts of the incident (virtualised table; for the dense bursts, 11,208 alerts in 222 s
-        on russellmitchell, grouped by rule id with counts, expandable).
-     5. ATT&CK techniques (native ids only) and playbook recommendations with "Request approval".
-   - Evidence pane: opens over the right third when an alert id is activated; shows the alert
-     fields and raw log lines, matched span highlighted. Esc closes it and returns focus.
+     3. Three tabs under the strip:
+        - **Alerts and evidence**: the incident's alerts (windowed table, sortable, filtered by
+          the strip's time range; "Group by rule" turns the 11,208-alert burst into a short
+          list of rules with counts). Selecting an alert opens its evidence *below* the table,
+          log lines first, then fields, so the list stays in view and the arrow keys walk
+          through evidence.
+        - **Findings**: the question box and the copilot's answers for this incident: cited
+          alert ids as links into the evidence, verified claims, and everything the verifier
+          dropped with its reason. Model offline state when no endpoint is configured.
+        - **Response**: the incident's report (created on request), ATT&CK techniques (native
+          ids and the fixed rule table only), playbook recommendations with "Request approval",
+          and the approval requests of this incident.
+   - Esc closes the evidence. Evidence is never a page navigation.
 2. **Alerts**. Split pane: alert table (time, detector, severity as the detector reports it,
    rule id, rule name, host, source IP) with detector / host / time filters and full-text search
    (`/alerts/search`); right: the evidence view of the selected alert.
 3. **Approvals**. Table: status, action, target, incident, requested by, requested at (UTC),
    decided by, executed at. Detail pane: the request, the incident link, decision form (reason
    required), execute button (approved only, once). States the executor is simulated.
-4. **Reports**. Table of reports per incident; detail shows the JSON body sections (timeline,
-   citations, techniques, recommendations); download CSV / PDF.
-5. **Ask** (copilot). Question box scoped to an incident or case; answer rendered as findings
-   with the same citation links and verifier markings. "Model offline" state when no endpoint
-   is configured.
+4. **Reports**. Table of reports; detail has three tabs (techniques and actions, timeline with
+   the evidence below the table, citations) and JSON / CSV / PDF downloads.
+5. **Ask** (copilot). The questions asked in this session (memory only) with their answers,
+   the same citation links and verifier markings as the Findings tab, evidence in a side
+   overlay. "Model offline" state when no endpoint is configured.
 6. **Audit** (manager, admin). Read-only table: time, user, role, action, target.
 7. **Sign in**. Username and password form; errors next to the field; no decoration.
 
@@ -82,7 +91,7 @@ Tokens are CSS custom properties on `:root[data-theme="dark"]` (default) and
 | `--det-suricata` | `#d18ab8` | `#a3407a` | detector identity |
 | `--det-aminer` | `#d9c74a` | `#756600` | detector identity |
 | `--det-sigma` | `#9aa3ad` | `#5c6670` | detector identity (hollow mark) |
-| `--mark` | `#4a3d0c` | `#ffe58a` | highlighted matched span in a log line |
+| `--mark` | `#4a3d0c` | `#ffe58a` | highlighted matched span in a log line (plus an underline in `--sev-medium`) |
 
 Measured contrast (WCAG 2 relative luminance, computed 2026-11-10 for every text-like token on
 `--bg`, `--surface`, `--raised` and `--selected`):
@@ -128,8 +137,9 @@ only carrier of meaning (below); run a CVD simulation on the first rendered scre
 - Motion: 100 ms `ease-out` for hover, focus and pane open; nothing above 150 ms; no animated
   counters; skeletons do not shimmer. `prefers-reduced-motion: reduce` sets all durations to 0.
 - Focus: 2 px `--accent` outline with 1 px offset on every focusable element; never removed.
-- Layout: rail 176 px (56 px collapsed), top bar 36 px, split 46 % / 54 % with a draggable,
-  keyboard-operable divider. Minimum supported width 1366 px with no horizontal scroll;
+- Layout: rail 176 px (56 px below 1024 px), top bar 36 px, split per screen (Incidents
+  50 / 50, Alerts 60 / 40, Reports 34 / 66) with a draggable, keyboard-operable divider whose
+  position is remembered. Minimum supported width 1366 px with no horizontal scroll;
   below 1024 px the detail pane takes the full width (no phone layout is promised).
 
 ## 4. Components
@@ -139,7 +149,7 @@ only carrier of meaning (below); run a CVD simulation on the first rendered scre
 | `AppShell`, `Rail`, `TopBar` | rail items are links with `aria-current` |
 | `DataTable` | sticky header, fixed column widths (`table-layout: fixed` semantics on a grid), sortable headers (`aria-sort`), row hover, single selection, own fixed-row-height virtualiser (only visible rows + overscan in the DOM), footer with row count |
 | `SplitPane` | list / detail; divider is a `separator` with arrow-key resize |
-| `EvidencePane` | alert fields + log lines; span highlight with `<mark>`; copy per line |
+| `EvidencePane` | log lines first (span highlight with `<mark>`, copy per line, cut at 600 characters with "Show all"), then alert fields, then the raw alert JSON collapsed |
 | `TimeStrip` | section 6 |
 | `Finding` | text, citation links, claim list with verifier status |
 | `SeverityCell`, `DetectorTag`, `StatusTag` | glyph or mark + text |
@@ -149,15 +159,16 @@ only carrier of meaning (below); run a CVD simulation on the first rendered scre
 | `Button` (primary, default, danger), `Select`, `TextInput`, `Textarea`, `Toggle` | visible labels; errors under the field with `aria-describedby` |
 | `Dialog` | decision reason, confirm execute; focus trapped, Esc closes |
 | `ShortcutHelp` | `?` opens the list |
-| `SkeletonRows`, `EmptyState`, `ErrorState`, `ModelOffline` | section 5 |
+| `SkeletonRows`, `EmptyState`, `ErrorState`, `ErrorNotice`, `ModelOffline`, `ScreenBoundary` | section 5; the boundary replaces a screen that throws while rendering |
 | `Toast` | `role="status"`; errors use `role="alert"` |
 | `Icon` | one file, `icons.tsx`: about 20 hand-authored inline SVGs, 16 px, 1.5 px stroke, `currentColor`, `aria-hidden` unless it is the only label |
 
 Keyboard (global unless a text field has focus): `j` / `k` or arrow keys move the row
-selection, `Enter` opens the row or citation, `Esc` closes the evidence pane or dialog, `/`
+selection, `Enter` moves focus to the detail of the selected row or opens a citation, `Esc` closes the evidence pane or dialog, `/`
 focuses search, `?` shows shortcuts, `g i` / `g a` / `g p` / `g r` go to Incidents / Alerts /
 Approvals / Reports, `c` copies the selected id, `d` toggles density, `t` toggles the theme.
-Tab order follows the visual order: rail, top bar, list, detail.
+Tab order follows the reading order: skip link, top bar, rail, list (filters, table), divider,
+detail. A table is one tab stop; its sortable headers are buttons after it.
 
 ## 5. States
 
@@ -211,9 +222,10 @@ that alert in the table. It exists to show bursts and gaps; it has no other deco
 8. Nothing on the screen exists only for decoration.
 9. No item from the brief's "Avoid" list is present.
 
-Loop per screen: build, render a screenshot (Playwright is not installed here; headless Chrome
-or Edge, both present on this machine), critique against the list, fix, re-render; at most 3
-passes.
+Loop per screen: build, render a screenshot with `scripts/shots.mjs` (Playwright is not
+installed; the script drives the headless Chrome or Edge already on the machine and also prints
+horizontal-scroll, row-overflow, DOM-size and Tab-order checks), critique against the list, fix,
+re-render; at most 3 passes. Results: `docs/session-notes.md`.
 
 ## 9. What the skill returned and what was kept
 
@@ -244,8 +256,9 @@ Rejected, with the reason:
   rows; pointer targets are the full row width, and every action has a keyboard path.
 - Heroicons / Lucide: the brief asks for a small hand-authored icon set.
 
-## 10. Stack (proposed, not installed)
+## 10. Stack
 
-React + TypeScript + Vite, plain CSS with the tokens above (no Tailwind, no component kit, no
-chart library, no virtualisation package: `DataTable` and `TimeStrip` are written here). This
-keeps the npm download to the toolchain itself. Nothing is installed until the user says go.
+React 19 + TypeScript + Vite 8, plain CSS with the tokens above (no Tailwind, no component kit,
+no chart library, no router, no virtualisation package: `DataTable`, `TimeStrip` and the hash
+router are written here). Installed 2026-11-10 after the user's go: 23 packages, 69 MB of
+`node_modules`. Pure logic is tested with Node's built-in test runner (no test dependency).

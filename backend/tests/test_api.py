@@ -120,6 +120,14 @@ def test_search_stats_health(client: TestClient) -> None:
     assert hits
 
 
+def test_scenarios_lists_alert_counts(client: TestClient) -> None:
+    assert client.get("/scenarios").status_code == 401
+    rows = client.get("/scenarios", headers=token(client, Role.EXECUTIVE)).json()["scenarios"]
+    assert rows and all(set(r) == {"scenario", "alerts"} for r in rows)
+    assert [r["scenario"] for r in rows] == sorted(r["scenario"] for r in rows)
+    assert sum(r["alerts"] for r in rows) == client.get("/health").json()["alerts"]
+
+
 def test_no_ground_truth_in_any_response(client: TestClient) -> None:
     h = token(client, Role.ADMIN)
     bodies = [client.get(p, headers=h).text for p in

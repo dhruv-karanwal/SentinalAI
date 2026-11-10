@@ -98,6 +98,11 @@ class Repository:
                              params)
         return {str(r["detector"]): int(r["n"]) for r in rows}
 
+    def list_scenarios(self) -> list[dict[str, Any]]:
+        """Stored scenarios with their alert counts, by name (the console's data-source list)."""
+        rows = self.db.query("SELECT scenario, COUNT(*) AS n FROM alerts GROUP BY scenario ORDER BY scenario")
+        return [{"scenario": str(r["scenario"]), "alerts": int(r["n"])} for r in rows]
+
     # --- cases and runs ----------------------------------------------------------------
     def put_case(self, case_id: str, scenario: str, window_start: str, window_end: str,
                  detail: dict[str, Any]) -> None:
