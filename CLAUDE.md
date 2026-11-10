@@ -54,7 +54,7 @@ multi-agent comparison, the verifier, statistics.
 | C1 | **Done**: ATT&CK RAG: `app/rag/` (chunks, offline bge-small via fastembed, SQLite vector table / pgvector, retriever), `search_attack` tool (`agent/rag_tool.py`), frozen relevance set `experiments/rag/attack_relevance_set.json` (25 queries, committed before the first run). Measured recall@1/3/5 = 0.28 / 0.48 / 0.56 (dense). **Fix 2026-11-10:** BM25 (`rag/lexical.py`) + `mode` dense/lexical/hybrid (alpha 0.5 fixed a priori); hybrid measured 0.48 / 0.68 / 0.68 on the same set (small, already tried against) |
 | C2 | **Done**: evidence verifier (`agent/verifier.py`: drops and counts unsupported citations/claims), multi-agent tools + shared memory (`agent/multi_tools.py`: repository memory table + vector memory), LangGraph supervisor with six agents (`agent/graph.py`), same per-case budgets as M5 with a hard stop; FakeClient tests for every edge, budgets, failure paths, leaks |
 | C3 | **Done (code)**: matched-budget runner (`agent/matched.py`: single vs graph, same cases, same budgets, same verifier, scored before and after the verifier next to the same baselines), CLI `rag-index`, `rag-eval`, `pilot-estimate`, `run-matched`, `run-pilot` (`app/cli_wave_c.py`). **2026-11-10:** pilot config in study.json (`pilot.variants` = wazuh, suricata, aminer, fused, oracle, noise-wazuh; `select` reachable; `retrieval` hybrid; spread first): 12 runs, 168 cases x 2 arms = 336 case runs, token bound 13,440,000; resumable runs (`--resume`, `run-pilot` always). **Real pilot not run (no model); GATE after it** |
-| D | **Offline parts done (2026-11-10)**: `app/outputs/` reports (JSON body, CSV, PDF via reportlab; timeline, citations, ATT&CK techniques, playbook recommendations), approval workflow + gated simulated executor (`action.execute`, four-eyes, once only, migration 0002), feedback API + `feedback-report` (no retraining), `POST /copilot/ask` (M5 tools + verifier), Grafana dashboard JSON, `docs/security-notes.md`, Jira disabled stub. **React dashboard not started** (after the pilot gate and your go; npm then) |
+| D | **Offline parts done (2026-11-10)**: `app/outputs/` reports (JSON body, CSV, PDF via reportlab; timeline, citations, ATT&CK techniques, playbook recommendations), approval workflow + gated simulated executor (`action.execute`, four-eyes, once only, migration 0002), feedback API + `feedback-report` (no retraining), `POST /copilot/ask` (M5 tools + verifier), Grafana dashboard JSON, `docs/security-notes.md`, Jira disabled stub. **React console built 2026-11-10** (user's go before the pilot gate): `frontend/` (React 19 + TypeScript + Vite 8, plain CSS tokens, no UI kit), screens Incidents, Alerts, Approvals, Reports, Ask, Audit, Sign in; design authority `frontend/DESIGN.md`; API additions `GET /scenarios` and verifier detail in copilot answers. Findings/Ask verified only in the model-offline state |
 | E | Only after the user says go |
 
 **Where we stopped (2026-11-09) and what comes next:** see the last section of
@@ -64,8 +64,8 @@ npm, Docker images) when the internet allows; then run the M6 smoke test, the
 matched-budget Wave C pilot, and stop at the gate. The B4 60/40 split question is
 resolved (replaced by leave-one-phase-out, 2026-11-10).
 
-Nested rules: `backend/CLAUDE.md`, `infra/CLAUDE.md` (and `frontend/CLAUDE.md`
-once the frontend exists). This file is the index.
+Nested rules: `backend/CLAUDE.md`, `infra/CLAUDE.md`, `frontend/CLAUDE.md` (with
+`frontend/DESIGN.md` as the design authority). This file is the index.
 
 ## Commands
 
@@ -125,6 +125,10 @@ S=../data/samples/synthetic_ait_ads
 ../.venv/Scripts/python.exe -m app.main create-user --username alice --role analyst   # needs SENTINEL_NEW_USER_PASSWORD
 ../.venv/Scripts/python.exe -m app.main serve      # API on 127.0.0.1:8000; needs SENTINEL_JWT_SECRET
 ```
+
+Console (from `frontend/`, needs the API running): `npm install`, `npm run dev`
+(127.0.0.1:5173, proxies `/api` to 127.0.0.1:8000), `npm test`, `npm run typecheck`,
+`npm run build`. See `frontend/CLAUDE.md`.
 
 Infra (optional): copy `.env.example` to `.env`, fill it, then
 `docker compose --profile lite up -d` (PostgreSQL + pgvector) or `--profile full`.
@@ -230,6 +234,8 @@ backend/app/
   outputs/jira.py         JiraAdapter (disabled stub, SYNTHETIC sample payload)
                           (registered by main.py)
 backend/tests/            pytest, one file per module + test_pipeline.py (end to end)
+frontend/                 analyst console: DESIGN.md (design authority), CLAUDE.md, src/ (tokens.css, app.css,
+                          icons.tsx, api.ts, hooks.ts, lib/ tested helpers, components/, screens/), scripts/shots.mjs
 data/samples/             committed SYNTHETIC samples (see its README)
 data/raw/, data/processed/ git-ignored: local datasets and pipeline outputs
 data/samples/synthetic_ait_ads/ SYNTHETIC files in the AIT-ADS shapes (scenario "synthetic")
@@ -553,6 +559,9 @@ experiments/config/study.json  frozen split; variant seed, shuffled/noise refere
   a decision needs a reason; execution happens once (`executed_utc`). Executives are read-only.
   Reports and copilot answers are platform outputs, never study results, and hold no labels
   (`LABEL_WORDS` scan in tests/test_wave_d.py). Feedback never retrains anything.
+- UI work never writes to `data/platform/`: serve a copy (`SENTINEL_DATA_DIR=../data/processed/ui-dev`)
+  with test accounts from the git-ignored `.env.ui-dev`. `GET /incidents` returns full timelines
+  (7.8 MB russellmitchell, 11.5 MB shaw); the console filters by scenario and keeps it in memory.
 - Triage severity is a first-match table (`SEVERITY_TABLE`, rows H1-H3, M1-M3, L1), each row
   tested. Level classes are triage-only (Wazuh >= 12 high, 7-11 medium; Suricata 1 high, 2
   medium; Sigma critical/high, medium); `Alert.severity` is never rescaled. A rebuild deletes the

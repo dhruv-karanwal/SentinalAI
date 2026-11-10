@@ -241,6 +241,9 @@ def test_copilot_uses_the_case_tools_and_the_verifier(services: Services) -> Non
     assert out["status"] == "ok" and out["verdict"] == "attack"
     assert out["verification"]["citations_dropped"] == 1 and out["verification"]["claims_dropped"] == 1
     assert len(out["cited_alert_ids"]) == 1 and out["cited_alert_ids"][0] in inc["alert_ids"]
+    assert out["claims"] == [] and out["dropped_citations"] == ["unknown:al-not-real"]
+    assert [(d["kind"], d["field"]) for d in out["dropped_claims"]] == [("field_value", "detector")]
+    assert out["dropped_claims"][0]["record_id"] in inc["alert_ids"] and out["dropped_claims"][0]["reason"]
     assert "Which host was targeted?" in seen[0][1]["content"]
     assert out["tool_calls"] == 1
     text = json.dumps(out)

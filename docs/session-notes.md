@@ -1983,3 +1983,81 @@ source files`.
   https://github.com/dhruv-karanwal/SentinalAI/pull/8, merged as 8634902.
 - Model work (M6 smoke test, pilot) not started: Ollama installer still downloading
   (56,352,768 of 1,689,667,936 bytes at 02:58 IST).
+
+## UI design spec, 2026-11-10
+
+- User's UI design brief received; `ui-ux-pro-max` run first (design-system with density 9,
+  motion 1, variance 2; ux, chart, react searches). Its landing pattern, Google fonts, blue
+  palette, 150-300 ms transitions and GSAP snippet were rejected because the brief forbids them;
+  what was kept and rejected is listed in `frontend/DESIGN.md` section 9.
+- Tokens contrast-measured with a WCAG 2 luminance script: text-like tokens >= 4.52:1 (dark) and
+  >= 4.64:1 (light) on all four surfaces; control borders >= 3.66 / 3.41. One light value failed
+  on the first pass (`--det-wazuh` 4.26 on `--selected`) and was darkened to `#086a58` (5.28).
+  Colour-vision-deficiency simulation not done yet.
+- Screenshot tooling found: Playwright not installed; Chrome and Edge present (headless render).
+  node v22.19.0, npm 11.6.2.
+- No screen built at that commit; results are in the next section.
+
+## Console build and per-screen checklist, 2026-11-10
+
+User said "Yes, build now" (dashboard before the pilot gate; npm approved). Stack: React 19,
+TypeScript, Vite 8, plain CSS; 23 npm packages, 69 MB. First `npm install` failed (ERESOLVE:
+`vite ^7` against `@vitejs/plugin-react` 6); pinned vite ^8.3 / plugin ^6.3 and it installed.
+
+Backend additions for the console (tests first): `GET /scenarios` (stored scenarios with alert
+counts, permission `read`) and the copilot answer now returns `claims`, `dropped_citations` and
+`dropped_claims` so dropped items can be shown with the verifier's reason.
+`pytest -q` -> `466 passed, 4 skipped`; `mypy` -> `Success: no issues found in 80 source files`.
+Frontend: `npm test` -> 17 passed; `tsc --noEmit` clean; `vite build` -> 311 kB JS (93 kB gzip),
+17 kB CSS.
+
+Rendering: Playwright is not installed. `frontend/scripts/shots.mjs` drives the installed
+headless Chrome over the DevTools protocol at 1366 x 768, against the real API on a copy of the
+dev stores (`data/processed/ui-dev`, test accounts in the git-ignored `.env.ui-dev`); screenshots
+in `data/processed/ui-shots/` (git-ignored). The data shown is the russellmitchell dev scenario
+replay (45,544 stored alerts, 843 incidents at gap 300 s): platform output, no labels.
+
+Checklist (P = pass, with how it was checked; "by design" = not measured with a person):
+
+| # | Check | Incidents | Alerts | Approvals | Reports | Ask | Audit | Sign in |
+|---|---|---|---|---|---|---|---|---|
+| 1 | Highest-severity open incident in under 5 s | P by design: sorted High first, top row preselected; not timed with a person | n/a | n/a | n/a | n/a | n/a | n/a |
+| 2 | Keyboard-only use | P: j / k, arrows, Enter, Esc, strip arrows + Shift scripted | P: j / k and Tab order scripted; the search was submitted by script | P for Tab order; decide and execute were driven by script clicks, not keys | P: Tab order, Esc closes evidence | P: Tab order only | P: j / k, Tab order | P by markup: a native form; not key-driven in the script |
+| 3 | Focus always visible | P: every Tab stop reports a 2 px outline | P (after fix: the divider had a colour change but no outline) | P | P | P | P | P by screenshot |
+| 4 | No horizontal scroll at 1366 px | P: document 0 px, 0 overflowing rows (after fix: the entity column overflowed) | P: 0 / 0 | P by screenshot | P: 0 px | P by screenshot | P: 0 / 0 | P by screenshot |
+| 5 | Large lists stay responsive | P: 11,208-alert incident = 60 row nodes, 1,154 DOM nodes; three selections incl. that one painted in 313 ms | P: 500-row pages appended on scroll, 34 row nodes; 1,500 of 45,544 loaded after two scrolls | n/a (1 row) | P: same table, 140 rows | n/a | P: same table, 22 rows; cap 1,000 | n/a |
+| 6 | Untrusted log text escaped | P: text nodes only; no innerHTML in src; splitHighlight test with a script tag | P | P | P | P | P | n/a |
+| 7 | Both themes pass contrast | P at token level (measured pairs); not re-measured from pixels | same | same | same | same | same | same |
+| 8 | Nothing only for decoration | P | P | P | P | P | P | P |
+| 9 | Nothing from the Avoid list | P | P | P | P | P | P | P |
+
+Passes used: Incidents 3, Alerts 2, Reports 2, Approvals 1, Audit 1, Ask 1, Sign in 1.
+
+Fixed during the loop:
+- Incident list row wider than its pane (a `minmax(96px, 1fr)` track): columns narrowed, entity
+  track `minmax(0, 1fr)`, split 50 / 50.
+- Severity glyph bars merged into one block: three separate bars.
+- Light theme drew the strip with dark-theme tokens (child effect ran before the attribute
+  changed): the attribute is now set before the state.
+- Focusing the strip scrolled the whole page: the frame no longer scrolls, panes clip.
+- Selecting an alert moved focus to the evidence heading, so the arrow keys stopped walking the
+  table: focus moves only on Enter or from a citation.
+- Evidence showed fields before log lines and was too short: log lines first, evidence gets
+  two thirds of the tab; Reports uses the same below-the-table layout instead of an overlay.
+- Search hits hid the match behind truncation: the snippet starts near the match and marks it.
+- A render error (a bad edit of mine) blanked the app: `ScreenBoundary` added.
+- Footer grammar ("1 requests"), action type wrapping mid-word, an extra Tab stop on the scroll
+  body.
+
+Not done / not verified:
+- Colour-vision-deficiency simulation of the severity and detector colours.
+- Ask and Findings with a real answer: no model endpoint, so only the model-offline and empty
+  states were rendered; the `Finding` view (citations, verified and dropped claims) is untested
+  against a live answer.
+- Report downloads (JSON / CSV / PDF) were not clicked.
+- Screen-reader pass; `prefers-reduced-motion` was not exercised.
+- Executive role: checked that Ask and Audit are absent from the rail and that evidence shows
+  "Not permitted"; nothing else.
+- 1024 px width: no horizontal scroll measured on Incidents; the layout below 1024 px was not
+  reviewed.
+- The shaw scenario was not rendered (russellmitchell only).

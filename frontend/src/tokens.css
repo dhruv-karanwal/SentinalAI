@@ -1,0 +1,91 @@
+/* Design tokens (frontend/DESIGN.md section 3). The only file with raw colour values.
+   Contrast was measured for every text-like token on bg, surface, raised and selected. */
+
+:root {
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, Consolas, Menlo, monospace;
+
+  --fs-11: 11px;
+  --fs-12: 12px;
+  --fs-13: 13px;
+  --fs-14: 14px;
+  --fs-16: 16px;
+
+  --sp-2: 2px;
+  --sp-4: 4px;
+  --sp-8: 8px;
+  --sp-12: 12px;
+  --sp-16: 16px;
+  --sp-24: 24px;
+
+  --radius-s: 2px;
+  --radius-m: 4px;
+
+  --dur: 100ms;
+
+  --rail-w: 176px;
+  --topbar-h: 36px;
+
+  --row-h: 24px;
+  --row-fs: var(--fs-12);
+}
+
+:root[data-density="comfortable"] {
+  --row-h: 32px;
+  --row-fs: var(--fs-13);
+}
+
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0f1113;
+  --surface: #15181b;
+  --raised: #1c2024;
+  --selected: #1f2a3a;
+  --border: #2a2f35;
+  --border-strong: #6f7883;
+  --text: #e3e6ea;
+  --text-muted: #a3abb5;
+  --text-faint: #8a939e;
+  --accent: #5b9dff;
+  --on-accent: #0b1220;
+  --sev-high: #f0624d;
+  --sev-medium: #e0a030;
+  --sev-low: #8f9aa6;
+  --det-wazuh: #2bb39a;
+  --det-suricata: #d18ab8;
+  --det-aminer: #d9c74a;
+  --det-sigma: #9aa3ad;
+  --mark: #4a3d0c;
+  --float-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f6f7f8;
+  --surface: #ffffff;
+  --raised: #eceef1;
+  --selected: #dde8f8;
+  --border: #d5d9de;
+  --border-strong: #77818c;
+  --text: #1b1f24;
+  --text-muted: #4a545f;
+  --text-faint: #5d6772;
+  --accent: #1f5fbf;
+  --on-accent: #ffffff;
+  --sev-high: #b42318;
+  --sev-medium: #8a5600;
+  --sev-low: #56606b;
+  --det-wazuh: #086a58;
+  --det-suricata: #a3407a;
+  --det-aminer: #756600;
+  --det-sigma: #5c6670;
+  --mark: #ffe58a;
+  --float-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur: 0ms;
+  }
+}
