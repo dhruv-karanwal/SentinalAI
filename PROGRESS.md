@@ -21,6 +21,10 @@ Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
   simulated gated executor, copilot route, feedback report, Grafana JSON, security notes, Jira stub.
   465 passed, 4 skipped; mypy clean (80 files). Merged: PR #8.
 
+- UI design spec `frontend/DESIGN.md` (branch `phase3/wave-d-ui`, 2026-11-10): users, screens,
+  contrast-measured tokens (dark + light), components, states, checklist, per the user's UI
+  design brief. No markup, no npm yet.
+
 ## In progress
 - Waiting for the model: Ollama installer download (background, resumable), then the 7B pull.
 
@@ -37,7 +41,9 @@ config` cleanly (with placeholder env values).
 
 ## Blocked
 - Model smoke test (M6) and the matched pilot: waiting for the model download.
-- Wave E: only after the user says go. React frontend: only after the pilot report and a go.
+- Wave E: only after the user says go. React frontend code: the design brief arrived
+  (2026-11-10) and DESIGN.md is committed, but the standing gate (pilot report + go) and the npm
+  download have not been lifted explicitly: asked the user.
 
 ## Fallback rule (user decision)
 If `qwen2.5:7b-instruct` is not usable 3 h after the download started (started 2026-11-10 02:27

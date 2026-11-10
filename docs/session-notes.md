@@ -1983,3 +1983,17 @@ source files`.
   https://github.com/dhruv-karanwal/SentinalAI/pull/8, merged as 8634902.
 - Model work (M6 smoke test, pilot) not started: Ollama installer still downloading
   (56,352,768 of 1,689,667,936 bytes at 02:58 IST).
+
+## UI design spec, 2026-11-10
+
+- User's UI design brief received; `ui-ux-pro-max` run first (design-system with density 9,
+  motion 1, variance 2; ux, chart, react searches). Its landing pattern, Google fonts, blue
+  palette, 150-300 ms transitions and GSAP snippet were rejected because the brief forbids them;
+  what was kept and rejected is listed in `frontend/DESIGN.md` section 9.
+- Tokens contrast-measured with a WCAG 2 luminance script: text-like tokens >= 4.52:1 (dark) and
+  >= 4.64:1 (light) on all four surfaces; control borders >= 3.66 / 3.41. One light value failed
+  on the first pass (`--det-wazuh` 4.26 on `--selected`) and was darkened to `#086a58` (5.28).
+  Colour-vision-deficiency simulation not done yet.
+- Screenshot tooling found: Playwright not installed; Chrome and Edge present (headless render).
+  node v22.19.0, npm 11.6.2.
+- No screen built yet, so no per-screen checklist results.
