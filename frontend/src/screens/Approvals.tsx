@@ -6,7 +6,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { api, ApiError, can, type Approval } from '../api.ts';
 import { DataTable, type Column } from '../components/DataTable.tsx';
 import { SplitPane } from '../components/SplitPane.tsx';
-import { Button, describeError, EmptyState, ErrorNotice, ErrorState, Id, StatusTag, Time } from '../components/ui.tsx';
+import { Button, describeError, EmptyState, ErrorNotice, ErrorState, Id, SeverityCell, SkeletonLines, StatusTag, Time } from '../components/ui.tsx';
+import { Icon } from '../icons.tsx';
+import { fmtInt } from '../lib/format.ts';
 import { useApp, useLoad, type Route } from '../hooks.ts';
 
 const stateOf = (a: Approval): string => (a.executed_utc ? 'executed' : a.status);
@@ -210,6 +212,25 @@ function ApprovalDetail({ approval: a, me, onChanged }: { approval: Approval; me
           </dl>
         </div>
 
+        <div className="section">
+          <h3>Rules for this request</h3>
+          <ul className="rules">
+            <li data-hit={own || undefined}>
+              <Icon name={own ? 'warning' : 'check'} /> Four-eyes: the requester cannot decide.{' '}
+              {own ? <strong>You requested this, so you cannot approve or reject it.</strong> : `Requested by ${a.requested_by}.`}
+            </li>
+            <li>
+              <Icon name="check" /> A decision needs a written reason; it is stored with the request and in the audit log.
+            </li>
+            <li>
+              <Icon name="check" /> An approved action runs once, by a manager or admin, and is simulated (no connector is called).
+            </li>
+          </ul>
+        </div>
+
+        <EvidenceSummary incidentId={a.incident_id} />
+        <Trail approval={a} />
+
         {a.status === 'pending' && (
           <div className="section">
             <h3>Decision</h3>
@@ -220,7 +241,7 @@ function ApprovalDetail({ approval: a, me, onChanged }: { approval: Approval; me
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 520 }}>
                 <div className="field">
-                  <label htmlFor="ap-reason">Reason (required)</label>
+                  <label htmlFor="ap-reason">Reason (required, {reason.trim().length} / 2000)</label>
                   <textarea
                     id="ap-reason"
                     className="textarea"
@@ -290,5 +311,99 @@ function ApprovalDetail({ approval: a, me, onChanged }: { approval: Approval; me
         )}
       </div>
     </>
+  );
+}
+
+/** What the request is about: the incident's severity, triage rule, size and detectors. */
+function EvidenceSummary({ incidentId }: { incidentId: string }) {
+  const { data, error } = useLoad((signal) => api.analysis(incidentId, signal), [incidentId]);
+  return (
+    <div className="section">
+      <h3>Evidence</h3>
+      {error && <p className="field-error">The incident could not be loaded: {describeError(error)}</p>}
+      {!data && !error && <SkeletonLines lines={2} />}
+      {data && (
+        <dl className="kv">
+          <dt>Incident</dt>
+          <dd>
+            <SeverityCell value={data.summary.severity} /> <span className="mono">{incidentId}</span>
+          </dd>
+          <dt>Why</dt>
+          <dd>{data.summary.rule ? `${data.summary.rule.severity} because ${data.summary.rule.rule} (rule ${data.summary.rule.row})` : 'no triage rule recorded'}</dd>
+          <dt>Alerts</dt>
+          <dd className="num">
+            {fmtInt(data.summary.alerts)} from {data.summary.detectors_agreeing} detector{data.summary.detectors_agreeing === 1 ? '' : 's'},{' '}
+            <Time ts={data.summary.first_ts} /> to <Time ts={data.summary.last_ts} />
+          </dd>
+          <dt>Entities</dt>
+          <dd className="mono">
+            {data.graph.nodes
+              .slice(0, 6)
+              .map((n) => n.value)
+              .join(', ')}
+            {data.graph.nodes_total > 6 ? ` +${data.graph.nodes_total - 6}` : ''}
+          </dd>
+          <dt>ATT&amp;CK</dt>
+          <dd>{data.kill_chain.filter((k) => k.alerts > 0).map((k) => k.name).join(', ') || 'no mapped alert'}</dd>
+        </dl>
+      )}
+      <a href={`#/incidents?id=${encodeURIComponent(incidentId)}`}>Open the incident with its alerts and evidence</a>
+    </div>
+  );
+}
+
+/** The request's history: from the approval record, plus the audit entries for roles that may read them. */
+function Trail({ approval: a }: { approval: Approval }) {
+  const { session } = useApp();
+  const mayAudit = can(session.role, 'audit.read');
+  const audit = useLoad((signal) => (mayAudit ? api.audit(signal) : Promise.resolve(null)), [mayAudit, a.id, a.status, a.executed_utc]);
+  const entries = (audit.data?.entries ?? []).filter((e) => e.target === `approval:${a.id}`).sort((x, y) => (x.ts < y.ts ? -1 : 1));
+  const steps: Array<[string, string | null, string]> = [
+    ['requested', a.created_utc, `by ${a.requested_by}`],
+    [a.status === 'pending' ? 'decision pending' : a.status, a.decided_utc, a.reviewer ? `by ${a.reviewer}: ${a.reason ?? ''}` : 'waiting for a manager or admin'],
+  ];
+  if (a.status === 'approved') steps.push([a.executed_utc ? 'executed (simulated)' : 'not executed yet', a.executed_utc, a.executed_by ? `by ${a.executed_by}` : '']);
+  return (
+    <div className="section">
+      <h3>Audit trail</h3>
+      <ol className="trail">
+        {steps.map(([what, ts, who]) => (
+          <li key={what} data-done={ts ? true : undefined}>
+            <span className="trail-what">{what}</span> {ts ? <Time ts={ts} /> : <span className="faint">-</span>} <span className="muted">{who}</span>
+          </li>
+        ))}
+      </ol>
+      {mayAudit ? (
+        entries.length > 0 && (
+          <table className="data-table" style={{ marginTop: 'var(--sp-8)' }}>
+            <caption className="visually-hidden">Audit log entries for this request</caption>
+            <thead>
+              <tr>
+                <th>Time (UTC)</th>
+                <th>User</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map((e) => (
+                <tr key={e.id}>
+                  <td>
+                    <Time ts={e.ts} />
+                  </td>
+                  <td>
+                    {e.username} <span className="faint">({e.role})</span>
+                  </td>
+                  <td className="mono">{e.action}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )
+      ) : (
+        <p className="faint" style={{ fontSize: 'var(--fs-12)' }}>
+          The full audit log is visible to managers and admins.
+        </p>
+      )}
+    </div>
   );
 }

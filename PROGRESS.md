@@ -3,7 +3,7 @@
 Read this first every session; update it in every commit that changes project state.
 Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
 
-**Last update:** 2026-11-10 16:30 IST, branch `phase3/wave-d-ui` (not pushed).
+**Last update:** 2026-11-12, branch `phase3/wave-d-ui-v2`.
 
 ## Done
 - M1-M5, Wave A (platform), B1-B4 (detection layer), Wave C code (RAG, LangGraph graph,
@@ -27,6 +27,17 @@ Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
   Backend: `GET /scenarios`, verifier detail in copilot answers. 466 passed, 4 skipped; mypy
   clean; frontend 17 tests, tsc clean, build 311 kB. Per-screen checklist: `docs/session-notes.md`.
   Open: colour-blind simulation, Findings/Ask with a real model answer, report downloads.
+
+- Console v2 (branch `phase3/wave-d-ui-v2`, 2026-11-12): DESIGN.md section 11 first, then an own
+  SVG chart module (no library), sign-in with pipeline schematic, Overview, Entity, incident summary
+  strip + ATT&CK lanes + entity graph, Alerts facets / saved filters / CSV export, report preview and
+  d2 PDF charts, Approvals rules + audit trail, Audit chart, Executive, Study (empty until a real
+  run), Settings, Users (env-supplied passwords), notifications, global search. Backend
+  `app/api/console.py`, `app/outputs/analytics.py`, `graph_layout.py`, migration 0003.
+  482 passed, 4 skipped on the branch; after merging main (PR #11, final-study tooling): 504 passed,
+  4 skipped, mypy clean (88 files); frontend 32 tests, tsc clean, build 421 kB.
+  Screenshots in `docs/ui/`; per-screen loop in `docs/session-notes.md`.
+  Open: Study with real results, Findings with a real model answer, paper printing, CVD simulation.
 
 ## In progress
 - Waiting for the model: Ollama installer download (background, resumable), then the 7B pull.

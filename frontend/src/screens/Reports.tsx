@@ -4,12 +4,15 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { api, ApiError, downloadReport, type Report, type ReportBody } from '../api.ts';
+import { ChartFrame, DETECTOR_ORDER, detectorTone } from '../charts/ChartFrame.tsx';
+import { EntityGraph } from '../charts/EntityGraph.tsx';
+import { TimeBars } from '../charts/TimeBars.tsx';
 import { DataTable, type Column } from '../components/DataTable.tsx';
 import { EvidencePane } from '../components/EvidencePane.tsx';
 import { SplitPane } from '../components/SplitPane.tsx';
-import { Button, describeError, DetectorTag, EmptyState, ErrorNotice, ErrorState, Id, SeverityCell, Time, TruncatedText } from '../components/ui.tsx';
+import { Button, describeError, DetectorTag, detectorName, EmptyState, ErrorNotice, ErrorState, Id, SeverityCell, Time, TruncatedText } from '../components/ui.tsx';
 import { useApp, useLoad, type Route } from '../hooks.ts';
-import { fmtInt } from '../lib/format.ts';
+import { epochSeconds, fmtDuration, fmtInt } from '../lib/format.ts';
 
 interface Props {
   route: Route & { setParams: (patch: Record<string, string | null>, replace?: boolean) => void };
@@ -79,7 +82,7 @@ export function ReportsScreen({ route }: Props) {
 
 function ReportDetail({ report, route }: { report: Report; route: Props['route'] }) {
   const { toast } = useApp();
-  const [tab, setTab] = useState<'timeline' | 'citations' | 'summary'>('summary');
+  const [tab, setTab] = useState<'preview' | 'timeline' | 'citations' | 'summary'>('preview');
   const [focusEvidence, setFocusEvidence] = useState<number | null>(null);
   const b = report.body;
   const ev = route.params.ev ?? null;
@@ -111,6 +114,17 @@ function ReportDetail({ report, route }: { report: Report; route: Props['route']
         </h2>
         <Id value={report.report_id} label="Copy report id" />
         <span className="spacer" />
+        <Button
+          icon="print"
+          className="no-print"
+          onClick={() => {
+            setTab('preview');
+            window.setTimeout(() => window.print(), 50);
+          }}
+          title="Print the executive summary of this report (light theme)"
+        >
+          Print summary
+        </Button>
         <span className="label">Download</span>
         {(['json', 'csv', 'pdf'] as const).map((f) => (
           <Button key={f} icon="download" onClick={() => void download(f)}>
@@ -161,6 +175,7 @@ function ReportDetail({ report, route }: { report: Report; route: Props['route']
       <div className="tabs" role="tablist" aria-label="Report sections">
         {(
           [
+            ['preview', 'Preview'],
             ['summary', 'Techniques and actions'],
             ['timeline', `Timeline (${fmtInt(b.timeline.length)})`],
             ['citations', `Citations (${fmtInt(b.citations.length)})`],
@@ -171,6 +186,12 @@ function ReportDetail({ report, route }: { report: Report; route: Props['route']
           </button>
         ))}
       </div>
+
+      {tab === 'preview' && (
+        <div className="tabpanel detail-scroll report-preview" role="tabpanel">
+          <ReportPreview report={report} />
+        </div>
+      )}
 
       {tab === 'summary' && (
         <div className="tabpanel detail-scroll" role="tabpanel">
@@ -286,5 +307,49 @@ function ReportDetail({ report, route }: { report: Report; route: Props['route']
       )}
 
     </>
+  );
+}
+
+/** The report as a reader sees it: summary, the two stored charts, techniques, actions. */
+function ReportPreview({ report }: { report: Report }) {
+  const b = report.body;
+  const c = b.charts;
+  const ts = c?.timeseries;
+  const start = ts?.start ? epochSeconds(ts.start) : 0;
+  const dets = ts ? DETECTOR_ORDER.filter((d) => ts.series[d]) : [];
+  const span = epochSeconds(b.incident.last_ts) - epochSeconds(b.incident.first_ts);
+  return (
+    <div className="section" style={{ display: 'grid', gap: 'var(--sp-12)' }}>
+      <div>
+        <h3 className="chart-title">Executive summary</h3>
+        <p style={{ margin: '4px 0 0', lineHeight: '20px' }}>
+          <SeverityCell value={b.incident.severity} /> incident <span className="mono">{b.incident.incident_id}</span> in {b.incident.scenario}: {fmtInt(b.incident.alerts)} alerts over{' '}
+          {fmtDuration(span)} ({b.incident.first_ts} to {b.incident.last_ts}, UTC), from {Object.keys(b.incident.detectors).length} detector
+          {Object.keys(b.incident.detectors).length === 1 ? '' : 's'}, involving {fmtInt(b.incident.entities.length)} hosts and addresses.{' '}
+          {b.techniques.length > 0 ? `Mapped ATT&CK techniques: ${b.techniques.map((t) => `${t.technique_id} (${fmtInt(t.alerts)})`).join(', ')}.` : 'No alert is mapped to ATT&CK.'}{' '}
+          {b.recommendations.length > 0 ? `${b.recommendations.length} playbook suggestion${b.recommendations.length === 1 ? '' : 's'}; nothing runs without an approved request.` : ''}
+        </p>
+        <p className="faint" style={{ margin: '4px 0 0', fontSize: 'var(--fs-12)' }}>
+          Report {report.report_id}, created {report.created_utc}. Platform output on replayed demo data; no labels.
+        </p>
+      </div>
+      {!c ? (
+        <div className="notice">This report was stored before charts were added (report version {String(b.report_version ?? 'd1')}). Create a new report from the incident to get the timeline and entity graph.</div>
+      ) : (
+        <>
+          <ChartFrame
+            title="Alert timeline"
+            question="When did the incident's alerts arrive, and from which detector?"
+            legend={dets.map((d) => ({ key: d, label: detectorName(d), tone: detectorTone(d), value: fmtInt(ts!.series[d]!.reduce((x, y) => x + y, 0)) }))}
+            table={{ columns: ['bin start (UTC)', ...dets], rows: Array.from({ length: ts!.bins }, (_, i) => [new Date((start + i * (ts!.bin_seconds ?? 1)) * 1000).toISOString(), ...dets.map((d) => ts!.series[d]![i] ?? 0)]) }}
+            empty={!ts || ts.total === 0 ? 'No alerts in the stored chart.' : undefined}
+            note="The same bins are drawn in the PDF."
+          >
+            <TimeBars series={ts!.series} start={start} binSeconds={ts!.bin_seconds ?? 1} height={140} label="Report alert timeline" />
+          </ChartFrame>
+          <EntityGraph graph={c.graph} fixed title="Entity graph snapshot" question="Which addresses and hosts are involved? (positions stored with the report; the PDF draws the same picture)" />
+        </>
+      )}
+    </div>
   );
 }

@@ -3,7 +3,10 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { api, ApiError, can, type Approval, type Incident, type Recommendation, type Report, type TimelineEntry } from '../api.ts';
+import { api, ApiError, can, type Approval, type Incident, type IncidentAnalysis, type Recommendation, type Report, type TimelineEntry } from '../api.ts';
+import { Lanes } from '../charts/Attack.tsx';
+import { ChartFrame } from '../charts/ChartFrame.tsx';
+import { EntityGraph, type GraphNode } from '../charts/EntityGraph.tsx';
 import { DataTable, type Column } from '../components/DataTable.tsx';
 import { EvidencePane } from '../components/EvidencePane.tsx';
 import { AskForm, Finding, type AskStore } from '../components/Findings.tsx';
@@ -42,8 +45,8 @@ const entityText = (i: Incident) => (i.detail.entities ?? []).map((e) => parseEn
 export function IncidentsScreen({ route, askStore, searchRef }: Props) {
   const { scenario, session } = useApp();
   const { data, error, loading, reload } = useLoad((signal) => api.incidents(scenario, signal), [scenario]);
-  const [sev, setSev] = useState<string>('all');
-  const [status, setStatus] = useState<string>('all');
+  const [sev, setSev] = useState<string>(route.params.sev ?? 'all');
+  const [status, setStatus] = useState<string>(route.params.status ?? 'all');
   const [q, setQ] = useState('');
   const [statusOverride, setStatusOverride] = useState<Record<string, string>>({});
   const [building, setBuilding] = useState(false);
@@ -244,7 +247,7 @@ export function IncidentsScreen({ route, askStore, searchRef }: Props) {
 // ---- detail ----------------------------------------------------------------------------------
 
 type AlertRowT = TimelineEntry & { t: number };
-type Tab = 'alerts' | 'findings' | 'response';
+type Tab = 'alerts' | 'attack' | 'graph' | 'findings' | 'response';
 
 interface RuleGroup {
   key: string;
@@ -275,6 +278,8 @@ function IncidentDetail({
   const [needles, setNeedles] = useState<string[]>([]);
   const [focusEvidence, setFocusEvidence] = useState<number | null>(null);
   const [allEntities, setAllEntities] = useState(false);
+  const [node, setNode] = useState<{ id: string; label: string; ids: Set<string> } | null>(null);
+  const analysis = useLoad((signal) => api.analysis(incident.incident_id, signal), [incident.incident_id]);
   const d = incident.detail;
   const ev = route.params.ev ?? null;
 
@@ -284,8 +289,8 @@ function IncidentDetail({
 
   const ruleKey = (e: { detector: string; rule_id: string | null }) => `${e.detector}|${e.rule_id ?? ''}`;
   const visible = useMemo(
-    () => timeline.filter((e) => (!range || (e.t >= range.from && e.t < range.to)) && (!rule || ruleKey(e) === rule)),
-    [timeline, range, rule],
+    () => timeline.filter((e) => (!range || (e.t >= range.from && e.t < range.to)) && (!rule || ruleKey(e) === rule) && (!node || node.ids.has(e.alert_id))),
+    [timeline, range, rule, node],
   );
   const groups = useMemo<RuleGroup[]>(() => {
     const m = new Map<string, RuleGroup>();
@@ -324,6 +329,18 @@ function IncidentDetail({
     [],
   );
 
+  const pickNode = async (n: GraphNode | null) => {
+    if (!n) return setNode(null);
+    try {
+      const r = await api.nodeAlerts(incident.incident_id, n.id);
+      setNode({ id: n.id, label: `${n.kind === 'host' ? 'host' : 'IP'} ${n.value}`, ids: new Set(r.alert_ids) });
+      setTab('alerts');
+      setGrouped(false);
+    } catch (err) {
+      toast(err instanceof ApiError ? describeError(err) : String(err), 'error');
+    }
+  };
+
   const openEvidence = (alertId: string, hl: string[] = []) => {
     setNeedles(hl);
     setTab('alerts');
@@ -331,6 +348,7 @@ function IncidentDetail({
     if (!visible.some((e) => e.alert_id === alertId)) {
       setRange(null);
       setRule(null);
+      setNode(null);
     }
     route.setParams({ ev: alertId });
     setFocusEvidence(Date.now());
@@ -378,25 +396,8 @@ function IncidentDetail({
         )}
       </div>
 
+      <SummaryStrip incident={incident} analysis={analysis.data} />
       <div className="section">
-        <div className="meta-row">
-          <span>
-            <span className="k">First seen</span>
-            <Time ts={incident.first_ts} />
-          </span>
-          <span>
-            <span className="k">Last seen</span>
-            <Time ts={incident.last_ts} />
-          </span>
-          <span>
-            <span className="k">Duration</span>
-            <span className="num">{fmtDuration(t1 - t0)}</span>
-          </span>
-          <span>
-            <span className="k">Alerts</span>
-            <span className="num">{fmtInt(incident.alert_ids.length)}</span>
-          </span>
-        </div>
         <div className="meta-row">
           <span className="k">Entities</span>
           {entities.length === 0 && <span className="faint">none recorded</span>}
@@ -435,6 +436,12 @@ function IncidentDetail({
         <button type="button" role="tab" id="tab-alerts" aria-selected={tab === 'alerts'} aria-controls="panel-alerts" onClick={() => setTab('alerts')}>
           Alerts and evidence <span className="num">({fmtInt(timeline.length)})</span>
         </button>
+        <button type="button" role="tab" id="tab-attack" aria-selected={tab === 'attack'} aria-controls="panel-attack" onClick={() => setTab('attack')}>
+          ATT&amp;CK lanes <span className="num">({analysis.data ? analysis.data.lanes.lanes.length : '...'})</span>
+        </button>
+        <button type="button" role="tab" id="tab-graph" aria-selected={tab === 'graph'} aria-controls="panel-graph" onClick={() => setTab('graph')}>
+          Entity graph <span className="num">({analysis.data ? fmtInt(analysis.data.graph.nodes_total) : '...'})</span>
+        </button>
         <button type="button" role="tab" id="tab-findings" aria-selected={tab === 'findings'} aria-controls="panel-findings" onClick={() => setTab('findings')}>
           Findings <span className="num">({findings.length})</span>
         </button>
@@ -459,8 +466,13 @@ function IncidentDetail({
                 Time range
               </Button>
             )}
+            {node && (
+              <Button icon="close" onClick={() => setNode(null)} title="Remove the entity filter">
+                <span className="mono">{node.label}</span>
+              </Button>
+            )}
             <span className="muted num">
-              {range || rule ? `${fmtInt(visible.length)} of ${fmtInt(timeline.length)} alerts` : `${fmtInt(timeline.length)} alerts`}
+              {range || rule || node ? `${fmtInt(visible.length)} of ${fmtInt(timeline.length)} alerts` : `${fmtInt(timeline.length)} alerts`}
               {grouped ? ` in ${fmtInt(groups.length)} rules` : ''}
             </span>
           </div>
@@ -498,6 +510,55 @@ function IncidentDetail({
               <EvidencePane alertId={ev} needles={needles} focusKey={focusEvidence} onClose={() => route.setParams({ ev: null })} />
             </div>
           )}
+        </div>
+      )}
+
+      {tab === 'attack' && (
+        <div className="tabpanel detail-scroll" role="tabpanel" id="panel-attack" aria-labelledby="tab-attack">
+          <div className="section">
+            {analysis.error && !analysis.data && <ErrorState what="the ATT&CK lanes" error={analysis.error} onRetry={analysis.reload} />}
+            {!analysis.data && !analysis.error && <SkeletonLines />}
+            {analysis.data && analysis.data.lanes.lanes.length === 0 && (
+              <EmptyState title="No alert of this incident carries an ATT&CK mapping.">Only Wazuh rule.mitre.id, Sigma tags and the documented rule table are used; nothing is guessed.</EmptyState>
+            )}
+            {analysis.data && analysis.data.lanes.lanes.length > 0 && (
+              <ChartFrame
+                title="ATT&CK tactic lanes"
+                question="Which tactics do the mapped alerts point to, and when? Click a tick (or Enter) to see those alerts."
+                table={{
+                  columns: ['tactic', 'bin start (UTC)', 'alerts'],
+                  rows: analysis.data.lanes.lanes.flatMap((l) => l.bins.map(([b, c]) => [l.name, new Date((epochSeconds(analysis.data!.lanes.start) + b * analysis.data!.lanes.bin_seconds) * 1000).toISOString(), c])),
+                }}
+                note={`${fmtInt(analysis.data.lanes.unmapped_alerts)} of ${fmtInt(analysis.data.summary.alerts_found)} alerts carry no ATT&CK mapping and are not drawn. Same time axis as the detector strip above.`}
+              >
+                <Lanes
+                  lanes={analysis.data.lanes.lanes}
+                  bins={analysis.data.lanes.bins}
+                  start={epochSeconds(analysis.data.lanes.start)}
+                  binSeconds={analysis.data.lanes.bin_seconds}
+                  onPick={(from, to) => (setRange({ from, to }), setTab('alerts'))}
+                />
+              </ChartFrame>
+            )}
+          </div>
+        </div>
+      )}
+
+      {tab === 'graph' && (
+        <div className="tabpanel detail-scroll" role="tabpanel" id="panel-graph" aria-labelledby="tab-graph">
+          <div className="section">
+            {analysis.error && !analysis.data && <ErrorState what="the entity graph" error={analysis.error} onRetry={analysis.reload} />}
+            {!analysis.data && !analysis.error && <SkeletonLines />}
+            {analysis.data && (
+              <EntityGraph
+                graph={analysis.data.graph}
+                title="Hosts and source IPs"
+                question="Which addresses talk to which hosts in this incident, and through which detector?"
+                selected={node?.id ?? null}
+                onPick={(n) => void pickNode(n)}
+              />
+            )}
+          </div>
         </div>
       )}
 
@@ -781,5 +842,56 @@ function RequestApprovalDialog({
         </p>
       )}
     </Dialog>
+  );
+}
+
+// ---- one-glance summary strip ---------------------------------------------------------------
+
+function SummaryStrip({ incident, analysis }: { incident: Incident; analysis: IncidentAnalysis | null }) {
+  const s = analysis?.summary;
+  const dets = Object.entries(incident.detail.detectors ?? s?.detectors ?? {});
+  const inputs = s?.inputs;
+  return (
+    <div className="summary-strip" role="group" aria-label="Incident summary">
+      <div className="why">
+        <div className="k">Why this severity {s?.rule ? `(triage rule ${s.rule.row})` : ''}</div>
+        <span>
+          <SeverityCell value={incident.severity} />{' '}
+          {s?.rule ? `because ${s.rule.rule}.` : incident.detail.severity_row ? `triage rule ${incident.detail.severity_row}` : 'no triage rule recorded'}
+        </span>
+        {inputs && (
+          <span className="inputs" aria-label="Triage inputs">
+            <span className="tag">detectors {inputs.detectors ?? '?'}</span>
+            <span className="tag">max level {inputs.max_level ?? '?'}</span>
+            <span className="tag">ATT&amp;CK {inputs.attack_mapped ? 'mapped' : 'not mapped'}</span>
+            <span className="tag">IOC {inputs.ioc_match ? 'match' : 'no match'}</span>
+            <span className="tag">{fmtInt(inputs.size ?? incident.alert_ids.length)} alerts</span>
+          </span>
+        )}
+      </div>
+      <div>
+        <div className="k">First / last seen (UTC)</div>
+        <div>
+          <Time ts={incident.first_ts} />
+        </div>
+        <div>
+          <Time ts={incident.last_ts} />{' '}
+          <span className="faint num">({fmtDuration(epochSeconds(incident.last_ts) - epochSeconds(incident.first_ts))})</span>
+        </div>
+      </div>
+      <div>
+        <div className="k">Detectors agreeing</div>
+        <div className="num" style={{ fontWeight: 600 }}>
+          {dets.length} <span className="faint" style={{ fontWeight: 400 }}>of 3</span>
+        </div>
+        <div style={{ display: 'flex', gap: 'var(--sp-8)', flexWrap: 'wrap' }}>
+          {dets.map(([det, n]) => (
+            <span key={det}>
+              <DetectorTag value={det} /> <span className="num faint">{fmtInt(n)}</span>
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }

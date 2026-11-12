@@ -61,8 +61,9 @@ shortcut list, sign out). No breadcrumbs. Skip link to main content is the first
 6. **Audit** (manager, admin). Read-only table: time, user, role, action, target.
 7. **Sign in**. Username and password form; errors next to the field; no decoration.
 
-There is no overview page of stat cards. Counts live where they are acted on (table footers,
-filter chips, the strip).
+v1 had no overview page. v2 (section 11) adds one, but it is a page of decision charts over
+the stored alerts and incidents, not stat cards: one compact status row, then charts that each
+link to a filtered table. Counts still also live where they are acted on.
 
 ## 3. Tokens
 
@@ -221,6 +222,11 @@ that alert in the table. It exists to show bursts and gaps; it has no other deco
 7. Both themes pass contrast.
 8. Nothing on the screen exists only for decoration.
 9. No item from the brief's "Avoid" list is present.
+10. (v2) Every chart has a text alternative (hidden table) and states the decision it supports.
+11. (v2) Colour is never the only encoding (glyph, word, dash pattern, shape or printed count).
+12. (v2) A 10,000-alert incident renders its detail in under 2 seconds.
+13. (v2) The chart module has unit tests for scales, ticks and edge cases (empty, one point, huge).
+14. (v2) Log and rule text stays escaped in tooltips (text nodes only).
 
 Loop per screen: build, render a screenshot with `scripts/shots.mjs` (Playwright is not
 installed; the script drives the headless Chrome or Edge already on the machine and also prints
@@ -262,3 +268,139 @@ React 19 + TypeScript + Vite 8, plain CSS with the tokens above (no Tailwind, no
 no chart library, no router, no virtualisation package: `DataTable`, `TimeStrip` and the hash
 router are written here). Installed 2026-11-10 after the user's go: 23 packages, 69 MB of
 `node_modules`. Pure logic is tested with Node's built-in test runner (no test dependency).
+
+## 11. v2 (2026-11-12): product shell, overview and charts
+
+Brief: "make it look and work like a finished product, informative through graphics". The v1
+Incidents screen (dense table, split pane, detector strip) stays the visual reference: same
+tokens, same 24 / 32 px rows, same hairlines; v2 adds screens and charts in that language.
+
+### 11.1 Shell
+
+- **Rail** (top to bottom): Overview (default after sign-in; executives land on Executive),
+  Incidents, Alerts, Approvals, Reports, Ask, Study, Audit, Users (admin); Settings and Help at
+  the bottom. Items the role cannot use are not rendered.
+- **Top bar**: brand mark + name, data source with stored count, environment badge
+  ("Dataset replay: demo data"), global search (alert id, IP, rule id, incident id; Ctrl+K or
+  `s` focuses it), notification bell with a count, user and role, sign out. Density, theme and
+  time format live in Settings (the `d` and `t` keys still work).
+- **Footer** on every screen: version, data source (AIT-ADS replay, scenario), API status, link
+  to the security notes.
+- **Page titles**: `<screen> · SentinelAI`; favicon = the brand mark (inline SVG data URL).
+- **Brand mark**: original SVG, a shield outline with signal arcs inside; one colour
+  (`currentColor`), 16 / 24 / 40 px. No stock icon.
+- **Error page**: one `state` block for unknown routes, render errors and API outages, saying
+  what happened, what still works, and a link back.
+
+### 11.2 Sign in
+
+Split layout at >= 1024 px: the form column (420 px) on the left, the pipeline schematic on the
+right. Form: mark, "SentinelAI", one line ("Security operations console for the AIT-ADS alert
+replay"), environment badge, username, password with a show / hide toggle, caps-lock warning
+under the field (`getModifierState`), role hint ("Your role comes from your account: analyst,
+manager, admin or executive"), errors announced (`role="alert"`): wrong credentials (401), API
+unreachable (0), any other status with its message; "Session expired" banner above the form.
+Schematic: six boxes Ingest, Normalize, Detect, Investigate, Report, Review joined by arrows,
+each with the real component names under it (replay collector, stream; alert normalizer,
+enrichment; Wazuh, Suricata, AMiner, Sigma, triage; single agent, LangGraph graph, verifier;
+reports JSON / CSV / PDF; approvals four-eyes, audit). Hairline boxes, no gradient, no
+illustration, no marketing copy.
+
+### 11.3 Chart rules (every chart)
+
+1. It supports a decision, stated as the chart's question line ("Where did alert volume spike?").
+2. Labelled axes with units (alerts, alerts per bin, UTC time, share in %).
+3. Direct labels or a legend with mark + name; colour is never the only carrier (detector series
+   also differ by stack position and are named in legend and tooltip; severity bars carry the
+   glyph and word; graph edges carry a dash pattern per detector).
+4. Tooltip with exact values on hover and on keyboard focus; tooltip content is text nodes only
+   (log and rule text stays escaped).
+5. A visually hidden `<table>` with the same numbers (the text alternative).
+6. Both themes through tokens; nothing decorative, no 3D, no pie, no animated counters, no
+   gradients, no transitions on data.
+7. Empty data says what fills it; one point and huge values render (scales are unit-tested).
+8. Every overview chart links to the filtered table under it (click, or Enter on a focused mark).
+
+Chart module: `src/lib/scale.ts` (linear, log, band and time scales, nice ticks, time ticks,
+compact numbers; pure, tested), `src/lib/graph.ts` (deterministic force layout: initial
+positions from a hash of the node id, fixed iteration count, no randomness; tested),
+`src/charts/` (React SVG: `ChartFrame` with question line, legend, tooltip and hidden table;
+`TimeBars`, `HBars`, `StackedHBars`, `HeatStrip`, `ChainStrip`, `EntityGraph`, `Lanes`,
+`DotPairs`). No chart library, no CDN.
+
+### 11.4 Chart tokens
+
+Detector and severity colours are reused (section 3). New tokens:
+
+| Token | Dark | Light | Use |
+|---|---|---|---|
+| `--grid` | `#262b31` | `#e3e6ea` | gridlines (separation only, carries no value) |
+| `--heat-1` .. `--heat-4` | `#1b2c40` `#1f3d5f` `#244f7e` `#2a62a0` | `#e3edf9` `#c3d8f2` `#9dbfe9` `#76a2dc` | ATT&CK heat cells; the count is printed in every non-empty cell in `--text`, so shade is never alone |
+| `--ref` | `#c9ced4` | `#3a4149` | baseline reference lines on the study charts (dashed) |
+
+Contrast of text on the heat steps and of `--ref` on the surfaces is computed by
+`src/lib/contrast.test.ts` from the hex values in `tokens.css` (WCAG relative luminance); the
+test fails below 4.5:1 for text and 3:1 for marks.
+
+### 11.5 Screens added or changed
+
+- **Overview** (`/overview`): status row (open incidents by severity, alerts stored, oldest
+  unreviewed High with its age in the queue, pending approvals), then: alerts over time stacked
+  by detector (linear / log toggle, incident-start markers on the time axis, brush to filter
+  the table below); incident severity x status stacked bars and age in queue; ATT&CK heat strip
+  (tactic columns, technique cells, click filters alerts); top hosts and top source IPs (bar
+  tone = highest incident severity the entity appears in, glyph + word in the label; click opens
+  the entity view); detector comparison (alerts, share mapped to ATT&CK, share with IOC match,
+  duplicate rate; IOC says "no indicator list loaded" instead of 0 % when none is loaded);
+  kill-chain strip for the scenario or a chosen incident (tactics in ATT&CK order, empty cells
+  for gaps). Under the charts: the alert table filtered by whatever chart was used.
+- **Entity view** (`/entity?kind=host|ip&value=`): counts by detector, first / last seen,
+  activity bars, top rules, incidents that contain the entity.
+- **Incident detail**: one-glance summary strip (severity, the triage rule in plain words with
+  its inputs, first / last seen, detectors agreeing); ATT&CK lanes under the strip (one lane per
+  tactic, binned ticks); a Graph tab (hosts and source IPs as nodes, alert count as edge width,
+  detector as edge colour + dash, capped at 60 nodes with "Show more", focusable nodes, click
+  filters the alert table); Findings with cited alerts as chips, verified / dropped tags and
+  the matched span marked in the evidence line.
+- **Alerts**: facet sidebar (detector, level, rule id, ATT&CK technique, host) with counts and
+  inline bars, saved filters (localStorage, per viewer), CSV export of the filtered view.
+- **Reports**: preview with the embedded timeline and entity graph (SVG); the PDF draws the same
+  two charts with reportlab from the same data and the same layout algorithm (ported to
+  Python, cross-checked by a test); printable executive summary.
+- **Approvals**: queue table + side pane (proposed action, evidence, audit trail of that
+  approval); the self-approval block and the reason requirement are stated in the pane before
+  the controls, not discovered from an error.
+- **Audit**: filters (user, action, text) and an activity-over-time bar chart.
+- **Executive** (`/executive`, read-only): severity trend, top risks, ATT&CK coverage strip,
+  time to review, open approvals, a plain-language caption under each chart; print stylesheet.
+- **Study** (`/study`): renders `scores.json` of matched runs only (FakeClient runs are excluded
+  and counted). Coverage bars with cite-all / top-k / noise reference lines, citation
+  precision, unsupported-claim rate before and after the verifier as paired dots, tokens and
+  latency per arm, detector-by-arm heat table. Banner: "dev scenarios, pilot numbers, not paper
+  results". No confidence intervals (the files have none). Empty state before any run.
+- **Settings** (theme, density, time format, default scenario), **Users** (admin: list,
+  create, deactivate, reset; passwords only from `SENTINEL_NEW_USER_PASSWORD` on the API host,
+  never typed in the browser), **Notifications** (pending approvals for deciders, decisions on
+  your own requests, failed runs), **Help** (shortcuts and what each screen is for).
+
+The console still shows no labels. The Study page shows run-level aggregates from result files
+(rates over cases), never a per-alert or per-case label.
+
+### 11.6 Performance
+
+The 11,208-alert incident must render its detail (strip, lanes, graph, table) in under 2 s:
+lanes and strip are binned, the graph is capped at 60 nodes before layout, the table is
+windowed. Server aggregates come from an in-memory per-scenario index (rebuilt when the stored
+alert count changes), so the charts never ship raw records.
+
+### 11.7 v2 skill run
+
+`ui-ux-pro-max` was run again on 2026-11-12 (`--design-system` density 9, motion 1, variance
+2; `chart` searches for time series, heatmap and network graph; `ux` searches for login errors
+and chart focus). Kept: Swiss / minimal style; chart rows "never colour alone", "table
+fallback", "focus reveals hover values", "print values in heat cells", "network graph: the
+adjacency table is the accessible source of truth, SVG up to 100 nodes"; login rows "password
+visibility toggle" and "errors announced". Rejected again: the Enterprise Gateway landing
+pattern, Fira fonts from Google Fonts, the blue-tinted palette, 150-300 ms hovers and the GSAP
+scroll reveal, line charts for alert volume (bars per bin show bursts; a line interpolates
+between bins that do not exist), Heroicons / Lucide, pie charts (forbidden by the brief).

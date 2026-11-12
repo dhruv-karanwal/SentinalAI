@@ -22,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -109,36 +110,50 @@ class AttackKB:
 _SIGMA_TAG = re.compile(r"^attack\.(t\d{4}(?:\.\d{3})?)$")
 
 
-def _native_ids(alert: Alert) -> list[str]:
-    if alert.detector is Detector.SIGMA:
+def _native_ids_raw(detector: str, raw: Mapping[str, Any]) -> list[str]:
+    if detector == Detector.SIGMA.value:
         # Sigma rules carry their own ATT&CK tags (attack.t1190): native ids, like Wazuh's
         # rule.mitre.id. Tactic tags (attack.execution) are not technique ids and are ignored.
-        sigma = alert.raw_alert.get("sigma")
+        sigma = raw.get("sigma")
         tags = sigma.get("tags") if isinstance(sigma, dict) else None
         matches = (_SIGMA_TAG.match(str(t)) for t in tags) if isinstance(tags, list) else ()
         return [m.group(1).upper() for m in matches if m]
-    if alert.detector is not Detector.WAZUH:
+    if detector != Detector.WAZUH.value:
         return []
-    rule = alert.raw_alert.get("rule")
+    rule = raw.get("rule")
     mitre = rule.get("mitre") if isinstance(rule, dict) else None
     ids = mitre.get("id") if isinstance(mitre, dict) else None
     return [str(i) for i in ids] if isinstance(ids, list) else []
 
 
-def _table_ids(alert: Alert) -> list[str]:
-    if alert.detector is Detector.SURICATA:
-        data = alert.raw_alert.get("data")
+def _table_ids_raw(detector: str, raw: Mapping[str, Any]) -> list[str]:
+    if detector == Detector.SURICATA.value:
+        data = raw.get("data")
         inner = data.get("alert") if isinstance(data, dict) else None
         category = inner.get("category") if isinstance(inner, dict) else None
         return list(RULE_TABLE.get(("suricata", "category", str(category)), ()))
     return []
 
 
+def technique_ids(detector: str, raw_alert: Mapping[str, Any]) -> list[str]:
+    """Technique ids of a stored record (detector name + ``raw_alert`` dict), native first.
+
+    The same rules as :func:`map_alert`, without building an ``Alert`` model: the console's
+    per-scenario index maps every stored alert this way.
+    """
+    out: list[str] = []
+    for tid in _native_ids_raw(detector, raw_alert) + _table_ids_raw(detector, raw_alert):
+        if tid not in out:
+            out.append(tid)
+    return out
+
+
 def map_alert(alert: Alert, kb: AttackKB | None = None) -> list[dict[str, Any]]:
     """Technique mappings of an alert: id, name, tactics, source, known."""
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for source, ids in (("native", _native_ids(alert)), ("rule_table", _table_ids(alert))):
+    det, raw = alert.detector.value, alert.raw_alert
+    for source, ids in (("native", _native_ids_raw(det, raw)), ("rule_table", _table_ids_raw(det, raw))):
         for tid in ids:
             if tid in seen:
                 continue

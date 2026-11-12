@@ -18,6 +18,7 @@ const PERMISSIONS: Record<string, readonly Role[]> = {
   'action.execute': ['manager', 'admin'],
   'copilot.ask': ['analyst', 'manager', 'admin'],
   'audit.read': ['manager', 'admin'],
+  'user.manage': ['admin'],
 };
 
 /** Mirrors PERMISSIONS in backend/app/api/auth.py; the API stays the authority (403 is shown, not hidden). */
@@ -203,6 +204,7 @@ export interface ReportBody {
   techniques: Array<{ technique_id: string; alerts: number }>;
   recommendations: Recommendation[];
   notice?: string;
+  charts?: { timeseries: TimeSeries; graph: GraphPayload };
 }
 
 export interface Report {
@@ -280,6 +282,239 @@ export interface ScenarioRow {
   alerts: number;
 }
 
+
+// ---- console v2 shapes ---------------------------------------------------------------------
+
+export interface TimeSeries {
+  start: string | null;
+  end: string | null;
+  bin_seconds: number | null;
+  bins: number;
+  series: Record<string, number[]>;
+  total: number;
+}
+
+export interface Technique {
+  technique_id: string;
+  name: string | null;
+  alerts: number;
+}
+
+export interface TacticCol {
+  tactic: string;
+  name: string;
+  alerts: number;
+  techniques: Technique[];
+}
+
+export interface ChainStage extends TacticCol {
+  first_ts: string | null;
+  last_ts: string | null;
+}
+
+export interface EntityRow {
+  value: string;
+  alerts: number;
+  by_detector: Record<string, number>;
+  severity: string | null;
+  incidents: number;
+}
+
+export interface DetectorRow {
+  detector: string;
+  alerts: number;
+  mapped: number;
+  mapped_share: number;
+  ioc: number | null;
+  ioc_share: number | null;
+  duplicates: number;
+  duplicate_share: number;
+  aggregates: number;
+}
+
+export interface QueueStatus {
+  by_severity_status: Record<string, Record<string, number>>;
+  age_in_queue: Record<string, Record<string, number>>;
+  age_buckets: string[];
+  open_by_severity: Record<string, number>;
+  oldest_unreviewed_high: { incident_id: string; created_utc: string; age_seconds: number; alerts: number } | null;
+  pending_approvals: number;
+  incidents: number;
+}
+
+export interface Overview {
+  scenario: string;
+  alerts: number;
+  status: QueueStatus;
+  timeseries: TimeSeries;
+  incident_starts: { markers: Array<{ incident_id: string; ts: string; severity: string }>; low_not_marked: number; omitted: number };
+  attack: { tactics: TacticCol[]; alerts: number; mapped_alerts: number; unmapped_alerts: number; kb_loaded: boolean; kb_version: string | null };
+  entities: { host: { distinct: number; rows: EntityRow[] }; ip: { distinct: number; rows: EntityRow[] } };
+  detectors: DetectorRow[];
+  ioc_loaded: boolean;
+  kill_chain: ChainStage[];
+}
+
+export interface AlertFilter {
+  detector?: string | null;
+  level?: string | null;
+  rule_id?: string | null;
+  technique?: string | null;
+  host?: string | null;
+  ip?: string | null;
+  since?: string | null;
+  until?: string | null;
+}
+
+export interface QueryRow extends AlertRow {
+  src_ip: string | null;
+  techniques: string[];
+}
+
+export interface FacetValue {
+  value: string;
+  count: number;
+  label: string | null;
+}
+
+export type FacetName = 'detector' | 'level' | 'rule_id' | 'technique' | 'host';
+
+export interface Facets {
+  facets: Record<FacetName, { values: FacetValue[]; distinct: number; shown: number }>;
+  total: number;
+  timeseries: TimeSeries;
+}
+
+export interface IncidentSummaryRow {
+  incident_id: string;
+  scenario: string;
+  first_ts: string;
+  last_ts: string;
+  severity: string;
+  status: string | null;
+  alerts: number;
+  created_utc: string;
+  detail: IncidentDetail & { features?: Record<string, unknown> };
+}
+
+export interface GraphPayload {
+  nodes: Array<{ id: string; kind: string; value: string; alerts: number; by_detector: Record<string, number>; x?: number; y?: number }>;
+  edges: Array<{ source: string; target: string; alerts: number; by_detector: Record<string, number> }>;
+  nodes_total: number;
+  nodes_omitted?: number;
+  width?: number;
+  height?: number;
+  nodes_shown?: number;
+}
+
+export interface IncidentAnalysis {
+  incident_id: string;
+  summary: {
+    severity: string;
+    status: string | null;
+    rule: { row: string; severity: string; rule: string } | null;
+    inputs: { ioc_match?: boolean; detectors?: number; max_level?: string; attack_mapped?: boolean; size?: number } | null;
+    first_ts: string;
+    last_ts: string;
+    alerts: number;
+    alerts_found: number;
+    detectors: Record<string, number>;
+    detectors_agreeing: number;
+    gap_seconds: number | null;
+  };
+  graph: GraphPayload;
+  lanes: { start: string; end: string; bin_seconds: number; bins: number; lanes: Array<{ tactic: string; name: string; bins: Array<[number, number]> }>; unmapped_alerts: number };
+  timeseries: TimeSeries;
+  kill_chain: ChainStage[];
+}
+
+export interface EntityView {
+  kind: string;
+  value: string;
+  alerts: number;
+  by_detector: Record<string, number>;
+  first_ts: string | null;
+  last_ts: string | null;
+  timeseries: TimeSeries;
+  top_rules: Array<{ rule_id: string; rule_name: string | null; alerts: number }>;
+  incidents: IncidentSummaryRow[];
+  incidents_total: number;
+}
+
+export interface SearchResult {
+  q: string;
+  alerts: Array<{ alert_id: string; scenario: string; detector: string; ts: string; rule_name: string | null }>;
+  incidents: IncidentSummaryRow[];
+  ips: Array<{ value: string; alerts: number }>;
+  rules: Array<{ value: string; alerts: number; label: string | null }>;
+  text: SearchHit[];
+}
+
+export interface Executive {
+  scenario: string;
+  severity_trend: Array<{ day: string; High: number; Medium: number; Low: number }>;
+  top_risks: Array<IncidentSummaryRow & { rule: { row: string; severity: string; rule: string } | null }>;
+  coverage: Array<{ tactic: string; name: string; alerts: number; techniques: number }>;
+  time_to_review: { reviewed: number; unreviewed: number; median_seconds: number | null; max_seconds: number | null };
+  open_approvals: { pending: number; oldest_utc: string | null };
+  queue: QueueStatus;
+}
+
+export interface Rate {
+  covered: number;
+  cases: number;
+  rate: number | null;
+}
+
+export interface ScoreRow {
+  coverage?: { event_label?: { reachable?: Rate; all?: Rate }; time_label?: { reachable?: Rate; all?: Rate } };
+  citation_precision?: { event_label: number | null; time_label: number | null; cited: number };
+  unsupported_claim_rate?: number | null;
+  claims?: number;
+  alerts_cited?: { total: number; mean_per_case: number | null };
+  runs?: { input_tokens: number; output_tokens: number; tool_calls: number; latency_seconds: number; budget_hit: number; status: Record<string, number> };
+  base?: string;
+  k?: number | null;
+}
+
+export interface StudyRun {
+  run_id: string;
+  scenario: string | null;
+  variant: string | null;
+  truncation: string | null;
+  split: string | null;
+  started_utc: string | null;
+  model_ids: Record<string, string> | null;
+  retrieval_mode: string | null;
+  cases: number;
+  matched_k: number | null;
+  arms: Record<string, ScoreRow>;
+  baselines: Record<string, ScoreRow>;
+  note: string | null;
+}
+
+export interface StudyResults {
+  runs: StudyRun[];
+  excluded_fake_runs: number;
+  incomplete_runs: number;
+  label: string;
+}
+
+export interface UserRow {
+  username: string;
+  role: Role;
+  created_utc: string;
+  disabled_utc: string | null;
+}
+
+export interface RunRow {
+  run_id: string;
+  scenario?: string;
+  status?: string;
+  started_utc?: string;
+  [k: string]: unknown;
+}
+
 // ---- calls --------------------------------------------------------------------------------
 
 export const api = {
@@ -318,7 +553,46 @@ export const api = {
 
   ask: (incident_id: string, question: string) => request<CopilotAnswer>('POST', '/copilot/ask', { incident_id, question }),
   audit: (signal?: AbortSignal) => request<{ entries: AuditEntry[] }>('GET', '/audit?limit=1000', undefined, signal),
+  overview: (scenario: string, signal?: AbortSignal) => request<Overview>('GET', `/overview${qs({ scenario })}`, undefined, signal),
+  queryAlerts: (scenario: string, f: AlertFilter, limit: number, offset: number, signal?: AbortSignal) =>
+    request<{ alerts: QueryRow[]; total: number; offset: number }>('GET', `/alerts/query${qs({ scenario, ...f, limit, offset })}`, undefined, signal),
+  facets: (scenario: string, f: AlertFilter, signal?: AbortSignal) => request<Facets>('GET', `/alerts/facets${qs({ scenario, ...f })}`, undefined, signal),
+  incidentSummaries: (scenario: string, signal?: AbortSignal) =>
+    request<{ incidents: IncidentSummaryRow[] }>('GET', `/incidents/summary${qs({ scenario })}`, undefined, signal),
+  incident: (id: string, signal?: AbortSignal) => request<Incident>('GET', `/incidents/${encodeURIComponent(id)}`, undefined, signal),
+  nodeAlerts: (id: string, node: string, signal?: AbortSignal) =>
+    request<{ alert_ids: string[] }>('GET', `/incidents/${encodeURIComponent(id)}/node-alerts${qs({ node })}`, undefined, signal),
+  analysis: (id: string, signal?: AbortSignal) => request<IncidentAnalysis>('GET', `/incidents/${encodeURIComponent(id)}/analysis`, undefined, signal),
+  entity: (kind: string, value: string, scenario: string, signal?: AbortSignal) =>
+    request<EntityView>('GET', `/entities/${encodeURIComponent(kind)}/${encodeURIComponent(value)}${qs({ scenario })}`, undefined, signal),
+  search: (q: string, scenario: string | null, signal?: AbortSignal) => request<SearchResult>('GET', `/search${qs({ q, scenario })}`, undefined, signal),
+  executive: (scenario: string, signal?: AbortSignal) => request<Executive>('GET', `/executive${qs({ scenario })}`, undefined, signal),
+  study: (signal?: AbortSignal) => request<StudyResults>('GET', '/study/results', undefined, signal),
+  runs: (signal?: AbortSignal) => request<{ runs: RunRow[] }>('GET', '/runs', undefined, signal),
+  users: (signal?: AbortSignal) => request<{ users: UserRow[]; password_source: string; password_source_set: boolean }>('GET', '/users', undefined, signal),
+  createUser: (username: string, role: Role) => request<{ username: string; role: Role }>('POST', '/console/users', { username, role }),
+  userAction: (username: string, action: 'deactivate' | 'reactivate' | 'reset') =>
+    request<Record<string, unknown>>('POST', `/users/${encodeURIComponent(username)}/${action}`),
+  report: (id: string, signal?: AbortSignal) => request<Report>('GET', `/reports/${encodeURIComponent(id)}`, undefined, signal),
 };
+
+/** CSV of the filtered alert view, fetched with the bearer token and saved by the browser. */
+export async function downloadAlertsCsv(scenario: string, f: AlertFilter): Promise<{ rows: number; total: number }> {
+  const path = `/alerts/export.csv${qs({ scenario, ...f })}`;
+  const res = await fetch(`/api${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (!res.ok) throw new ApiError(res.status, path, res.statusText || `HTTP ${res.status}`);
+  const rows = Number(res.headers.get('X-Rows') ?? 0);
+  const total = Number(res.headers.get('X-Rows-Total') ?? rows);
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `alerts-${scenario}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  return { rows, total };
+}
 
 /** Report files need the bearer token, so they are fetched and handed to the browser as a blob. */
 export async function downloadReport(reportId: string, format: 'json' | 'csv' | 'pdf'): Promise<void> {

@@ -4,8 +4,11 @@ import { ApiError, type Session } from './api.ts';
 
 // ---- app context ---------------------------------------------------------------------------
 
+export type TimeFormat = 'iso' | 'short';
+
 export interface AppState {
   session: Session;
+  timeFormat: TimeFormat;
   scenario: string | null;
   theme: 'dark' | 'light';
   density: 'compact' | 'comfortable';
@@ -43,6 +46,13 @@ export function buildHash(path: string, params: Record<string, string | null | u
   for (const [k, v] of Object.entries(params)) if (v) p.set(k, v);
   const s = p.toString();
   return `#${path}${s ? `?${s}` : ''}`;
+}
+
+export type RouteApi = Route & { setParams: (patch: Record<string, string | null>, replace?: boolean) => void };
+
+/** The app state when there is one (SignIn renders outside the provider). */
+export function useAppMaybe(): AppState | null {
+  return useContext(AppContext);
 }
 
 export function useRoute(): Route & { setParams: (patch: Record<string, string | null>, replace?: boolean) => void } {
