@@ -54,7 +54,7 @@ multi-agent comparison, the verifier, statistics.
 | C1 | **Done**: ATT&CK RAG: `app/rag/` (chunks, offline bge-small via fastembed, SQLite vector table / pgvector, retriever), `search_attack` tool (`agent/rag_tool.py`), frozen relevance set `experiments/rag/attack_relevance_set.json` (25 queries, committed before the first run). Measured recall@1/3/5 = 0.28 / 0.48 / 0.56 (dense). **Fix 2026-11-10:** BM25 (`rag/lexical.py`) + `mode` dense/lexical/hybrid (alpha 0.5 fixed a priori); hybrid measured 0.48 / 0.68 / 0.68 on the same set (small, already tried against) |
 | C2 | **Done**: evidence verifier (`agent/verifier.py`: drops and counts unsupported citations/claims), multi-agent tools + shared memory (`agent/multi_tools.py`: repository memory table + vector memory), LangGraph supervisor with six agents (`agent/graph.py`), same per-case budgets as M5 with a hard stop; FakeClient tests for every edge, budgets, failure paths, leaks |
 | C3 | **Done (code)**: matched-budget runner (`agent/matched.py`: single vs graph, same cases, same budgets, same verifier, scored before and after the verifier next to the same baselines), CLI `rag-index`, `rag-eval`, `pilot-estimate`, `run-matched`, `run-pilot` (`app/cli_wave_c.py`). **2026-11-10:** pilot config in study.json (`pilot.variants` = wazuh, suricata, aminer, fused, oracle, noise-wazuh; `select` reachable; `retrieval` hybrid; spread first): 12 runs, 168 cases x 2 arms = 336 case runs, token bound 13,440,000; resumable runs (`--resume`, `run-pilot` always). **Real pilot not run (no model); GATE after it** |
-| D | **Offline parts done (2026-11-10)**: `app/outputs/` reports (JSON body, CSV, PDF via reportlab; timeline, citations, ATT&CK techniques, playbook recommendations), approval workflow + gated simulated executor (`action.execute`, four-eyes, once only, migration 0002), feedback API + `feedback-report` (no retraining), `POST /copilot/ask` (M5 tools + verifier), Grafana dashboard JSON, `docs/security-notes.md`, Jira disabled stub. **React console built 2026-11-10** (user's go before the pilot gate): `frontend/` (React 19 + TypeScript + Vite 8, plain CSS tokens, no UI kit), screens Incidents, Alerts, Approvals, Reports, Ask, Audit, Sign in; design authority `frontend/DESIGN.md`; API additions `GET /scenarios` and verifier detail in copilot answers. Findings/Ask verified only in the model-offline state |
+| D | **Offline parts done (2026-11-10)**: `app/outputs/` reports (JSON body, CSV, PDF via reportlab; timeline, citations, ATT&CK techniques, playbook recommendations), approval workflow + gated simulated executor (`action.execute`, four-eyes, once only, migration 0002), feedback API + `feedback-report` (no retraining), `POST /copilot/ask` (M5 tools + verifier), Grafana dashboard JSON, `docs/security-notes.md`, Jira disabled stub. **React console built 2026-11-10** (user's go before the pilot gate): `frontend/` (React 19 + TypeScript + Vite 8, plain CSS tokens, no UI kit), screens Incidents, Alerts, Approvals, Reports, Ask, Audit, Sign in; design authority `frontend/DESIGN.md`; API additions `GET /scenarios` and verifier detail in copilot answers. Findings/Ask verified only in the model-offline state. **Console v2 2026-11-12** (`phase3/wave-d-ui-v2`): own SVG chart module (`frontend/src/lib/scale.ts`, `graph.ts`, `charts/`), sign-in with pipeline schematic, Overview (status row, alerts over time, queue, ATT&CK heat strip, top entities, detector comparison, kill chain, filtered table), Entity, incident summary strip + ATT&CK lanes + entity graph, Alerts facets / saved filters / CSV, report preview + d2 PDF charts, Approvals rules + trail, Audit chart, Executive, Study (results files only; empty until a real run), Settings, Users, notifications, global search; backend `app/api/console.py` + `app/outputs/analytics.py` + `graph_layout.py`, migration 0003 |
 | E | Only after the user says go |
 
 **Where we stopped (2026-11-09) and what comes next:** see the last section of
@@ -232,6 +232,12 @@ backend/app/
   outputs/approvals.py    ApprovalService.request / decide / execute (simulated), ApprovalError
   outputs/feedback_report.py  feedback_report(repo): counts, disputed targets; CLI feedback-report
   outputs/jira.py         JiraAdapter (disabled stub, SYNTHETIC sample payload)
+  outputs/analytics.py    console aggregates (label-free): Fact, AlertIndex (filter, facets, bins, ATT&CK
+                          matrix, entities, detector comparison), kill_chain, queue_summary, incident_analysis,
+                          executive_summary, entity_view, report_charts
+  outputs/graph_layout.py deterministic force layout shared with frontend/src/lib/graph.ts (fixture-checked)
+  api/console.py          console v2 routes (overview, alerts query/facets/export, incident analysis and
+                          node alerts, entities, search, executive, study results, users admin)
                           (registered by main.py)
 backend/tests/            pytest, one file per module + test_pipeline.py (end to end)
 frontend/                 analyst console: DESIGN.md (design authority), CLAUDE.md, src/ (tokens.css, app.css,
@@ -559,6 +565,14 @@ experiments/config/study.json  frozen split; variant seed, shuffled/noise refere
   a decision needs a reason; execution happens once (`executed_utc`). Executives are read-only.
   Reports and copilot answers are platform outputs, never study results, and hold no labels
   (`LABEL_WORDS` scan in tests/test_wave_d.py). Feedback never retrains anything.
+- Console v2 aggregates come from one in-memory `AlertIndex` per scenario (`app/api/console.py`), rebuilt
+  when the stored count changes: first request 2.5 s (russellmitchell) / 4.4 s (shaw), then cached. Its
+  routes are registered before `/alerts/{alert_id}` and `/incidents/{incident_id}`; keep that order.
+- IOC share is `None` ("not measured"), not 0, while no local indicator list is loaded
+  (`services.extras["iocs"]`). The Study page shows only `scores.json` of matched runs whose model ids
+  are not `fake`; it is empty until a real pilot run exists.
+- The graph layout exists twice (Python for the PDF, TypeScript for the console). Change both and
+  regenerate `frontend/src/lib/graph.fixture.json` from the Python module; both test suites compare it.
 - UI work never writes to `data/platform/`: serve a copy (`SENTINEL_DATA_DIR=../data/processed/ui-dev`)
   with test accounts from the git-ignored `.env.ui-dev`. `GET /incidents` returns full timelines
   (7.8 MB russellmitchell, 11.5 MB shaw); the console filters by scenario and keeps it in memory.

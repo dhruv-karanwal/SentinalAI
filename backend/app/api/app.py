@@ -149,6 +149,9 @@ def create_app(services: Services, *, metrics: Any | None = None) -> FastAPI:
             payload = decode_token(creds.credentials, services.secret)
         except AuthError as exc:
             raise HTTPException(401, str(exc)) from exc
+        user = repo.get_user(str(payload["sub"]))
+        if user is not None and user.get("disabled_utc"):
+            raise HTTPException(401, "account deactivated")
         return Principal(str(payload["sub"]), Role(payload["role"]))
 
     def need(permission: str) -> Callable[..., Principal]:
@@ -160,6 +163,11 @@ def create_app(services: Services, *, metrics: Any | None = None) -> FastAPI:
         return check
 
     app.state.need = need
+    # console v2 routes first: their fixed paths (/alerts/query, /incidents/summary) must win
+    # over the /alerts/{alert_id} and /incidents/{incident_id} routes defined below
+    from app.api.console import add_console_routes
+
+    add_console_routes(app, repo, services.index, services.extras, need)
 
     @app.middleware("http")
     async def _timing(request: Request, call_next: Callable[..., Any]) -> Any:
@@ -181,6 +189,9 @@ def create_app(services: Services, *, metrics: Any | None = None) -> FastAPI:
         if user is None or not verify_password(body.password, str(user["password_hash"])):
             repo.audit(body.username, "-", "login.failed", None, {})
             raise HTTPException(401, "invalid credentials")
+        if user.get("disabled_utc"):
+            repo.audit(body.username, "-", "login.refused", None, {"reason": "deactivated"})
+            raise HTTPException(401, "account deactivated")
         role = Role(user["role"])
         repo.audit(body.username, role.value, "login", None, {})
         return {"access_token": issue_token(body.username, role, services.secret),
@@ -303,6 +314,10 @@ def create_app(services: Services, *, metrics: Any | None = None) -> FastAPI:
         if inc is None:
             raise HTTPException(404, "no such incident")
         report = build_report(inc, _incident_alerts(inc))
+        from app.outputs.analytics import fact_from_row, report_charts
+
+        report["charts"] = report_charts(inc, sorted((fact_from_row(r) for r in repo.get_alerts(inc["alert_ids"])),
+                                                     key=lambda f: (f.ts, f.alert_id)))
         rid = repo.put_report(body.incident_id, report)
         key = f"reports/{rid}"
         services.objects.put(f"{key}.pdf", render_pdf(report), "application/pdf")

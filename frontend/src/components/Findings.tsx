@@ -63,13 +63,34 @@ export function Finding({ entry, onOpenEvidence }: { entry: AskEntry; onOpenEvid
       )}
 
       <div className="cites">
-        <span className="muted">Cited alerts ({v.citations_kept} verified):</span>
-        {a.cited_alert_ids.length === 0 && <span className="faint">none</span>}
-        {a.cited_alert_ids.map((id) => (
-          <button key={id} type="button" className="linklike mono" onClick={() => onOpenEvidence(id, needlesFor(a, id))} title="Open the evidence for this alert">
-            {id}
-          </button>
-        ))}
+        <span className="muted">
+          Cited alerts ({v.citations_kept} verified{v.citations_dropped ? `, ${v.citations_dropped} dropped` : ''}):
+        </span>
+        {a.cited_alert_ids.length === 0 && (a.dropped_citations?.length ?? 0) === 0 && <span className="faint">none</span>}
+        <span className="chips">
+          {a.cited_alert_ids.map((id) => {
+            const quotes = needlesFor(a, id);
+            return (
+              <button
+                key={id}
+                type="button"
+                className="chip mono"
+                data-state="verified"
+                onClick={() => onOpenEvidence(id, quotes)}
+                title={`verified citation; opens the evidence${quotes.length ? ' with the quoted span marked' : ''}`}
+              >
+                {id}
+                <span className="visually-hidden"> (verified)</span>
+              </button>
+            );
+          })}
+          {a.dropped_citations?.map((id) => (
+            <span key={`d-${id}`} className="chip mono" data-state="dropped" title="dropped by the verifier: not an alert of this incident">
+              {id}
+              <span className="visually-hidden"> (dropped by the verifier)</span>
+            </span>
+          ))}
+        </span>
       </div>
 
       {(a.claims?.length ?? 0) > 0 && (

@@ -3,6 +3,10 @@
 import { useMemo, useState } from 'react';
 
 import { api, type AuditEntry } from '../api.ts';
+import { ChartFrame } from '../charts/ChartFrame.tsx';
+import { TimeBars } from '../charts/TimeBars.tsx';
+import { epochSeconds, fmtDuration, fmtInt } from '../lib/format.ts';
+import { binByKey } from '../lib/scale.ts';
 import { DataTable, type Column } from '../components/DataTable.tsx';
 import { SplitPane } from '../components/SplitPane.tsx';
 import { Button, EmptyState, ErrorNotice, ErrorState, Time } from '../components/ui.tsx';
@@ -17,11 +21,18 @@ interface Props {
 export function AuditScreen({ route, searchRef }: Props) {
   const { data, error, loading, reload } = useLoad((signal) => api.audit(signal), []);
   const [q, setQ] = useState('');
+  const [user, setUser] = useState('');
+  const [action, setAction] = useState('');
+  const all = useMemo(() => data?.entries ?? [], [data]);
+  const users = useMemo(() => [...new Set(all.map((e) => e.username))].sort(), [all]);
+  const actions = useMemo(() => [...new Set(all.map((e) => e.action))].sort(), [all]);
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    const all = data?.entries ?? [];
-    return needle ? all.filter((e) => `${e.username} ${e.role} ${e.action} ${e.target ?? ''}`.toLowerCase().includes(needle)) : all;
-  }, [data, q]);
+    return all.filter(
+      (e) => (!user || e.username === user) && (!action || e.action === action) && (!needle || `${e.username} ${e.role} ${e.action} ${e.target ?? ''}`.toLowerCase().includes(needle)),
+    );
+  }, [all, q, user, action]);
+  const activity = useMemo(() => binByKey(rows.map((e) => ({ t: epochSeconds(e.ts), key: family(e.action) }))), [rows]);
   const selectedId = route.params.id ?? null;
   const selected = (data?.entries ?? []).find((e) => String(e.id) === selectedId) ?? null;
 
@@ -63,7 +74,51 @@ export function AuditScreen({ route, searchRef }: Props) {
           </label>
           <input id="audit-q" ref={searchRef} className="input" placeholder="Filter by user, action or target ( / )" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
+        <label className="label" htmlFor="audit-user">
+          User
+        </label>
+        <select id="audit-user" className="select" value={user} onChange={(e) => setUser(e.target.value)}>
+          <option value="">all</option>
+          {users.map((u) => (
+            <option key={u}>{u}</option>
+          ))}
+        </select>
+        <label className="label" htmlFor="audit-action">
+          Action
+        </label>
+        <select id="audit-action" className="select mono" value={action} onChange={(e) => setAction(e.target.value)}>
+          <option value="">all</option>
+          {actions.map((a) => (
+            <option key={a}>{a}</option>
+          ))}
+        </select>
       </div>
+      {activity.bins > 0 && (
+        <div style={{ padding: '0 var(--sp-12)' }}>
+          <ChartFrame
+            className="compact-chart"
+            title="Activity over time"
+            question="When did people act, and when were requests refused?"
+            legend={[
+              { key: 'write', label: 'changes', tone: 'accent' },
+              { key: 'sign-in', label: 'sign-ins', tone: 'muted' },
+              { key: 'refused', label: 'denied, failed or refused', tone: 'high' },
+            ]}
+            table={{ columns: ['bin start (UTC)', 'changes', 'sign-ins', 'refused'], rows: Array.from({ length: activity.bins }, (_, i) => [new Date((activity.start + i * activity.step) * 1000).toISOString(), activity.series.write?.[i] ?? 0, activity.series['sign-in']?.[i] ?? 0, activity.series.refused?.[i] ?? 0]) }}
+            note={`${fmtInt(rows.length)} entries in bins of ${fmtDuration(activity.step)} (the newest 1,000 entries are loaded).`}
+          >
+            <TimeBars
+              series={Object.fromEntries(['write', 'sign-in', 'refused'].filter((k) => activity.series[k]).map((k) => [k, activity.series[k]!]))}
+              start={activity.start}
+              binSeconds={activity.step}
+              height={96}
+              label="Audit activity over time"
+              tones={{ write: 'accent', 'sign-in': 'muted', refused: 'high' }}
+              names={{ write: 'changes', 'sign-in': 'sign-ins', refused: 'refused' }}
+            />
+          </ChartFrame>
+        </div>
+      )}
       {error && data && <ErrorNotice what="the audit log" error={error} onRetry={reload} />}
       {error && !data ? (
         <ErrorState what="the audit log" error={error} onRetry={reload} />
@@ -120,4 +175,10 @@ export function AuditScreen({ route, searchRef }: Props) {
   );
 
   return <SplitPane id="audit" left={list} right={detail} initial={62} />;
+}
+
+export function family(action: string): 'write' | 'sign-in' | 'refused' {
+  if (action === 'denied' || action.endsWith('failed') || action.endsWith('refused')) return 'refused';
+  if (action === 'login') return 'sign-in';
+  return 'write';
 }

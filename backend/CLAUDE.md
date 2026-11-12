@@ -5,6 +5,13 @@
 - **Truth separation:** labels live only in the truth area (`truth.db` / schema `truth`). Modules on agent tool paths (`TOOL_PATH_MODULES` in tests/test_platform_storage.py) must never mention `TruthStore` or `ground_truth`; the API never returns `time_label`/`event_label` (tests/test_api.py).
 - **Migrations are append-only:** never edit an applied file (sha256 check raises `MigrationError`); add `NNNN+1_*.sql`. Placeholders: `{{ID}} {{JSON}} {{TS}} {{S}}`. Queries use `?`.
 - **API:** no `from __future__ import annotations` in `app/api/app.py` (FastAPI resolves closure dependencies). Every non-GET endpoint calls `repo.audit(...)`; denied requests are audited as `denied`. New permissions go in `PERMISSIONS` (auth.py) with a row in `test_rbac_matrix`.
+- Console v2 (`app/api/console.py`, added in `create_app` before the `{id}` routes): overview, alerts
+  query / facets / CSV export, incident summary / analysis / node alerts, entities, search, executive,
+  study results, users admin. Aggregates live in `app/outputs/analytics.py` (label-free, in `LABEL_FREE`);
+  ATT&CK ids of stored records via `intel.attack.technique_ids` (same rules as `map_alert`). Users:
+  migration `0003_user_disabled.sql`; create / reset take the password only from
+  `SENTINEL_NEW_USER_PASSWORD` (409 when unset); deactivated users get 401 at login and on every token.
+  Reports are `d2`: the API adds `charts` (timeline bins + placed entity graph) and the PDF draws them.
 - Console support: `GET /scenarios` (`Repository.list_scenarios`, permission `read`); the copilot answer carries `claims`, `dropped_citations`, `dropped_claims` (real alert ids, never labels) next to the counts.
 - Secrets only from the environment: `SENTINEL_JWT_SECRET` (>= 32 chars), `SENTINEL_NEW_USER_PASSWORD` for `create-user`, DB/MinIO credentials. Never as CLI arguments, never in files.
 - Consumer writes in transactions of 1000 (`batch_size`); SQLite runs WAL. A per-row transaction makes a dev replay take >10 minutes.

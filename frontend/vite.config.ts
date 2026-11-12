@@ -11,6 +11,8 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 5173,
     strictPort: true,
+    // the Security notes page imports ../docs/security-notes.md as raw text
+    fs: { allow: ['.', '../docs'] },
     proxy: {
       '/api': { target, changeOrigin: false, rewrite: (path) => path.replace(/^\/api/, '') },
     },

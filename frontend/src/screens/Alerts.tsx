@@ -1,180 +1,190 @@
-// Alerts: every stored alert of the data source in time order, loaded 500 at a time as the
-// list is scrolled, or the full-text search hits. The selected alert's evidence is on the right.
+// Alerts: facet sidebar (detector, level, rule id, ATT&CK technique, host; counts and inline bars),
+// the filtered table (GET /alerts/query, exact total), saved filters (this browser only), CSV
+// export of the filtered view, full-text search, and the evidence of the selected alert.
+// Filters live in the URL so charts elsewhere can link to a filtered view.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 
-import { api, ApiError, type AlertRow, type SearchHit } from '../api.ts';
+import { api, ApiError, downloadAlertsCsv, type AlertFilter, type FacetName, type SearchHit } from '../api.ts';
+import { MiniBar } from '../charts/Bars.tsx';
+import { TimeBars } from '../charts/TimeBars.tsx';
+import { ChartFrame, DETECTOR_ORDER, detectorTone, type Tone } from '../charts/ChartFrame.tsx';
+import { AlertQueryTable, describeFilter, filterKey } from '../components/AlertQueryTable.tsx';
 import { DataTable, type Column } from '../components/DataTable.tsx';
 import { EvidencePane } from '../components/EvidencePane.tsx';
 import { SplitPane } from '../components/SplitPane.tsx';
-import { Button, DetectorTag, detectorName, EmptyState, ErrorNotice, ErrorState, Time } from '../components/ui.tsx';
-import { useApp, useLoad, type Route } from '../hooks.ts';
+import { Button, DetectorTag, Dialog, EmptyState, ErrorState, Time, describeError, detectorName } from '../components/ui.tsx';
+import { storageGet, storageSet, useApp, useLoad, type RouteApi } from '../hooks.ts';
 import { Icon } from '../icons.tsx';
-import { fmtInt } from '../lib/format.ts';
+import { epochSeconds, fmtInt } from '../lib/format.ts';
 import { needlesFromQuery } from '../lib/highlight.ts';
 
-const PAGE = 500;
+const KEYS: Array<keyof AlertFilter> = ['detector', 'level', 'rule_id', 'technique', 'host', 'ip', 'since', 'until'];
+const FACETS: Array<[FacetName, string]> = [
+  ['detector', 'Detector'],
+  ['level', 'Level (detector-native)'],
+  ['rule_id', 'Rule id'],
+  ['technique', 'ATT&CK technique'],
+  ['host', 'Host'],
+];
 
-/** FTS snippet: the index marks matches with [ and ]. Start near the first match and mark it. */
-function Snippet({ text }: { text: string }) {
-  const first = text.indexOf('[');
-  const start = first > 24 ? first - 24 : 0;
-  const parts = text.slice(start).split(/\[([^\]]*)\]/);
-  return (
-    <span className="mono">
-      {start > 0 && <span className="faint">...</span>}
-      {parts.map((p, i) => (i % 2 === 1 ? <mark key={i}>{p}</mark> : <span key={i}>{p}</span>))}
-    </span>
-  );
-}
-const DETECTORS = ['wazuh', 'suricata', 'aminer'];
-
-interface Props {
-  route: Route & { setParams: (patch: Record<string, string | null>, replace?: boolean) => void };
-  searchRef: React.RefObject<HTMLInputElement | null>;
+interface Saved {
+  name: string;
+  params: Record<string, string>;
 }
 
-export function AlertsScreen({ route, searchRef }: Props) {
-  const { scenario } = useApp();
-  const [detector, setDetector] = useState<string | null>(null);
-  const [host, setHost] = useState('');
-  const [hostApplied, setHostApplied] = useState('');
-  const [query, setQuery] = useState('');
-  const [queryApplied, setQueryApplied] = useState('');
+function loadSaved(): Saved[] {
+  try {
+    const v = JSON.parse(storageGet('sentinel.savedFilters') ?? '[]') as unknown;
+    return Array.isArray(v) ? (v as Saved[]).filter((s) => s && typeof s.name === 'string') : [];
+  } catch {
+    return [];
+  }
+}
 
-  const stats = useLoad((signal) => api.alertStats(scenario, signal), [scenario]);
-  const total = useMemo(() => {
-    const by = stats.data?.by_detector;
-    if (!by || hostApplied) return null;
-    return detector ? (by[detector] ?? 0) : Object.values(by).reduce((a, b) => a + b, 0);
-  }, [stats.data, detector, hostApplied]);
-
-  // ---- paged list -----------------------------------------------------------------------------
-  const [rows, setRows] = useState<AlertRow[]>([]);
-  const [done, setDone] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<ApiError | null>(null);
-  const generation = useRef(0);
-  const busy = useRef(false);
-
-  const loadPage = useCallback(
-    async (offset: number, gen: number) => {
-      if (busy.current) return;
-      busy.current = true;
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await api.alerts({ scenario, detector, host_ip: hostApplied || null, limit: PAGE, offset });
-        if (gen !== generation.current) return;
-        setRows((prev) => (offset === 0 ? res.alerts : [...prev, ...res.alerts]));
-        setDone(res.alerts.length < PAGE);
-      } catch (err) {
-        if (gen === generation.current) setError(err instanceof ApiError ? err : new ApiError(0, '/alerts', String(err)));
-      } finally {
-        busy.current = false;
-        if (gen === generation.current) setLoading(false);
-      }
-    },
-    [scenario, detector, hostApplied],
-  );
-
-  useEffect(() => {
-    generation.current += 1;
-    busy.current = false;
-    setRows([]);
-    setDone(false);
-    void loadPage(0, generation.current);
-  }, [loadPage]);
-
-  const onEndReached = useCallback(() => {
-    if (!done && !busy.current && !error) void loadPage(rows.length, generation.current);
-  }, [done, error, loadPage, rows.length]);
-
-  // ---- search ---------------------------------------------------------------------------------
-  const search = useLoad(
-    (signal) => (queryApplied ? api.searchAlerts(queryApplied, scenario, signal) : Promise.resolve({ hits: [] as SearchHit[] })),
-    [queryApplied, scenario],
-  );
-  const searching = queryApplied !== '';
-  const needles = useMemo(() => needlesFromQuery(queryApplied), [queryApplied]);
-
+export function AlertsScreen({ scenario, route, searchRef }: { scenario: string; route: RouteApi; searchRef: React.RefObject<HTMLInputElement | null> }) {
+  const { toast, session } = useApp();
+  const filter = useMemo<AlertFilter>(() => Object.fromEntries(KEYS.map((k) => [k, route.params[k] ?? null])), [route.params]);
+  const fkey = filterKey(filter);
+  const facets = useLoad((signal) => api.facets(scenario, filter, signal), [scenario, fkey]);
+  const [query, setQuery] = useState(route.params.q ?? '');
+  const queryApplied = route.params.q ?? '';
+  const search = useLoad((signal) => (queryApplied ? api.searchAlerts(queryApplied, scenario, signal) : Promise.resolve(null)), [queryApplied, scenario]);
+  const [saved, setSaved] = useState<Saved[]>(loadSaved);
+  const [exporting, setExporting] = useState(false);
   const selectedId = route.params.id ?? null;
-  const select = (id: string) => route.setParams({ id });
+  const needles = useMemo(() => needlesFromQuery(queryApplied), [queryApplied]);
+  const active = KEYS.filter((k) => filter[k]);
 
-  const columns = useMemo<Column<AlertRow>[]>(
-    () => [
-      { id: 'ts', header: 'Time (UTC)', width: '146px', render: (a) => <Time ts={a.ts} /> },
-      { id: 'det', header: 'Detector', width: '74px', render: (a) => <DetectorTag value={a.detector} /> },
-      {
-        id: 'sev',
-        header: 'Sev.',
-        width: '32px',
-        align: 'right',
-        title: () => 'Severity as the detector reports it (Wazuh level 0-15, Suricata 1-3 with 1 most severe); not rescaled',
-        render: (a) => (a.severity === null ? <span className="faint">-</span> : <span className="mono">{a.severity}</span>),
-      },
-      { id: 'rule', header: 'Rule id', width: '88px', render: (a) => <span className="mono">{a.rule_id ?? '-'}</span> },
-      { id: 'name', header: 'Rule name', width: 'minmax(0, 1fr)', title: (a) => a.rule_name ?? '', render: (a) => a.rule_name ?? <span className="faint">-</span> },
-      { id: 'host', header: 'Host', width: '100px', render: (a) => <span className="mono">{a.host_ip ?? '-'}</span> },
-    ],
-    [],
-  );
+  const set = (patch: Partial<Record<keyof AlertFilter | 'q' | 'id', string | null>>) => route.setParams(patch as Record<string, string | null>);
+  const toggle = (facet: FacetName, value: string) => set({ [facet]: filter[facet] === value ? null : value });
+
+  const [naming, setNaming] = useState<string | null>(null);
+  const save = () => setNaming(describeFilter(filter));
+  const commitSave = (raw: string) => {
+    const name = raw.trim();
+    setNaming(null);
+    if (!name) return;
+    const params = Object.fromEntries(KEYS.filter((k) => filter[k]).map((k) => [k, String(filter[k])]));
+    const next = [...saved.filter((s) => s.name !== name), { name, params }];
+    setSaved(next);
+    storageSet('sentinel.savedFilters', JSON.stringify(next));
+  };
+  const removeSaved = (name: string) => {
+    const next = saved.filter((s) => s.name !== name);
+    setSaved(next);
+    storageSet('sentinel.savedFilters', JSON.stringify(next));
+  };
+  const exportCsv = async () => {
+    setExporting(true);
+    try {
+      const r = await downloadAlertsCsv(scenario, filter);
+      toast(r.rows < r.total ? `Exported ${fmtInt(r.rows)} of ${fmtInt(r.total)} alerts (export limit).` : `Exported ${fmtInt(r.rows)} alerts as CSV.`);
+    } catch (err) {
+      toast(err instanceof ApiError ? describeError(err) : String(err), 'error');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const hitColumns = useMemo<Column<SearchHit>[]>(
     () => [
-      { id: 'ts', header: 'Time (UTC)', width: '146px', sortKey: (h) => h.ts, render: (h) => <Time ts={h.ts} /> },
-      { id: 'det', header: 'Detector', width: '74px', sortKey: (h) => h.detector, render: (h) => <DetectorTag value={h.detector} /> },
-      { id: 'name', header: 'Rule name', width: 'minmax(0, 1fr)', sortKey: (h) => h.rule_name, title: (h) => h.rule_name ?? '', render: (h) => h.rule_name ?? <span className="faint">-</span> },
-      { id: 'snip', header: 'Match', width: 'minmax(0, 2fr)', title: (h) => h.snippet ?? '', render: (h) => <Snippet text={h.snippet ?? ''} /> },
+      { id: 'ts', header: 'Time (UTC)', width: '146px', render: (h) => <Time ts={h.ts} /> },
+      { id: 'det', header: 'Detector', width: '78px', render: (h) => <DetectorTag value={h.detector} /> },
+      { id: 'rule', header: 'Rule', width: 'minmax(0, 1fr)', title: (h) => h.rule_name ?? '', render: (h) => h.rule_name ?? '-' },
+      { id: 'id', header: 'Alert id', width: '150px', render: (h) => <span className="mono">{h.alert_id}</span> },
     ],
     [],
   );
 
-  const filterText = [detector ? `detector = ${detector}` : null, hostApplied ? `host = ${hostApplied}` : null].filter(Boolean).join(', ');
+  const sidebar = (
+    <aside className="facets" aria-label="Facets">
+      {facets.error && !facets.data && <ErrorState what="facets" error={facets.error} onRetry={facets.reload} />}
+      {!facets.data && !facets.error && <div className="facet faint">Counting...</div>}
+      {facets.data &&
+        FACETS.map(([name, label]) => {
+          const f = facets.data!.facets[name];
+          const max = Math.max(1, ...f.values.map((v) => v.count));
+          return (
+            <section key={name} className="facet" aria-labelledby={`fc-${name}`}>
+              <h3 id={`fc-${name}`}>
+                <span>{label}</span>
+                <span className="faint num">{fmtInt(f.distinct)}</span>
+              </h3>
+              <ul>
+                {f.values.map((v) => {
+                  const tone: Tone = name === 'detector' ? detectorTone(v.value) : 'accent';
+                  const pressed = filter[name] === v.value;
+                  const text = name === 'detector' ? detectorName(v.value) : v.value;
+                  return (
+                    <li key={v.value}>
+                      <button
+                        type="button"
+                        aria-pressed={pressed}
+                        onClick={() => toggle(name, v.value)}
+                        title={`${text}${v.label ? ` ${v.label}` : ''}: ${fmtInt(v.count)} alerts${pressed ? ' (click to remove)' : ''}`}
+                      >
+                        <span className="fv">
+                          <span className={name === 'detector' ? '' : 'mono'}>{text}</span>
+                          {v.label && <span className="faint"> {v.label}</span>}
+                        </span>
+                        <MiniBar value={v.count} max={max} tone={tone} />
+                        <span className="fc">{fmtInt(v.count)}</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+              {f.distinct > f.shown && <div className="faint" style={{ fontSize: 'var(--fs-11)', padding: '2px 4px' }}>top {f.shown} of {fmtInt(f.distinct)}</div>}
+            </section>
+          );
+        })}
+      <section className="facet" aria-labelledby="fc-saved">
+        <h3 id="fc-saved">
+          <span>Saved filters</span>
+          <span className="faint">this browser</span>
+        </h3>
+        {saved.length === 0 && <div className="faint">None yet. Set a filter, then Save.</div>}
+        <ul>
+          {saved.map((s) => (
+            <li key={s.name} style={{ display: 'flex' }}>
+              <button type="button" onClick={() => route.setParams({ ...Object.fromEntries(KEYS.map((k) => [k, null])), ...s.params })} title={JSON.stringify(s.params)}>
+                <span className="fv">{s.name}</span>
+              </button>
+              <button type="button" aria-label={`Delete saved filter ${s.name}`} style={{ width: 24, gridTemplateColumns: '1fr' }} onClick={() => removeSaved(s.name)}>
+                <Icon name="close" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      </section>
+    </aside>
+  );
 
+  const ts = facets.data?.timeseries;
   const list = (
-    <>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       <div className="pane-head">
         <h1>Alerts</h1>
+        <span className="muted num">{facets.data ? `${fmtInt(facets.data.total)} match` : ''}</span>
         <span className="spacer" />
-        <span className="muted num" style={{ fontSize: 'var(--fs-12)' }}>
-          {scenario ?? 'all data sources'}
-        </span>
+        {active.length > 0 && <Button onClick={save}>Save filter</Button>}
+        <Button icon="download" onClick={() => void exportCsv()} disabled={exporting || !facets.data || facets.data.total === 0} title="CSV of the filtered view (no raw records)">
+          {exporting ? 'Exporting...' : 'Export CSV'}
+        </Button>
       </div>
       <form
         className="filters"
         role="search"
         onSubmit={(e) => {
           e.preventDefault();
-          setHostApplied(host.trim());
-          setQueryApplied(query.trim());
+          set({ q: query.trim() || null, id: null });
         }}
       >
-        <div className="group" role="group" aria-label="Detector filter">
-          <Button aria-pressed={detector === null} onClick={() => setDetector(null)} disabled={searching}>
-            All
-          </Button>
-          {DETECTORS.map((d) => (
-            <Button key={d} aria-pressed={detector === d} onClick={() => setDetector(detector === d ? null : d)} disabled={searching}>
-              {detectorName(d)} <span className="num faint">{stats.data ? fmtInt(stats.data.by_detector[d] ?? 0) : ''}</span>
-            </Button>
-          ))}
-        </div>
-        <label className="visually-hidden" htmlFor="al-host">
-          Host IP, exact
-        </label>
-        <input
-          id="al-host"
-          className="input mono"
-          style={{ width: 128 }}
-          placeholder="Host IP (exact)"
-          value={host}
-          onChange={(e) => setHost(e.target.value)}
-          disabled={searching}
-        />
         <div className="search">
           <Icon name="search" />
           <label className="visually-hidden" htmlFor="al-q">
-            Search log lines and rule names
+            Search log text
           </label>
           <input
             id="al-q"
@@ -187,92 +197,114 @@ export function AlertsScreen({ route, searchRef }: Props) {
             onKeyDown={(e) => {
               if (e.key === 'Escape') {
                 setQuery('');
-                setQueryApplied('');
+                set({ q: null });
                 e.currentTarget.blur();
               }
             }}
           />
         </div>
-        <Button type="submit">Apply</Button>
-        {(searching || hostApplied) && (
-          <Button
-            kind="ghost"
-            icon="close"
-            onClick={() => {
-              setQuery('');
-              setQueryApplied('');
-              setHost('');
-              setHostApplied('');
-            }}
-          >
-            Clear
+        <Button type="submit">Search</Button>
+        {active.map((k) => (
+          <button key={k} type="button" className="chip" onClick={() => set({ [k]: null })} aria-label={`Remove filter ${k} = ${filter[k]}`}>
+            {k.replace('_', ' ')} = <span className="mono">{k === 'detector' ? detectorName(String(filter[k])) : String(filter[k])}</span>
+            <Icon name="close" />
+          </button>
+        ))}
+        {active.length > 1 && (
+          <Button kind="ghost" onClick={() => route.setParams(Object.fromEntries(KEYS.map((k) => [k, null])))}>
+            Clear all
           </Button>
         )}
       </form>
-
-      {searching ? (
-        search.error && !search.data ? (
-          <ErrorState what="search results" error={search.error} onRetry={search.reload} />
-        ) : (
-          <DataTable
-            label={`Search hits for ${queryApplied}`}
-            unit="hits"
-            primary
-            rows={search.data?.hits ?? []}
-            columns={hitColumns}
-            rowKey={(h) => h.alert_id}
-            selectedKey={selectedId}
-            onSelect={(h) => select(h.alert_id)}
-            copyText={(h) => h.alert_id}
-            loading={search.loading}
-            footer={<span>Best matches first; at most 200 hits are returned</span>}
-            empty={<EmptyState title={`No alert contains all of: ${needles.join(', ') || queryApplied}.`}>The search covers log lines and rule names of {scenario ?? 'all data sources'}.</EmptyState>}
-          />
-        )
-      ) : (
-        <>
-          {error && rows.length > 0 && <ErrorNotice what="alerts" error={error} onRetry={() => void loadPage(rows.length, generation.current)} />}
-          {error && rows.length === 0 ? (
-            <ErrorState what="alerts" error={error} onRetry={() => void loadPage(0, generation.current)} />
+      {!queryApplied && ts && ts.total > 0 && (
+        <div style={{ padding: '0 var(--sp-12)' }}>
+          <ChartFrame
+            className="compact-chart"
+            title="Matching alerts over time"
+            question="Drag to narrow the time range."
+            legend={DETECTOR_ORDER.filter((d) => ts.series[d]).map((d) => ({ key: d, label: detectorName(d), tone: detectorTone(d) }))}
+            table={{ columns: ['bin', ...Object.keys(ts.series)], rows: Array.from({ length: ts.bins }, (_, i) => [i, ...Object.values(ts.series).map((v) => v[i] ?? 0)]) }}
+          >
+            <TimeBars
+              series={ts.series}
+              start={ts.start ? epochSeconds(ts.start) : 0}
+              binSeconds={ts.bin_seconds ?? 1}
+              height={96}
+              label="Matching alerts over time"
+              onSelect={(b) => {
+                const s0 = ts.start ? epochSeconds(ts.start) : 0;
+                const st = ts.bin_seconds ?? 1;
+                set(b ? { since: new Date((s0 + b[0] * st) * 1000).toISOString(), until: new Date((s0 + (b[1] + 1) * st) * 1000).toISOString() } : { since: null, until: null });
+              }}
+            />
+          </ChartFrame>
+        </div>
+      )}
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        {queryApplied ? (
+          search.error && !search.data ? (
+            <ErrorState what="search results" error={search.error} onRetry={search.reload} />
           ) : (
             <DataTable
-              label="Alerts in time order"
-              unit="alerts loaded"
+              label={`Search hits for ${queryApplied}`}
+              unit="hits"
               primary
-              rows={rows}
-              columns={columns}
-              rowKey={(a) => a.alert_id}
+              rows={search.data?.hits ?? []}
+              columns={hitColumns}
+              rowKey={(h) => h.alert_id}
               selectedKey={selectedId}
-              onSelect={(a) => select(a.alert_id)}
-              copyText={(a) => a.alert_id}
-              loading={loading}
-              onEndReached={onEndReached}
-              footer={
-                <span className="num">
-                  {total !== null ? `of ${fmtInt(total)}` : done ? 'all loaded' : 'more on scroll'} · oldest first{loading && rows.length > 0 ? ' · loading next 500' : ''}
-                </span>
-              }
-              empty={
-                filterText ? (
-                  <EmptyState title={`No alerts match ${filterText}.`}>The host filter is an exact match on the alert's host IP.</EmptyState>
-                ) : (
-                  <EmptyState title={`No alerts stored for ${scenario ?? 'any data source'}.`}>
-                    Replay a scenario into the stores: <span className="mono">app.main platform-ingest --scenario {scenario ?? '<name>'}</span>
-                  </EmptyState>
-                )
-              }
+              onSelect={(h) => set({ id: h.alert_id })}
+              copyText={(h) => h.alert_id}
+              loading={search.loading}
+              footer={<span>Best matches first; at most 200 hits. Facet filters do not apply to text search.</span>}
+              empty={<EmptyState title={`No alert contains all of: ${needles.join(', ') || queryApplied}.`}>The search covers log lines and rule names of {scenario}.</EmptyState>}
             />
-          )}
-        </>
-      )}
-    </>
+          )
+        ) : (
+          <AlertQueryTable scenario={scenario} filter={filter} primary compact label="Alerts in time order" selectedId={selectedId} onSelect={(a) => set({ id: a.alert_id })} />
+        )}
+      </div>
+    </div>
   );
 
   const detail = selectedId ? (
     <EvidencePane key={selectedId} alertId={selectedId} needles={needles} />
   ) : (
-    <EmptyState title="No alert selected.">Select a row to read its fields and raw log lines.</EmptyState>
+    <EmptyState title="No alert selected.">
+      Select a row to read its fields and raw log lines.{session.role === 'executive' ? ' Your role cannot read raw records.' : ''}
+    </EmptyState>
   );
 
-  return <SplitPane id="alerts" left={list} right={detail} initial={60} />;
+  return (
+    <div className="alerts-layout">
+      {sidebar}
+      <SplitPane id="alerts" left={list} right={detail} initial={62} />
+      {naming !== null && (
+        <Dialog
+          title="Save filter"
+          onClose={() => setNaming(null)}
+          footer={
+            <>
+              <Button onClick={() => setNaming(null)}>Cancel</Button>
+              <Button kind="primary" onClick={() => commitSave(naming)} disabled={!naming.trim()}>
+                Save
+              </Button>
+            </>
+          }
+        >
+          <form
+            className="field"
+            onSubmit={(e) => {
+              e.preventDefault();
+              commitSave(naming);
+            }}
+          >
+            <label htmlFor="sf-name">Name (kept in this browser only)</label>
+            <input id="sf-name" className="input" autoFocus value={naming} maxLength={80} onChange={(e) => setNaming(e.target.value)} />
+            <span className="faint">{describeFilter(filter)}</span>
+          </form>
+        </Dialog>
+      )}
+    </div>
+  );
 }

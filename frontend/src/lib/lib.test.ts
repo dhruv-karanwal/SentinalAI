@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { barHeight, binIndex, binRange, binTicks } from './bins.ts';
-import { compareQueue, fmtDuration, fmtInt, isoUtc, parseEntity, relTime, sortBy } from './format.ts';
+import { compareQueue, fmtDuration, fmtStep, fmtTime, fmtInt, isoUtc, parseEntity, relTime, sortBy } from './format.ts';
 import { needlesFromQuery, splitHighlight } from './highlight.ts';
 import { clampIndex, scrollTopFor, visibleRange } from './virtual.ts';
 
@@ -140,4 +140,19 @@ test('splitHighlight merges overlapping needles', () => {
     { text: 'abcde', hit: true },
     { text: 'f', hit: false },
   ]);
+});
+
+test('fmtTime prints UTC in the chosen format and keeps invalid input', () => {
+  assert.equal(fmtTime('2022-01-21T00:02:27+00:00'), '2022-01-21T00:02:27Z');
+  assert.equal(fmtTime('2022-01-21T00:02:27+00:00', 'short'), '2022-01-21 00:02:27');
+  assert.equal(fmtTime('nope', 'short'), 'nope');
+});
+
+test('fmtStep prints bin widths as short units', () => {
+  assert.equal(fmtStep(10), '10 s');
+  assert.equal(fmtStep(300), '5 min');
+  assert.equal(fmtStep(3600), '1 h');
+  assert.equal(fmtStep(10800), '3 h');
+  assert.equal(fmtStep(86400 * 2), '2 d');
+  assert.equal(fmtStep(90), '1 min 30 s');
 });

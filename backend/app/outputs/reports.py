@@ -17,6 +17,9 @@ Sections:
 - ``recommendations``: :func:`app.outputs.playbooks.recommend` of those ids;
 - ``findings`` (optional): an agent's cited ids and claims after the
   evidence verifier (kept and dropped, with reasons);
+- ``charts`` (optional, added by the API since d2): the alert timeline binned by detector and
+  the entity graph with node positions (``analytics.report_charts``); the console preview and
+  the PDF draw these same numbers and positions;
 - ``notice``: recommendations are suggestions; nothing executes without an
   approved record.
 
@@ -38,7 +41,7 @@ from app.intel.attack import AttackKB, map_alert
 from app.outputs.playbooks import recommend
 from app.schemas.alert import Alert
 
-REPORT_VERSION = "d1"
+REPORT_VERSION = "d2"
 MAX_ROWS = 500
 EXCERPT_CHARS = 300
 CSV_COLUMNS = ("ts", "alert_id", "detector", "rule_id", "rule_name", "severity", "host_ip", "techniques")
@@ -105,6 +108,78 @@ def render_csv(body: dict[str, Any]) -> str:
     return buf.getvalue()
 
 
+# Print colours for the PDF charts (the light-theme detector tokens of the console) and the dash
+# pattern that also tells the detectors apart without colour.
+DETECTOR_PRINT = {"wazuh": ("#086a58", None), "suricata": ("#a3407a", (4, 2)),
+                  "aminer": ("#756600", (1, 2)), "sigma": ("#5c6670", (6, 2, 1, 2))}
+
+
+def _chart_flowables(charts: dict[str, Any], width_pt: float) -> list[Any]:
+    """reportlab drawings of the report's timeline and entity graph (no labels, no raw text)."""
+    from reportlab.graphics.shapes import Circle, Drawing, Line, Rect, String
+    from reportlab.lib import colors
+
+    out: list[Any] = []
+    ts = charts.get("timeseries") or {}
+    series: dict[str, list[int]] = ts.get("series") or {}
+    if series:
+        n = int(ts["bins"])
+        h, left, bottom, top = 120.0, 36.0, 22.0, 8.0
+        d = Drawing(width_pt, h)
+        totals = [sum(v[i] for v in series.values()) for i in range(n)]
+        peak = max(totals) or 1
+        plot_w = width_pt - left - 8
+        bw = plot_w / n
+        for i in range(n):
+            y = bottom
+            for det, values in series.items():
+                c = values[i]
+                if not c:
+                    continue
+                bh = (h - bottom - top) * c / peak
+                colour, _ = DETECTOR_PRINT.get(det, ("#5c6670", None))
+                d.add(Rect(left + i * bw, y, max(bw - 0.5, 0.5), bh, fillColor=colors.HexColor(colour),
+                           strokeColor=None))
+                y += bh
+        d.add(Line(left, bottom, left + plot_w, bottom, strokeColor=colors.grey, strokeWidth=0.5))
+        d.add(String(2, h - top - 6, f"{peak:,}", fontSize=6))
+        d.add(String(2, bottom - 2, "0", fontSize=6))
+        d.add(String(left, 6, f"{ts['start']}  ->  {ts['end']}  (UTC; bins of {ts['bin_seconds']} s; "
+                     "alerts per bin, stacked by detector)", fontSize=6))
+        x = left + plot_w - 4
+        for det in reversed(list(series)):
+            colour, _ = DETECTOR_PRINT.get(det, ("#5c6670", None))
+            label = f"{det} {sum(series[det]):,}"
+            x -= 6 + 3.2 * len(label)
+            d.add(Rect(x, h - 8, 5, 5, fillColor=colors.HexColor(colour), strokeColor=None))
+            d.add(String(x + 7, h - 8, label, fontSize=6))
+        out.append(d)
+    g = charts.get("graph") or {}
+    nodes = g.get("nodes") or []
+    if nodes:
+        gw, gh = float(g["width"]), float(g["height"])
+        scale = min(1.0, width_pt / gw)
+        d = Drawing(gw * scale, gh * scale + 14)
+        pos = {n["id"]: (n["x"] * scale, (gh - n["y"]) * scale + 14) for n in nodes}
+        top_edge = max((e["alerts"] for e in g["edges"]), default=1)
+        for e in g["edges"]:
+            det = max(e["by_detector"].items(), key=lambda kv: kv[1])[0]
+            colour, dash = DETECTOR_PRINT.get(det, ("#5c6670", None))
+            (x1, y1), (x2, y2) = pos[e["source"]], pos[e["target"]]
+            d.add(Line(x1, y1, x2, y2, strokeColor=colors.HexColor(colour), strokeDashArray=dash,
+                       strokeWidth=0.75 + 3.25 * (e["alerts"] / top_edge) ** 0.5))
+        for n in nodes:
+            x, y = pos[n["id"]]
+            host = n["kind"] == "host"
+            d.add(Circle(x, y, 4, fillColor=colors.white if host else colors.HexColor("#1b1f24"),
+                         strokeColor=colors.HexColor("#1b1f24"), strokeWidth=1))
+            d.add(String(x + 6, y - 2, f"{n['value']} ({n['alerts']:,})", fontSize=5.5))
+        d.add(String(0, 2, f"Entity graph: {g['nodes_shown']} of {g['nodes_total']} nodes; hollow = host, "
+                     "filled = source IP; edge width = alerts, colour and dash = main detector", fontSize=6))
+        out.append(d)
+    return out
+
+
 def render_pdf(body: dict[str, Any]) -> bytes:
     """A4 PDF via reportlab; ``invariant=1`` makes the bytes depend on the body only."""
     from reportlab.lib import colors
@@ -144,6 +219,8 @@ def render_pdf(body: dict[str, Any]) -> bytes:
                                   "required" if r["requires_approval"] else "no"]
                                  for r in body["recommendations"]],
                               [32 * mm, 90 * mm, 35 * mm, 20 * mm])]
+    if body.get("charts"):
+        story += [p("Charts", styles["Heading2"]), *_chart_flowables(body["charts"], 180 * mm)]
     if "findings" in body:
         v = body["findings"]["verification"]
         story += [p("Agent findings after the evidence verifier", styles["Heading2"]),

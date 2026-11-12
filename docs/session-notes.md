@@ -2061,3 +2061,90 @@ Not done / not verified:
 - 1024 px width: no horizontal scroll measured on Incidents; the layout below 1024 px was not
   reviewed.
 - The shaw scenario was not rendered (russellmitchell only).
+
+## Console v2 (`phase3/wave-d-ui-v2`), 2026-11-12
+
+Brief: finished-product look, informative through graphics; every chart supports a decision,
+has labelled axes with units, a legend or direct labels, a tooltip with exact values, a hidden
+table, both themes; no decoration, no 3D, no pie, no animated counters. No new downloads: the SVG
+chart module is written in `frontend/src/lib/` (scale, graph, contrast, study) and
+`frontend/src/charts/`.
+
+Order of work: `ui-ux-pro-max` rerun and DESIGN.md section 11 first, then backend tests and
+code, then the chart module with tests, then screens, then the screenshot loop.
+
+### Backend (all label-free; `outputs/analytics.py` and `outputs/graph_layout.py` are in `LABEL_FREE`)
+
+- `app/outputs/analytics.py`: per-scenario `AlertIndex` of `Fact`s (time, detector, rule, native
+  severity, host, source IP from the enrichment, ATT&CK ids via the new `intel.attack.technique_ids`
+  on the stored record, Suricata-duplicate flag, IOC = None unless an indicator list is loaded).
+  Filters, facets (each facet ignores its own filter), time bins, ATT&CK matrix, top entities
+  with the highest incident severity, detector comparison, kill chain with gaps, queue summary,
+  incident analysis (graph, tactic lanes, triage rule in words), executive summary, entity view.
+- `app/outputs/graph_layout.py`: deterministic force layout (FNV-1a start positions, 150
+  iterations, only + - * / sqrt). The JS port reproduces `frontend/src/lib/graph.fixture.json`
+  exactly; both test suites check it.
+- `app/api/console.py` (registered before the `{id}` routes): `GET /overview`, `/alerts/query`,
+  `/alerts/facets`, `/alerts/export.csv`, `/incidents/summary`, `/incidents/{id}/analysis`,
+  `/incidents/{id}/node-alerts`, `/entities/{kind}/{value}`, `/search`, `/executive`,
+  `/study/results` (FakeClient runs excluded and counted), `GET /users`, `POST /console/users`,
+  `POST /users/{u}/deactivate|reactivate|reset` (password only from `SENTINEL_NEW_USER_PASSWORD`
+  on the API host; an admin cannot change their own account). Migration `0003_user_disabled.sql`;
+  a deactivated user's login and existing token are refused (401).
+- Reports d2: the API stores `charts` (timeline bins + entity graph with positions) in the body
+  at creation; `render_pdf` draws both with reportlab drawings (detector colour + dash pattern).
+
+Index timings on the UI-dev stores (one build per scenario, cached until the count changes):
+russellmitchell 45,544 alerts build 2.5 s, aggregates 0.5 s; shaw 70,782 alerts build 4.4 s,
+aggregates 0.7 s; analysis of the 11,208-alert incident 0.03 s.
+
+Real numbers seen on russellmitchell (UI-dev copy, dev scenario): 15,075 of 45,544 alerts mapped
+to ATT&CK (33.1 %); 7 of 14 tactics observed; Wazuh mapped 46.6 %, duplicates of Suricata
+28.4 % (9,186); Suricata mapped 0.3 % (27, the Web Application Attack rule-table row); AMiner 0 %.
+IOC match is "not measured" (no indicator list loaded). Top host 10.143.2.4 (11,014 alerts),
+top source IP 172.19.131.174 (9,699). Queue: High 4, Medium 12, Low 827, all open; oldest
+unreviewed High 2 d 18 h in the queue (since triage stored it).
+
+### Per-screen loop (DESIGN.md section 8 + v2 additions), 3 passes, `scripts/shots.mjs`
+
+Pass 1 (dark): overview, incidents, incident graph, alerts, executive, study, reports, login.
+Found and fixed: tactic headers overlapped in the heat strip (now two clipped lines); axis unit
+"1 h 00 min" (new `fmtStep`: "1 h"); age-in-queue patterns ambiguous (now a count grid with
+heat shading and printed counts); the incident detail header pushed the tabs below the fold
+(summary strip compacted, ATT&CK lanes moved to their own tab); the Alerts table lost its Rule
+column in the 584 px pane (compact column set); executive trend flattened 4 High under 827 Low
+(now small multiples, one scale per severity, counts printed); pipeline schematic text touched
+the box edge; the only stored report predated charts (two d2 reports created on the UI-dev copy).
+Pass 2: entity graph third node fell below the fold (graph height capped at 300 px, axes scaled
+separately); report legend used raw detector ids. Pass 3 (both themes, final shots): no
+horizontal scroll, no `.dt-row` overflow, 0 console errors, tab walk shows the focus ring on all
+14 stops (skip link, brand, data source, search, notifications, help, sign out, rail).
+
+Checklist results:
+
+| Check | Result |
+|---|---|
+| Highest-severity open incident in < 5 s | status row links "High 4"; Incidents still sorts High first |
+| Keyboard only | charts are one tab stop with arrow keys (bins), Shift for ranges, Enter filters, Esc clears; graph nodes and heat cells are buttons |
+| Focus visible | tab walk: ring on every stop |
+| No horizontal scroll at 1366 px | `scrollWidth > clientWidth` false on every screen; `.dt-row` overflow false on Alerts |
+| 10,000+ rows | 11,208-alert incident detail (summary, strip, table, analysis) rendered in 451 ms after selection (MutationObserver in the shot run) |
+| Untrusted text escaped | tooltips and labels are text nodes; `grep dangerouslySetInnerHTML\|innerHTML frontend/src` finds nothing |
+| Contrast, both themes | `src/lib/charts.test.ts` measures text, severity, detector, accent and `--ref` on bg / surface / raised and text on every heat step: all pass (>= 4.5:1, `--ref` >= 3:1) |
+| Text alternative per chart | every `ChartFrame` renders a visually hidden table |
+| Colour never alone | severity glyph + word; detector name in legend, tooltip and table, dash pattern on graph edges; host circle vs IP square; heat cells print the count |
+| Nothing decorative, no pie / 3D / counters | none present |
+| Chart module unit tests | scales, nice ticks, log1p, time ticks, bands, stacks, heat steps, binning, layout determinism and cross-language fixture, contrast, study references: 32 frontend tests |
+
+Report PDF: no PDF rasterizer is installed (none downloaded), so the PDF was checked by
+inflating its content streams: the d2 report has the "Charts" heading, the timeline and graph
+captions and 43 rectangles (14 in the d1 report of the same incident).
+
+Not verified: the Study page with real results (no real-model run exists; its reference-line
+logic is unit-tested in `lib/study.ts`); Findings chips against a real model answer; printing
+on paper (the print stylesheet was not exercised in headless Chrome); a colour-vision-deficiency
+simulation; label collisions in dense entity graphs (labels are drawn for the 14 largest nodes
+and can overlap; the tooltip and the hidden table carry every value).
+
+Screenshots (1366 px wide; overview full height): `docs/ui/` login, overview, incident-graph,
+alerts, report-preview, executive, study-empty in dark and light, plus approvals-light (manager).

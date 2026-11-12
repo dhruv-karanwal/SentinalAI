@@ -12,6 +12,7 @@
 //   {"theme": "light"}                 {"density": "comfortable"}
 //   {"size": [1366, 768]}              {"shot": "incidents-dark"}
 //   {"signin": "ui-manager"}           (signs out first if needed)
+//   {"signout": true}                 back to the sign-in page
 //   {"tabwalk": 12}                    presses Tab N times; prints each focused element and its outline
 
 import { spawn } from 'node:child_process';
@@ -125,7 +126,7 @@ async function signIn(user) {
   if (out) await sleep(200);
   if (!(await evaluate(setInput('si-user', user)))) throw new Error('sign-in form not found');
   await evaluate(setInput('si-pass', password));
-  await evaluate(`document.querySelector('.signin button[type=submit]').click()`);
+  await evaluate(`(document.querySelector('.login-form button[type=submit]') ?? document.querySelector('.signin button[type=submit]')).click()`);
   for (let i = 0; i < 50; i++) {
     if (await evaluate(`!!document.querySelector('.shell')`)) return;
     await sleep(200);
@@ -164,6 +165,9 @@ async function run() {
     if (step.goto !== undefined) {
       await evaluate(`window.location.hash = ${JSON.stringify(step.goto)}`);
       await sleep(step.wait ?? 600);
+    } else if (step.signout) {
+      await evaluate(`(() => { const b = [...document.querySelectorAll('button')].find(x => x.textContent.trim() === 'Sign out'); if (b) b.click(); })()`);
+      await sleep(step.wait ?? 400);
     } else if (step.signin) {
       await signIn(step.signin);
     } else if (step.key) {

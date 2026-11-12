@@ -13,6 +13,23 @@ export function isoUtc(ts: string | number | Date): string {
   return d.toISOString().replace(/\.\d{3}Z$/, 'Z');
 }
 
+/** Time in the chosen format: iso = 2022-01-21T00:02:27Z, short = 2022-01-21 00:02:27 (both UTC). */
+export function fmtTime(ts: string | number | Date, format: 'iso' | 'short' = 'iso'): string {
+  const iso = isoUtc(ts);
+  if (format === 'iso' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(iso)) return iso;
+  return iso.replace('T', ' ').replace('Z', '');
+}
+
+/** A bin width as a short unit: "10 s", "5 min", "1 h", "3 h", "1 d"; other values as a duration. */
+export function fmtStep(seconds: number): string {
+  const s = Math.round(seconds);
+  if (s > 0 && s % 86400 === 0) return `${s / 86400} d`;
+  if (s > 0 && s % 3600 === 0) return `${s / 3600} h`;
+  if (s > 0 && s % 60 === 0 && s < 3600) return `${s / 60} min`;
+  if (s > 0 && s < 60) return `${s} s`;
+  return fmtDuration(s);
+}
+
 export function epochSeconds(ts: string): number {
   return Date.parse(ts) / 1000;
 }

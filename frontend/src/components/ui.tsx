@@ -4,7 +4,8 @@ import { Component, useEffect, useRef, useState, type ErrorInfo, type ReactNode 
 
 import { ApiError } from '../api.ts';
 import { Icon, SeverityGlyph, type IconName } from '../icons.tsx';
-import { isoUtc, relTime } from '../lib/format.ts';
+import { useAppMaybe } from '../hooks.ts';
+import { fmtTime, relTime } from '../lib/format.ts';
 import { splitHighlight } from '../lib/highlight.ts';
 
 // ---- tags ------------------------------------------------------------------------------------
@@ -48,10 +49,11 @@ export function StatusTag({ value }: { value: string }) {
 
 /** Absolute UTC time; the relative time is in the hover text. */
 export function Time({ ts }: { ts: string | null | undefined }) {
+  const app = useAppMaybe();
   if (!ts) return <span className="faint">-</span>;
   return (
-    <time className="mono num" dateTime={ts} title={relTime(ts)}>
-      {isoUtc(ts)}
+    <time className="mono num" dateTime={ts} title={`${relTime(ts)} (UTC)`}>
+      {fmtTime(ts, app?.timeFormat ?? 'iso')}
     </time>
   );
 }
@@ -139,7 +141,7 @@ export function Button({
   ...rest
 }: { children?: ReactNode; kind?: 'primary' | 'danger' | 'ghost'; icon?: IconName } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
-    <button type="button" {...rest} className={`btn${kind ? ` ${kind}` : ''}`}>
+    <button type="button" {...rest} className={`btn${kind ? ` ${kind}` : ''}${rest.className ? ` ${rest.className}` : ''}`}>
       {icon && <Icon name={icon} />}
       {children}
     </button>

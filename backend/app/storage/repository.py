@@ -92,6 +92,29 @@ class Repository:
                 return
             offset += batch
 
+    def iter_alert_rows(self, scenario: str, batch: int = 5000) -> Iterator[dict[str, Any]]:
+        """Every stored alert row of a scenario (decoded), in (ts, alert_id) order, paged."""
+        offset = 0
+        while True:
+            rows = self.db.query("SELECT * FROM alerts WHERE scenario = ? ORDER BY ts, alert_id "
+                                 "LIMIT ? OFFSET ?", (scenario, batch, offset))
+            for r in rows:
+                yield self._alert_row(r)
+            if len(rows) < batch:
+                return
+            offset += batch
+
+    def get_alerts(self, alert_ids: Sequence[str], chunk: int = 500) -> list[dict[str, Any]]:
+        """Rows for ``alert_ids`` in the order given (unknown ids are skipped)."""
+        found: dict[str, dict[str, Any]] = {}
+        ids = list(dict.fromkeys(alert_ids))
+        for i in range(0, len(ids), chunk):
+            part = ids[i:i + chunk]
+            marks = ", ".join("?" for _ in part)
+            for r in self.db.query(f"SELECT * FROM alerts WHERE alert_id IN ({marks})", tuple(part)):
+                found[str(r["alert_id"])] = self._alert_row(r)
+        return [found[i] for i in ids if i in found]
+
     def count_alerts(self, scenario: str | None = None) -> dict[str, int]:
         clause, params = (" WHERE scenario = ?", (scenario,)) if scenario else ("", ())
         rows = self.db.query(f"SELECT detector, COUNT(*) AS n FROM alerts{clause} GROUP BY detector",
@@ -272,6 +295,19 @@ class Repository:
     def get_user(self, username: str) -> dict[str, Any] | None:
         rows = self.db.query("SELECT * FROM users WHERE username = ?", (username,))
         return rows[0] if rows else None
+
+    def list_users(self) -> list[dict[str, Any]]:
+        """Accounts without their password hashes."""
+        rows = self.db.query("SELECT username, role, created_utc, disabled_utc FROM users ORDER BY username")
+        return [{"username": r["username"], "role": r["role"], "created_utc": str(r["created_utc"]),
+                 "disabled_utc": None if r["disabled_utc"] is None else str(r["disabled_utc"])} for r in rows]
+
+    def set_user_disabled(self, username: str, disabled: bool) -> None:
+        self.db.execute("UPDATE users SET disabled_utc = ? WHERE username = ?",
+                        (utc_now() if disabled else None, username))
+
+    def set_password(self, username: str, password_hash: str) -> None:
+        self.db.execute("UPDATE users SET password_hash = ? WHERE username = ?", (password_hash, username))
 
     def remember(self, session_id: str, key: str, value: Any) -> int:
         return self.db.insert("INSERT INTO memory (session_id, key, value, created_utc) "
