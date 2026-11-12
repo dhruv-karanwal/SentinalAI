@@ -231,6 +231,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     add_wave_c_parsers(sub, DEFAULT_STUDY_CONFIG, _positive_int)
 
+    from app.cli_final import add_parsers as add_final_parsers
+
+    add_final_parsers(sub, DEFAULT_STUDY_CONFIG, _positive_int)
+
     user = sub.add_parser("create-user", help="create or replace a platform user")
     user.add_argument("--username", required=True)
     user.add_argument("--role", required=True, choices=[r.value for r in Role])
@@ -757,6 +761,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command in WAVE_C_COMMANDS:
         return wave_c_dispatch(args)
+    from app.cli_final import COMMANDS as FINAL_COMMANDS
+    from app.cli_final import dispatch as final_dispatch
+
+    if args.command in FINAL_COMMANDS:
+        return final_dispatch(args)
     if args.command == "create-user":
         return _create_user(args)
     if args.command == "serve":

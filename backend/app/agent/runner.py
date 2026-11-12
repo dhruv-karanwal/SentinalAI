@@ -41,7 +41,7 @@ from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.agent.agent import CaseRun, conservative_tokens, investigate
 from app.agent.client import ChatClient
@@ -65,6 +65,9 @@ from app.study.cases import (
 )
 from app.study.config import TRUNCATION_CHOICES, StudyConfig
 from app.study.variants import AlertPool, experiment_variants
+
+if TYPE_CHECKING:
+    from app.study.freeze import HeldOutPermit
 
 
 @dataclass(frozen=True)
@@ -115,8 +118,13 @@ def select_cases(cases: Sequence[Case], limit: int | None, *, mode: str = "inter
 def prepare_run(processed_dir: str | Path, labels_path: str | Path, scenario: str, variant: str,
                 config: StudyConfig, *, limit: int | None,
                 truncation: str | None = None, selection: str = "interleaved",
-                case_ids: Sequence[str] | None = None) -> PreparedRun:
-    config.split.require_dev(scenario)  # before any file is read
+                case_ids: Sequence[str] | None = None,
+                permit: HeldOutPermit | None = None) -> PreparedRun:
+    # before any file is read: dev only, unless a protocol-freeze permit (app.study.freeze) is given
+    if permit is None:
+        config.split.require_dev(scenario)
+    else:
+        permit.check(config, scenario)
     rule = truncation or config.cases.truncation
     if rule not in TRUNCATION_CHOICES:
         raise ValueError(f"truncation must be one of {', '.join(TRUNCATION_CHOICES)}")

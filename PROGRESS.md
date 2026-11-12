@@ -71,3 +71,14 @@ ollama list
 ../.venv/Scripts/python.exe -m pytest -q
 ../.venv/Scripts/python.exe -m mypy
 ```
+
+## Final runs agent (branch `phase3/final-runs`, worktree `D:\Projects\ERA-final`)
+**Last update:** 2026-11-12 IST.
+- Built (tests first): `app/study/stats.py` (paired bootstrap + Holm), `app/study/freeze.py`
+  (`protocol-freeze`, `--allow-held-out` permit, access log), `app/study/final_runs.py` (plan of
+  `experiments/config/final_study.json`, per-scenario checkpoints, per-case rows),
+  `app/study/paper_assets.py` (`export-paper-assets` -> `results/`), CLI `app/cli_final.py`
+  (`protocol-freeze`, `final-plan`, `run-final`, `study-stats`, `export-paper-assets`).
+  Matched runs now write `per_case` scores and `study_part` (pilot / held-out / adhoc).
+- Model: segmented download `data/processed/downloads/final_fetch.py` (log `final-fetch.log`).
+- Decisions: `docs/session-notes.md`, "Final runs agent, 2026-11-12".

@@ -1,0 +1,31 @@
+{
+  "note": "Comparison family of the final study, declared before the protocol freeze (hashed into it) and before any held-out run. Paired by case (same scenario, truncation, repeat and case id on both sides), percentile bootstrap of the mean difference (b - a), resampled within scenario, Holm-Bonferroni over the whole family. Metrics are per case: coverage_event_reachable (1/0 on reachable attack cases, the headline), citation_precision_event, unsupported_claim_rate (claims of the case), verdict_correct (1/0, all cases).",
+  "seed": 20261112,
+  "resamples": 10000,
+  "confidence": 0.95,
+  "stratify_by": "scenario",
+  "primary_truncation": "spread",
+  "primary_repeat": 1,
+  "family": [
+    {"name": "H1 arm: graph vs single (fused, after verifier), coverage", "metric": "coverage_event_reachable",
+     "a": {"variant": "fused", "arm": "single+verifier"}, "b": {"variant": "fused", "arm": "graph+verifier"}},
+    {"name": "H2 verifier: single before vs after, unsupported claims", "metric": "unsupported_claim_rate",
+     "a": {"variant": "fused", "arm": "single"}, "b": {"variant": "fused", "arm": "single+verifier"}},
+    {"name": "H3 verifier: graph before vs after, unsupported claims", "metric": "unsupported_claim_rate",
+     "a": {"variant": "fused", "arm": "graph"}, "b": {"variant": "fused", "arm": "graph+verifier"}},
+    {"name": "H4 source: wazuh vs fused (graph+verifier), coverage", "metric": "coverage_event_reachable",
+     "a": {"variant": "wazuh", "arm": "graph+verifier"}, "b": {"variant": "fused", "arm": "graph+verifier"}},
+    {"name": "H5 source: aminer vs fused (graph+verifier), coverage", "metric": "coverage_event_reachable",
+     "a": {"variant": "aminer", "arm": "graph+verifier"}, "b": {"variant": "fused", "arm": "graph+verifier"}},
+    {"name": "H6 source: suricata vs fused (graph+verifier), coverage", "metric": "coverage_event_reachable",
+     "a": {"variant": "suricata", "arm": "graph+verifier"}, "b": {"variant": "fused", "arm": "graph+verifier"}},
+    {"name": "H7 source: fused vs oracle (graph+verifier), coverage", "metric": "coverage_event_reachable",
+     "a": {"variant": "fused", "arm": "graph+verifier"}, "b": {"variant": "oracle", "arm": "graph+verifier"}},
+    {"name": "H8 noise control: noise-wazuh vs wazuh (graph+verifier), coverage", "metric": "coverage_event_reachable",
+     "a": {"variant": "noise-wazuh", "arm": "graph+verifier"}, "b": {"variant": "wazuh", "arm": "graph+verifier"}},
+    {"name": "H9 arm: graph vs single (fused, after verifier), citation precision", "metric": "citation_precision_event",
+     "a": {"variant": "fused", "arm": "single+verifier"}, "b": {"variant": "fused", "arm": "graph+verifier"}},
+    {"name": "H10 arm: graph vs single (fused), verdict accuracy", "metric": "verdict_correct",
+     "a": {"variant": "fused", "arm": "single+verifier"}, "b": {"variant": "fused", "arm": "graph+verifier"}}
+  ]
+}
