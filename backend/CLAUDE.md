@@ -19,7 +19,9 @@
   (`analytics.alert_runs`: consecutive identical alerts folded, counts add up). `/incidents/summary`
   and Executive `top_risks` carry `detail.main_host` / `main_ip` (`analytics.main_entities`, most
   alerts). The report PDF places graph labels with `graph_layout.place_labels` (no overlap). Study
-  results carry `study_part`. Tests: `tests/test_explain.py` (FakeClient only).
+  results carry `study_part`. `GET /copilot/status` (`copilot.ask`): online / offline / busy from
+  `services.extras["model_probe"]` (GET `{base_url}/models`, 2 s timeout, never a chat request) and
+  `MODEL_LOCK`. Tests: `tests/test_explain.py` (FakeClient only).
 - Console support: `GET /scenarios` (`Repository.list_scenarios`, permission `read`); the copilot answer carries `claims`, `dropped_citations`, `dropped_claims` (real alert ids, never labels) next to the counts.
 - Secrets only from the environment: `SENTINEL_JWT_SECRET` (>= 32 chars), `SENTINEL_NEW_USER_PASSWORD` for `create-user`, DB/MinIO credentials. Never as CLI arguments, never in files.
 - Consumer writes in transactions of 1000 (`batch_size`); SQLite runs WAL. A per-row transaction makes a dev replay take >10 minutes.

@@ -486,3 +486,94 @@ pointer" (hidden graph labels on focus, titles on truncated cells); network grap
 view is the accessible source of truth". Rejected again: the Trust & Authority landing pattern,
 Fira fonts, the blue / green palette, 200-250 ms hovers and scroll reveals. The chat-panel query
 returned no database match; its design follows the existing Dialog and toast rules instead.
+
+## 13. Motion and mission-control layer (wave F, 2026-11-13)
+
+Brief (user, 2026-11-13): "make the console feel alive and premium, and turn the chat into a real
+floating button"; direction: security-operations mission control (dark glass panels, subtle grid /
+scanline texture, glowing severity accents, monospace data type), data still readable. **This brief
+replaces the earlier motion rules** of sections 3, 9, 11.3 and 12.2 ("nothing above 150 ms", "no
+animated counters", "skeletons do not shimmer", "no transitions on data") for the pieces listed here.
+Everything else in sections 3-12 stands: tokens only, never colour alone, tables windowed, text nodes
+only, honest numbers.
+
+### 13.1 Visual layer
+
+- `src/motion.css` holds the whole layer (tokens only; a test fails on a hex value in it).
+- The dark base moved to a blue-black: `--bg #0a0d12`, `--surface #10151c`, `--raised #171e27`,
+  `--selected #1c2a3d`, `--border #242c37`, `--grid #1f2731` (light unchanged). The contrast test
+  (`charts.test.ts`, WCAG from `tokens.css`) still passes for every text token on the new surfaces.
+- New non-text tokens (decorative, or a state mark always next to a word, so no 4.5:1 need):
+  `--online` (model reachable; `#3fca7a` dark / `#1a7f45` light, a mark >= 3:1 on the surfaces),
+  `--glass`, `--glass-edge`, `--grid-line`, `--scanline`, `--glow-accent`, `--glow-high`,
+  `--glow-medium`, `--glow-low`, `--glow-online`, `--sheen`, `--shimmer`, `--lift-shadow`.
+- Texture: one fixed body background (32 px blueprint grid + 3 px scanlines) behind the app.
+- Glass: translucent panels on Overview / About blocks; `backdrop-filter` only on floating chrome
+  (top bar, tour, toasts, chat panel), never over a table.
+- Data type: `.num`, status values and KPIs in the mono stack with tabular numerals. Section kickers
+  ("01 · THE PROBLEM") in mono caps with the accent.
+
+### 13.2 Motion system
+
+Tokens: `--ease-out` cubic-bezier(0.22, 1, 0.36, 1), `--ease-in`, `--ease-spring` (slight overshoot,
+floating layers only, never data), `--dur-fast` 140 ms (hover, press), `--dur-mid` 240 ms (page,
+panel, nav, toast), `--dur-slow` 420 ms (scroll reveal), `--dur-draw` 900 ms (chart draw-in,
+counters). Only `transform` and `opacity` are animated (plus a `filter` halo on the High glyph).
+
+| Piece | Where | How |
+|---|---|---|
+| Page transition | every screen | `.screen-enter` wrapper keyed by route: fade + 6 px rise |
+| Nav indicator | rail | one 2 px bar translated to the current item |
+| Skeleton shimmer | `.skeleton-bar` | a translated sheen pseudo-element |
+| Counters | Overview status row, About hero | `<Count>`: rAF count-up once seen; exact value in `aria-label` |
+| Chart draw-in | `.draw-charts` pages (Overview, Executive) | `ChartFrame` sets `data-drawn` on first view; bars grow (`scaleY`), marks fade |
+| High pulse | `.sev[data-sev=high]` glyph, look-first cards | soft halo / edge pulse; **off inside tables** |
+| Micro | buttons, chips | press scale 0.97; primary hover glow |
+| Toasts | bottom right | slide in from the right |
+| Reveal | About sections, look-first cards | `<Reveal>`: IntersectionObserver once, staggered 70 ms |
+
+Not animated, on purpose: table rows (hover only), the incident strip canvas, the entity graph,
+anything in Incidents / Alerts beyond hover. `prefers-reduced-motion: reduce` turns every animation
+and transition off (last block of `motion.css`), shows reveals and counters at their final state and
+hides the decorative packets. Primitives: `components/motion.tsx` (`useSeen`, `Reveal`, `Count`,
+`DrawOnView`, `tiltHandlers`); pure maths in `lib/motion.ts` (tested). No animation library.
+
+### 13.3 About as a scroll story
+
+Hero: kicker, title, the six stages Ingest, Normalize, Detect, Investigate, Report, Review as SVG
+nodes with alert packets (detector-coloured dots) running each segment and the stage rings lighting
+in a wave; three counters from `/overview` (alerts stored, incidents, detectors with alerts). Then
+numbered sections with a sticky stepper (current section from the scroll position, `activeSection`):
+the problem; the five-stage detail; the study with an interactive diagram (source toggle Wazuh /
+Suricata / AMiner / Fused / Oracle / Noise / Shuffled feeding the fixed agent; Fused uses the real
+detector shares of the scenario, the rest is marked SCHEMATIC; four arms as lanes, the verified lanes
+drop packets at a dashed verifier line); the verifier demo (the real quote rule, exact case-sensitive
+substring of at least 8 characters, on a SAMPLE line with a TEST-NET address, plus an input to try a
+quote; real run text is not used because the transcripts sit next to per-case scores); results
+status (unchanged, never a number); screen cards with pointer tilt and glow; limits; glossary.
+
+### 13.4 Floating help chat
+
+A 52 px round button fixed bottom right on every screen (z-index 90, above the tour at 55 and the
+toasts), accent fill, a slow pulse ring, a status dot (green `--online`: model reachable; amber:
+busy; grey: glossary only) and an unread count. The dot comes from `GET /copilot/status`, a probe
+that lists the endpoint's models and never generates (no GPU load), polled on mount, on open and
+every 60 s while the tab is visible. The panel (400 x 560; "larger" 640 x 720) springs out of the
+button: header with status, clear, resize, minimise, close; a scrolling log with bubbles, a typing
+indicator and a copy button per answer; three suggested questions per screen; the question box. Esc
+closes, Tab is trapped, focus returns to the button. Below 640 px wide it is a bottom sheet. Open
+state, size and the last 40 messages live in `sessionStorage` (try/catch; works without it). Logic in
+`lib/chat.ts` (tested: reducer, focus trap, error notes for 429 / 503 / 0, chips, storage). Scrolling
+pages keep 88 px under their last block so the button never hides it; split-pane screens (Incidents,
+Alerts) accept that it overlaps the bottom-right corner of the detail table.
+
+### 13.5 Skill run (2026-11-13)
+
+`ui-ux-pro-max --design-system` (motion 6, density 8) returned Minimalism & Swiss with a navy /
+green palette, Inter and a GSAP stagger. Kept: the reduced-motion rule (final state, no
+scroll-jacking), "animate 1-2 key elements per view" (hero pipeline, counters; tables stay still),
+a focus ring on every modal control, "no back-out easing on dense data" (spring only on floating
+layers). Rejected: Inter from Google Fonts (no web fonts), GSAP (CSS + rAF cover it, no dependency),
+the navy / green palette (the measured tokens stay; only the dark base moved). The `frontend-design`
+skill named in the brief is not installed in this session; the direction was set by hand from the
+brief.

@@ -126,6 +126,13 @@ export function App() {
   const [modelOffline, setModelOffline] = useState(false);
   const [demo, setDemoState] = useState(() => storageGet('sentinel.demo') !== '0');
   const [tour, setTour] = useState<number | null>(null);
+  const railRef = useRef<HTMLElement | null>(null);
+  // the rail indicator slides to the current item (transform only; DESIGN.md 13.2)
+  useEffect(() => {
+    const nav = railRef.current;
+    const cur = nav?.querySelector<HTMLElement>('a[aria-current="page"]');
+    nav?.style.setProperty('--ind-y', cur ? `${cur.offsetTop}px` : '-100px');
+  });
   const setDemo = useCallback((on: boolean) => {
     storageSet('sentinel.demo', on ? '1' : '0');
     setDemoState(on);
@@ -427,12 +434,17 @@ export function App() {
             Sign out
           </Button>
         </header>
-        <nav className="rail" aria-label="Screens">
+        <nav className="rail" aria-label="Screens" ref={railRef}>
+          <span className="rail-ind" aria-hidden="true" />
           <ul>{items.filter((n) => !n.hidden).map(link)}</ul>
           <ul>{BOTTOM.map(link)}</ul>
         </nav>
         <main className="main" id="main" tabIndex={-1}>
-          <ScreenBoundary resetKey={`${route.path}|${scenario}`}>{screen}</ScreenBoundary>
+          <ScreenBoundary resetKey={`${route.path}|${scenario}`}>
+            <div className="screen-enter" key={route.path}>
+              {screen}
+            </div>
+          </ScreenBoundary>
         </main>
         <footer className="footer">
           <span>SentinelAI console {VERSION}</span>

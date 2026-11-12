@@ -3,9 +3,14 @@
 Read this first every session; update it in every commit that changes project state.
 Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
 
-**Last update:** 2026-11-13, branch `phase3/wave-e-explainable-ui`.
+**Last update:** 2026-11-13, branch `phase3/wave-f-motion-ui`.
 
 ## Done
+- Motion console (`phase3/wave-f-motion-ui`, 2026-11-13, user's go; pilot untouched): mission-control
+  layer + motion system (DESIGN.md 13), About as a scroll story, Overview counters / chart draw-in /
+  glowing look-first cards, floating help chat with `GET /copilot/status` (probe, no generation).
+  Backend 520 passed, 4 skipped, mypy clean; frontend 54 tests, tsc clean, build ok. One real chat call
+  after the pilot finished: 10.0 s incl. cold model load, answer grounded in the glossary.
 - M1-M5, Wave A (platform), B1-B4 (detection layer), Wave C code (RAG, LangGraph graph,
   verifier, matched runner): merged on `main` (PR #6). 422 passed, 4 skipped, mypy clean.
 

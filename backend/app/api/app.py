@@ -78,6 +78,19 @@ def services_from_env() -> Services:
         settings = load_agent_settings()
         services.extras["copilot_client"] = OpenAICompatibleClient(settings.model,
                                                                    api_key=api_key(settings.model))
+        base = (settings.model.base_url or "").rstrip("/")
+
+        def _probe() -> bool:
+            # GET {base}/models lists models without loading or running one (Ollama, llama.cpp, vLLM).
+            import urllib.request
+
+            try:
+                with urllib.request.urlopen(base + "/models", timeout=2) as r:
+                    return bool(200 <= r.status < 300)
+            except OSError:
+                return False
+
+        services.extras["model_probe"] = _probe
     return services
 
 
@@ -440,6 +453,20 @@ def create_app(services: Services, *, metrics: Any | None = None) -> FastAPI:
                 "model": client.model_id, "sources": ex.sources(glossary, body.screen, body.context, incident),
                 "input_tokens": result.input_tokens, "output_tokens": result.output_tokens,
                 "note": "help answer from the glossary and the screen only; not a study result"}
+
+    @app.get("/copilot/status")
+    def copilot_status(_: Annotated[Principal, Depends(need("copilot.ask"))]) -> dict[str, Any]:
+        """Is the help chat's model reachable? A cheap probe, never a chat request (no GPU load)."""
+        from app.api import explain as ex
+
+        client = services.extras.get("copilot_client")
+        if client is None:
+            return {"state": "offline", "model": None, "reason": "no model endpoint configured"}
+        if ex.MODEL_LOCK.locked():
+            return {"state": "busy", "model": client.model_id}
+        probe = services.extras.get("model_probe")
+        ok = bool(probe()) if probe is not None else True
+        return {"state": "online" if ok else "offline", "model": client.model_id}
 
     @app.post("/copilot/ask")
     def copilot_ask(body: CopilotBody,

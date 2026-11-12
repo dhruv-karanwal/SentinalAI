@@ -13,7 +13,8 @@ npm test               # node --test over src/lib/*.test.ts (Node >= 22.18 strip
 npm run build          # typecheck + vite build into dist/ (git-ignored)
 # screenshots for the per-screen loop (headless Chrome or Edge already on the machine):
 node scripts/shots.mjs steps.json ../data/processed/ui-shots   # needs SENTINEL_UI_DEV_PASSWORD
-# steps: goto, wait, key, eval, report, theme, density, size, shot, signin, signout, tabwalk
+# steps: goto, wait, key, eval, report, theme, density, size, motion (reduced-motion), shot, signin,
+#        signout, tabwalk
 ```
 
 The API must run for the console to show anything: `python -m app.main serve` from `backend/`
@@ -33,15 +34,18 @@ src/api.ts              typed client, in-memory token, PERMISSIONS mirror of bac
 src/hooks.ts            AppContext, hash routing (#/screen?id=..&ev=..), useLoad, nav events
 src/lib/                pure logic with tests: format, virtual (windowing), bins (strip), highlight,
                         scale (scales, ticks, bins), graph (force layout + graph.fixture.json + placeLabels),
-                        contrast, study, explain (glossary search, whatHappened, incident labels, folded runs)
+                        contrast, study, explain (glossary search, whatHappened, incident labels, folded runs),
+                        motion (easing, counters, stepper), chat (reducer, focus trap, error notes, storage)
 src/content/            glossary.ts (the ONE glossary: Term tooltips, About, chat fallback) and about.ts
                         (pipeline stages, study question, screen guide, limits, tour stops, suggested questions)
 src/charts/             SVG charts: ChartFrame (question, legend, tooltip, hidden table), TimeBars, Bars
                         (HBars, StackedHBars, DotPairs, MiniBar), Attack (HeatStrip, ChainStrip, Lanes), EntityGraph
 src/components/         DataTable, SplitPane, TimeStrip (canvas), EvidencePane, Findings, ui, AlertQueryTable,
                         AlertRunsTable (folded repeats), GlobalSearch, Notifications, Term (+ Explain), Tour, HelpChat
+                        (floating button + panel), motion (Reveal, Count, useSeen, DrawOnView, tiltHandlers)
 src/v2.css              v2 styles (charts, sign-in, shell, facets, print); tokens only
 src/explain.css         explainable-console styles (DESIGN.md section 12); tokens only
+src/motion.css          wave F mission-control layer, motion system, floating chat (DESIGN.md 13); tokens only
 src/screens/            About, Overview, Incidents, Alerts, Approvals, Reports, Ask, Executive, Study, Audit, Users,
                         Entity, Settings (+ SecurityNotes), ErrorPage, SignIn
 src/App.tsx             shell (top bar, rail), global shortcuts, toasts, ScreenBoundary
@@ -78,7 +82,10 @@ scripts/shots.mjs       DevTools-protocol screenshot runner (no dependency)
   shows platform outputs only: no labels. The Study page is the one exception for study numbers: it
   renders run-level aggregates from `scores.json` (never per-case or per-alert labels), with the
   "dev scenarios, pilot numbers, not paper results" banner.
-- **Motion** at most 100 ms (`--dur`), zero with `prefers-reduced-motion`.
+- **Motion** (DESIGN.md 13): only the tokens `--ease-*` / `--dur-fast|mid|slow|draw`, only `transform` and
+  `opacity`, nothing on table rows beyond hover, no animation in Incidents / Alerts detail; every animation
+  is off under `prefers-reduced-motion` (last block of `motion.css`). Use `Reveal`, `Count`, `useSeen` from
+  `components/motion.tsx`; chart draw-in only on pages with the `draw-charts` class. No animation library.
 - The session token is kept in memory (a reload signs out). Theme, density, time format, split
   position, the chosen and default data source, the overview log toggle and saved alert filters are
   the only things in `localStorage`.
@@ -92,9 +99,11 @@ scripts/shots.mjs       DevTools-protocol screenshot runner (no dependency)
   pair. The "What happened" sentence and incident labels are deterministic (`lib/explain.ts`), never
   model output. A screen that the help chat should understand publishes a plain-text summary with
   `useScreenContext`; it holds only numbers the screen already shows.
-- **Help chat and the model:** only `POST /copilot/ask` with `mode: "explain"` (one request, <= 300
+- **Help chat and the model:** the status dot only calls `GET /copilot/status` (lists models, never
+  generates); answers only `POST /copilot/ask` with `mode: "explain"` (one request, <= 300
   output tokens, 429 when busy). Never test it against the real model while a pilot runs; screenshots
   of the online state use a fetch mock labelled MOCK FOR SCREENSHOT.
+- The chat's open state, size and last 40 messages are in `sessionStorage` (`sentinel.chat`).
 - Demo mode (`sentinel.demo`, on unless set to 0), the collapsed "More detail" (`sentinel.overview.more`)
   are also in `localStorage`.
 
@@ -118,3 +127,8 @@ scripts/shots.mjs       DevTools-protocol screenshot runner (no dependency)
   event without a focused window); test it with a real Tab key press (`shots.mjs` `key` step).
 - The in-app Browser pane scales a 1366 px viewport down to its own width, so its screenshots
   are too small to judge type; use `scripts/shots.mjs` for the visual loop.
+- Another session may own the dev pair on 5173 / 8000. For a second pair, run the API with
+  `serve --port 8001` and Vite with `SENTINEL_API_URL=http://127.0.0.1:8001` on 5174, and point
+  `shots.mjs` at it with `SENTINEL_UI_URL`.
+- `shots.mjs` keeps `sessionStorage` between steps: clear `sentinel.chat` before a chat step, or a
+  click on the button may close a panel restored by the previous step.

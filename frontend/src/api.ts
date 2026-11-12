@@ -579,6 +579,9 @@ export const api = {
 
   explain: (body: { question: string; screen?: string; context?: string; incident_id?: string | null; glossary: Array<{ term: string; definition: string; why: string }> }) =>
     request<ExplainAnswer>('POST', '/copilot/ask', { mode: 'explain', ...body, incident_id: body.incident_id || undefined }),
+  /** cheap model reachability probe (lists models, never generates) */
+  copilotStatus: (signal?: AbortSignal) =>
+    request<{ state: 'online' | 'offline' | 'busy'; model: string | null; reason?: string }>('GET', '/copilot/status', undefined, signal),
   alertRuns: (scenario: string, f: AlertFilter, limit: number, offset: number, signal?: AbortSignal) =>
     request<{ runs: AlertRun[]; total_runs: number; total_alerts: number; offset: number }>('GET', `/alerts/runs${qs({ scenario, ...f, limit, offset })}`, undefined, signal),
   ask: (incident_id: string, question: string) => request<CopilotAnswer>('POST', '/copilot/ask', { incident_id, question }),

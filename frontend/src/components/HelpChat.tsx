@@ -1,58 +1,95 @@
-// Help chat: a launcher at the bottom right of every screen and a small panel above it.
-// It answers "what is this term / chart / finding?" from the glossary and the current screen:
-// - with the local model: POST /copilot/ask in explain mode (same route and model as the copilot,
-//   one request at a time, at most ~300 output tokens; the API refuses a second concurrent one);
-// - without it (no endpoint, Ollama unreachable, role without copilot.ask, model busy): a
-//   deterministic glossary search, labelled "Local model offline: showing glossary answers only".
-// It never guesses beyond the glossary and the screen; answers are text nodes only. Esc closes
-// and returns focus to the launcher. Nothing leaves the machine: the API and model are local.
+// Floating help chat (DESIGN.md 13.4): a round button fixed bottom right on every screen (above the
+// tour and toasts) with a status dot (green: local model reachable; amber: busy; grey: glossary
+// only), and a floating panel (bottom sheet on phone widths).
+// - Model status: GET /copilot/status, a probe that lists models and never generates, so the dot is
+//   honest without loading the GPU. Polled on mount, on open and every 60 s while the tab is visible.
+// - Answers: POST /copilot/ask in explain mode (one request at a time, <= 300 output tokens); on
+//   503 / unreachable / 429 / no permission, a deterministic glossary answer with the reason.
+// - Keyboard: Esc closes, Tab is trapped inside the panel, focus returns to the button on close.
+// - Open state and history are kept per browser session (sessionStorage, try/catch).
+// Answers are text nodes only. Nothing leaves the machine: the API and model are local.
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 
 import { api, ApiError, can } from '../api.ts';
-import { SUGGESTED } from '../content/about.ts';
 import { getScreenContext, useApp } from '../hooks.ts';
 import { Icon } from '../icons.tsx';
+import { chatReducer, errorNote, loadChat, nextFocus, saveChat, sessionStore, suggestionsFor, type ChatMsg } from '../lib/chat.ts';
 import { glossaryAnswer, searchGlossary } from '../lib/explain.ts';
+import { prefersReducedMotion } from '../lib/motion.ts';
 
-interface Msg {
-  id: number;
-  who: 'you' | 'help';
-  text: string;
-  /** who answered: the model id, or 'glossary' */
-  by?: string;
-  terms?: string[];
-  note?: string;
-}
+type ModelState = 'unknown' | 'online' | 'offline' | 'busy' | 'not-allowed';
 
-type ModelState = 'unknown' | 'online' | 'offline' | 'not-allowed';
-
-/** after an offline answer, the model is asked again only after this long */
-const RETRY_MS = 60_000;
+const POLL_MS = 60_000;
+const FOCUSABLE = 'button:not([disabled]), textarea:not([disabled]), input:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
 
 export function HelpChat({ path, screenName, incidentId }: { path: string; screenName: string; incidentId: string | null }) {
   const { session } = useApp();
   const allowed = can(session.role, 'copilot.ask');
-  const [open, setOpen] = useState(false);
-  const [msgs, setMsgs] = useState<Msg[]>([]);
+  const [state, dispatch] = useReducer(chatReducer, undefined, () => loadChat(sessionStore()));
+  const [closing, setClosing] = useState(false);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [model, setModel] = useState<ModelState>(allowed ? 'unknown' : 'not-allowed');
-  const offlineAt = useRef(0);
-  const launcher = useRef<HTMLButtonElement | null>(null);
+  const [modelId, setModelId] = useState<string | null>(null);
+  const [unread, setUnread] = useState(0);
+  const [copied, setCopied] = useState<number | null>(null);
+  const fab = useRef<HTMLButtonElement | null>(null);
+  const panel = useRef<HTMLDivElement | null>(null);
   const input = useRef<HTMLTextAreaElement | null>(null);
   const log = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => {
-    if (open) input.current?.focus();
-  }, [open]);
-  useEffect(() => {
-    log.current?.scrollTo({ top: log.current.scrollHeight });
-  }, [msgs]);
+  useEffect(() => saveChat(sessionStore(), state), [state]);
 
+  const probe = useCallback(async () => {
+    if (!allowed) return;
+    try {
+      const r = await api.copilotStatus();
+      setModel(r.state);
+      setModelId(r.model);
+    } catch {
+      setModel('offline');
+    }
+  }, [allowed]);
+
+  useEffect(() => {
+    void probe();
+    const t = window.setInterval(() => document.visibilityState === 'visible' && void probe(), POLL_MS);
+    return () => window.clearInterval(t);
+  }, [probe]);
+
+  useEffect(() => {
+    if (state.open && !state.minimised) {
+      input.current?.focus();
+      setUnread(0);
+    }
+  }, [state.open, state.minimised]);
+  useEffect(() => {
+    if (state.returnFocus) {
+      fab.current?.focus();
+      dispatch({ type: 'focused' });
+    }
+  }, [state.returnFocus]);
+  useEffect(() => {
+    log.current?.scrollTo({ top: log.current.scrollHeight, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+  }, [state.msgs, busy]);
+
+  const open = () => {
+    dispatch({ type: 'open' });
+    void probe();
+  };
   const close = () => {
-    setOpen(false);
-    launcher.current?.focus();
+    if (prefersReducedMotion()) return dispatch({ type: 'close' });
+    setClosing(true);
+    window.setTimeout(() => {
+      setClosing(false);
+      dispatch({ type: 'close' });
+    }, 140);
+  };
+
+  const push = (msg: ChatMsg) => {
+    dispatch({ type: 'push', msg });
+    if (msg.who === 'help' && (!state.open || state.minimised)) setUnread((n) => n + 1);
   };
 
   const ask = async (raw: string) => {
@@ -60,14 +97,13 @@ export function HelpChat({ path, screenName, incidentId }: { path: string; scree
     if (!question || busy) return;
     setText('');
     const id = Date.now();
-    setMsgs((m) => [...m, { id, who: 'you', text: question }]);
+    push({ id, who: 'you', text: question });
     const terms = searchGlossary(question, undefined, 4);
     const fallback = (note: string) => {
       const g = glossaryAnswer(question);
-      setMsgs((m) => [...m, { id: id + 1, who: 'help', text: g.text, by: 'glossary', terms: g.terms.map((t) => t.term), note }]);
+      push({ id: id + 1, who: 'help', text: g.text, by: 'glossary', terms: g.terms.map((t) => t.term), note });
     };
     if (!allowed) return fallback('Your role cannot ask the local model; showing glossary answers only.');
-    if (model === 'offline' && Date.now() - offlineAt.current < RETRY_MS) return fallback('Local model offline: showing glossary answers only.');
     setBusy(true);
     try {
       const r = await api.explain({
@@ -78,127 +114,187 @@ export function HelpChat({ path, screenName, incidentId }: { path: string; scree
         glossary: terms.map((t) => ({ term: t.term, definition: t.definition, why: t.why })),
       });
       setModel('online');
-      setMsgs((m) => [...m, { id: id + 1, who: 'help', text: r.answer.join(' ').trim() || '(empty answer)', by: r.model, terms: terms.map((t) => t.term) }]);
+      setModelId(r.model);
+      push({ id: id + 1, who: 'help', text: r.answer.join(' ').trim() || '(empty answer)', by: r.model, terms: terms.map((t) => t.term) });
     } catch (err) {
       const status = err instanceof ApiError ? err.status : 0;
-      if (status === 429) fallback('The local model is busy with another request; showing the glossary answer instead.');
-      else if (status === 503 || status === 0 || status === 502 || status === 504) {
-        setModel('offline');
-        offlineAt.current = Date.now();
-        fallback('Local model offline: showing glossary answers only.');
-      } else fallback(`The help request failed (${status || 'no answer'}${err instanceof Error ? `: ${err.message}` : ''}); showing the glossary answer.`);
+      const n = errorNote(status, err instanceof Error ? err.message : '');
+      if (status === 429) setModel('busy');
+      else if (n.offline) setModel('offline');
+      fallback(n.note);
     } finally {
       setBusy(false);
     }
   };
 
-  const suggestions = SUGGESTED[path] ?? SUGGESTED['/about']!;
+  const copy = async (m: ChatMsg) => {
+    try {
+      await navigator.clipboard.writeText(m.text);
+      setCopied(m.id);
+      window.setTimeout(() => setCopied((c) => (c === m.id ? null : c)), 1500);
+    } catch {
+      // clipboard blocked: nothing to do, the text stays selectable
+    }
+  };
+
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      e.stopPropagation();
+      e.preventDefault();
+      close();
+      return;
+    }
+    if (e.key !== 'Tab' || !panel.current) return;
+    const items = Array.from(panel.current.querySelectorAll<HTMLElement>(FOCUSABLE));
+    const idx = nextFocus(items.length, items.indexOf(document.activeElement as HTMLElement), e.shiftKey);
+    if (idx !== null) {
+      e.preventDefault();
+      items[idx]?.focus();
+    }
+  };
+
+  const suggestions = suggestionsFor(path);
+  const dot = model === 'online' ? 'online' : model === 'busy' ? 'busy' : 'offline';
   const status =
-    model === 'online' ? 'Local model online' : model === 'offline' ? 'Local model offline: showing glossary answers only' : model === 'not-allowed' ? 'Glossary answers only (your role cannot ask the model)' : 'Local model: not asked yet';
+    model === 'online'
+      ? `Local model online${modelId ? `: ${modelId}` : ''}`
+      : model === 'busy'
+        ? 'Local model busy: answers may come from the glossary'
+        : model === 'not-allowed'
+          ? 'Glossary only (your role cannot ask the model)'
+          : model === 'unknown'
+            ? 'Checking the local model...'
+            : 'Local model offline: glossary answers only';
 
   return (
     <>
       <button
-        ref={launcher}
+        ref={fab}
         type="button"
-        className="chat-launcher"
-        aria-expanded={open}
+        className="fab"
+        aria-expanded={state.open}
         aria-controls="help-chat"
-        onClick={() => (open ? close() : setOpen(true))}
-        title="Ask what a term, chart or finding means"
+        aria-label={`${state.open ? 'Close' : 'Open'} the help chat. ${status}${unread ? `. ${unread} new answer${unread === 1 ? '' : 's'}` : ''}`}
+        title={`Ask what a term, chart or finding means (${status})`}
+        onClick={() => (state.open ? close() : open())}
       >
         <Icon name="chat" />
-        <span>Explain</span>
+        <span className="fab-dot" data-state={dot} aria-hidden="true" />
+        {unread > 0 && (
+          <span className="fab-badge" aria-hidden="true">
+            {unread}
+          </span>
+        )}
       </button>
-      {open && (
+      {state.open && (
         <div
           id="help-chat"
-          className="chat"
+          ref={panel}
+          className="fab-panel"
           role="dialog"
           aria-modal="false"
           aria-labelledby="help-chat-t"
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') {
-              close();
-              e.stopPropagation();
-              e.preventDefault();
-            }
-          }}
+          data-wide={state.wide ? '' : undefined}
+          data-min={state.minimised ? '' : undefined}
+          data-closing={closing ? '' : undefined}
+          onKeyDown={onKey}
         >
-          <div className="chat-head">
-            <h2 id="help-chat-t">Explain this screen</h2>
-            <span className="faint chat-where">{screenName}{incidentId ? ` · ${incidentId}` : ''}</span>
+          <div className="fab-head">
+            <div style={{ minWidth: 0, display: 'grid' }}>
+              <h2 id="help-chat-t">Explain this screen</h2>
+              <span className="fab-status" data-state={dot} role="status">
+                <i aria-hidden="true" />
+                {status}
+              </span>
+            </div>
             <span className="spacer" />
-            <button type="button" className="icon-btn" onClick={close} aria-label="Close the help chat (Esc)">
+            <button type="button" className="icon-btn" onClick={() => dispatch({ type: 'clear' })} aria-label="Clear the conversation" title="Clear" disabled={state.msgs.length === 0}>
+              <Icon name="trash" />
+            </button>
+            <button type="button" className="icon-btn" onClick={() => dispatch({ type: 'wide' })} aria-label={state.wide ? 'Make the panel smaller' : 'Make the panel larger'} aria-pressed={state.wide} title="Resize">
+              <Icon name="expand" />
+            </button>
+            <button type="button" className="icon-btn" onClick={() => dispatch({ type: 'minimise' })} aria-label={state.minimised ? 'Restore the panel' : 'Minimise the panel'} aria-pressed={state.minimised} title="Minimise">
+              <Icon name="minimise" />
+            </button>
+            <button type="button" className="icon-btn" onClick={close} aria-label="Close the help chat (Esc)" title="Close (Esc)">
               <Icon name="close" />
             </button>
           </div>
-          <div className="chat-status" data-state={model} role="status">
-            {status}
-          </div>
-          <div className="chat-log" ref={log} aria-live="polite">
-            {msgs.length === 0 && (
-              <p className="faint chat-intro">
-                Answers come only from the glossary and what this screen shows. If neither has the answer, it says so instead of guessing. Everything stays on this machine.
-              </p>
-            )}
-            {msgs.map((m) => (
-              <div key={m.id} className="chat-msg" data-who={m.who}>
-                <div className="chat-who">{m.who === 'you' ? 'You' : 'Help'}</div>
-                <div className="chat-text">{m.text}</div>
-                {m.who === 'help' && (
-                  <div className="chat-by">
-                    {m.by === 'glossary' ? 'answered from the glossary (no model)' : `answered by local model ${m.by}`}
-                    {m.terms && m.terms.length > 0 && <> · glossary: {m.terms.join(', ')}</>}
+          {!state.minimised && (
+            <>
+              <div className="fab-log" ref={log} aria-live="polite">
+                <p className="fab-intro">
+                  On <strong>{screenName}</strong>
+                  {incidentId ? ` · ${incidentId}` : ''}. Answers come only from the glossary and what this screen shows; if neither has the answer it says so. Everything stays on this machine.
+                </p>
+                {state.msgs.map((m) => (
+                  <div key={m.id} className="fab-msg" data-who={m.who}>
+                    <div className="fab-text">{m.text}</div>
+                    {m.who === 'help' && (
+                      <div className="fab-meta">
+                        <span>
+                          {m.by === 'glossary' ? 'from the glossary (no model)' : `local model ${m.by}`}
+                          {m.terms && m.terms.length > 0 && <> · {m.terms.join(', ')}</>}
+                        </span>
+                        <span className="spacer" />
+                        <button type="button" className="icon-btn" onClick={() => void copy(m)} aria-label="Copy this answer" title="Copy">
+                          <Icon name={copied === m.id ? 'check' : 'copy'} />
+                        </button>
+                      </div>
+                    )}
+                    {m.note && <div className="fab-note">{m.note}</div>}
+                  </div>
+                ))}
+                {busy && (
+                  <div className="fab-msg" data-who="help" aria-busy="true" aria-label="The local model is answering">
+                    <span className="fab-typing" aria-hidden="true">
+                      <i />
+                      <i />
+                      <i />
+                    </span>
                   </div>
                 )}
-                {m.note && <div className="chat-note">{m.note}</div>}
               </div>
-            ))}
-            {busy && (
-              <div className="chat-msg" data-who="help" aria-busy="true">
-                <div className="chat-who">Help</div>
-                <div className="chat-text faint">Asking the local model (one short answer)...</div>
+              <div className="fab-suggest" aria-label="Suggested questions">
+                {suggestions.map((s) => (
+                  <button key={s} type="button" className="chip" onClick={() => void ask(s)} disabled={busy}>
+                    {s}
+                  </button>
+                ))}
               </div>
-            )}
-          </div>
-          <div className="chat-suggest" aria-label="Suggested questions">
-            {suggestions.map((s) => (
-              <button key={s} type="button" className="chip" onClick={() => void ask(s)} disabled={busy}>
-                {s}
-              </button>
-            ))}
-          </div>
-          <form
-            className="chat-form"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void ask(text);
-            }}
-          >
-            <label htmlFor="help-q" className="visually-hidden">
-              Your question
-            </label>
-            <textarea
-              id="help-q"
-              ref={input}
-              className="input"
-              rows={2}
-              maxLength={500}
-              placeholder="What does this chart show?"
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
+              <form
+                className="fab-form"
+                onSubmit={(e) => {
                   e.preventDefault();
                   void ask(text);
-                }
-              }}
-            />
-            <button type="submit" className="btn primary" disabled={busy || !text.trim()} aria-label="Send question">
-              <Icon name="send" />
-            </button>
-          </form>
+                }}
+              >
+                <label htmlFor="help-q" className="visually-hidden">
+                  Your question
+                </label>
+                <textarea
+                  id="help-q"
+                  ref={input}
+                  className="input"
+                  rows={2}
+                  maxLength={500}
+                  placeholder="What does this chart show?"
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      void ask(text);
+                    }
+                  }}
+                />
+                <button type="submit" className="btn primary" disabled={busy || !text.trim()} aria-label="Send question">
+                  <Icon name="send" />
+                </button>
+              </form>
+            </>
+          )}
         </div>
       )}
     </>
