@@ -65,9 +65,9 @@ export function AlertQueryTable({ scenario, filter, label, selectedId = null, on
 
   const columns = useMemo<Column<QueryRow>[]>(() => {
     const cols: Column<QueryRow>[] = [
-      { id: 'ts', header: 'Time (UTC)', width: '146px', render: (a) => <Time ts={a.ts} /> },
+      { id: 'ts', header: 'Time (UTC, data date)', width: '146px', render: (a) => <Time ts={a.ts} /> },
       { id: 'det', header: 'Detector', width: '78px', render: (a) => <DetectorTag value={a.detector} /> },
-      { id: 'sev', header: 'Level', width: '44px', align: 'right', render: (a) => (a.severity ?? <span className="faint">-</span>) },
+      { id: 'sev', header: 'Own severity', width: '52px', align: 'right', render: (a) => (a.severity ?? <span className="faint">-</span>) },
       { id: 'rule', header: 'Rule', width: 'minmax(0, 1fr)', title: (a) => `${a.rule_id ?? ''} ${a.rule_name ?? ''}`, render: (a) => (
         <span>
           <span className="mono faint">{a.rule_id ?? '-'}</span> {a.rule_name}
@@ -75,7 +75,7 @@ export function AlertQueryTable({ scenario, filter, label, selectedId = null, on
       ) },
       { id: 'host', header: 'Host', width: '112px', render: (a) => <span className="mono">{a.host_ip ?? '-'}</span> },
       { id: 'src', header: 'Source IP', width: '112px', render: (a) => <span className="mono">{a.src_ip ?? '-'}</span> },
-      { id: 'tech', header: 'ATT&CK', width: '84px', title: (a) => a.techniques.join(', '), render: (a) => <span className="mono">{a.techniques.join(', ') || '-'}</span> },
+      { id: 'tech', header: 'ATT&CK', width: '84px', title: (a) => a.techniques.join(', ') || 'no ATT&CK technique', render: (a) => <span className="mono" title={a.techniques.join(', ')}>{a.techniques.join(', ') || '-'}</span> },
     ];
     return compact ? cols.filter((c) => c.id !== 'src' && c.id !== 'tech') : cols;
   }, [compact]);

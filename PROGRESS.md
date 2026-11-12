@@ -3,7 +3,7 @@
 Read this first every session; update it in every commit that changes project state.
 Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
 
-**Last update:** 2026-11-12, branch `phase3/wave-d-ui-v2`.
+**Last update:** 2026-11-13, branch `phase3/wave-e-explainable-ui`.
 
 ## Done
 - M1-M5, Wave A (platform), B1-B4 (detection layer), Wave C code (RAG, LangGraph graph,
@@ -38,6 +38,16 @@ Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
   4 skipped, mypy clean (88 files); frontend 32 tests, tsc clean, build 421 kB.
   Screenshots in `docs/ui/`; per-screen loop in `docs/session-notes.md`.
   Open: Study with real results, Findings with a real model answer, paper printing, CVD simulation.
+
+- Explainable console (branch `phase3/wave-e-explainable-ui`, 2026-11-13, while the dev pilot ran;
+  no study, agent, experiments or data file touched): glossary + `<Term>` tooltips, About page
+  (Professor demo mode landing), 6-stop tour, help chat (explain mode of `/copilot/ask`, glossary
+  fallback), Overview in two layers, "What happened", folded alert repeats, distinct incident labels,
+  graph labels without overlap (console + PDF), data / created dates, Study explained (pilot / final /
+  ad hoc). pytest 517 passed, 4 skipped; mypy clean (89 files); frontend 41 tests, tsc clean, build ok.
+  Screenshots in `docs/ui/`; checks in `docs/session-notes.md` (2026-11-13).
+  Open: help chat against the real model (only mocked: pilot running), report PDF graph labels not
+  looked at in a rendered PDF, CVD simulation.
 
 ## In progress
 - Waiting for the model: Ollama installer download (background, resumable), then the 7B pull.

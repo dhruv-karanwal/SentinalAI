@@ -10,22 +10,24 @@ import { MiniBar } from '../charts/Bars.tsx';
 import { TimeBars } from '../charts/TimeBars.tsx';
 import { ChartFrame, DETECTOR_ORDER, detectorTone, type Tone } from '../charts/ChartFrame.tsx';
 import { AlertQueryTable, describeFilter, filterKey } from '../components/AlertQueryTable.tsx';
+import { AlertRunsTable } from '../components/AlertRunsTable.tsx';
+import { Term } from '../components/Term.tsx';
 import { DataTable, type Column } from '../components/DataTable.tsx';
 import { EvidencePane } from '../components/EvidencePane.tsx';
 import { SplitPane } from '../components/SplitPane.tsx';
 import { Button, DetectorTag, Dialog, EmptyState, ErrorState, Time, describeError, detectorName } from '../components/ui.tsx';
-import { storageGet, storageSet, useApp, useLoad, type RouteApi } from '../hooks.ts';
+import { storageGet, storageSet, useApp, useLoad, useScreenContext, type RouteApi } from '../hooks.ts';
 import { Icon } from '../icons.tsx';
 import { epochSeconds, fmtInt } from '../lib/format.ts';
 import { needlesFromQuery } from '../lib/highlight.ts';
 
 const KEYS: Array<keyof AlertFilter> = ['detector', 'level', 'rule_id', 'technique', 'host', 'ip', 'since', 'until'];
-const FACETS: Array<[FacetName, string]> = [
-  ['detector', 'Detector'],
-  ['level', 'Level (detector-native)'],
-  ['rule_id', 'Rule id'],
-  ['technique', 'ATT&CK technique'],
-  ['host', 'Host'],
+const FACETS: Array<[FacetName, string, string]> = [
+  ['detector', 'Detector', 'detector'],
+  ['level', "Detector's own severity", 'severity'],
+  ['rule_id', 'Rule id', 'alert'],
+  ['technique', 'ATT&CK technique', 'attack-technique'],
+  ['host', 'Host', 'entity'],
 ];
 
 interface Saved {
@@ -55,8 +57,13 @@ export function AlertsScreen({ scenario, route, searchRef }: { scenario: string;
   const selectedId = route.params.id ?? null;
   const needles = useMemo(() => needlesFromQuery(queryApplied), [queryApplied]);
   const active = KEYS.filter((k) => filter[k]);
+  const fold = route.params.fold !== '0';
+  useScreenContext(
+    'alerts',
+    `Alerts of ${scenario}, ${describeFilter(filter)}${facets.data ? `: ${facets.data.total} match. By detector: ${facets.data.facets.detector.values.map((v) => `${v.value} ${v.count}`).join(', ')}. Top rules: ${facets.data.facets.rule_id.values.slice(0, 5).map((v) => `${v.value}${v.label ? ` (${v.label})` : ''} ${v.count}`).join(', ')}` : ''}. Repeated identical rows are ${fold ? 'folded into one row with a count' : 'shown one by one'}. "Own severity" is the detector's own level, not rescaled.${selectedId ? ` Selected alert ${selectedId}.` : ''}`,
+  );
 
-  const set = (patch: Partial<Record<keyof AlertFilter | 'q' | 'id', string | null>>) => route.setParams(patch as Record<string, string | null>);
+  const set = (patch: Partial<Record<keyof AlertFilter | 'q' | 'id' | 'fold', string | null>>) => route.setParams(patch as Record<string, string | null>);
   const toggle = (facet: FacetName, value: string) => set({ [facet]: filter[facet] === value ? null : value });
 
   const [naming, setNaming] = useState<string | null>(null);
@@ -102,13 +109,15 @@ export function AlertsScreen({ scenario, route, searchRef }: { scenario: string;
       {facets.error && !facets.data && <ErrorState what="facets" error={facets.error} onRetry={facets.reload} />}
       {!facets.data && !facets.error && <div className="facet faint">Counting...</div>}
       {facets.data &&
-        FACETS.map(([name, label]) => {
+        FACETS.map(([name, label, term]) => {
           const f = facets.data!.facets[name];
           const max = Math.max(1, ...f.values.map((v) => v.count));
           return (
             <section key={name} className="facet" aria-labelledby={`fc-${name}`}>
               <h3 id={`fc-${name}`}>
-                <span>{label}</span>
+                <span>
+                  <Term id={term}>{label}</Term>
+                </span>
                 <span className="faint num">{fmtInt(f.distinct)}</span>
               </h3>
               <ul>
@@ -168,6 +177,9 @@ export function AlertsScreen({ scenario, route, searchRef }: { scenario: string;
         <h1>Alerts</h1>
         <span className="muted num">{facets.data ? `${fmtInt(facets.data.total)} match` : ''}</span>
         <span className="spacer" />
+        <Button aria-pressed={fold} onClick={() => set({ fold: fold ? '0' : null })} title="Fold consecutive alerts with the same rule, level, host and source IP into one row">
+          Fold repeats
+        </Button>
         {active.length > 0 && <Button onClick={save}>Save filter</Button>}
         <Button icon="download" onClick={() => void exportCsv()} disabled={exporting || !facets.data || facets.data.total === 0} title="CSV of the filtered view (no raw records)">
           {exporting ? 'Exporting...' : 'Export CSV'}
@@ -261,7 +273,11 @@ export function AlertsScreen({ scenario, route, searchRef }: { scenario: string;
             />
           )
         ) : (
-          <AlertQueryTable scenario={scenario} filter={filter} primary compact label="Alerts in time order" selectedId={selectedId} onSelect={(a) => set({ id: a.alert_id })} />
+          fold ? (
+            <AlertRunsTable scenario={scenario} filter={filter} primary label="Alerts in time order, repeats folded" selectedId={selectedId} onSelect={(id) => set({ id })} onFilter={(p) => set({ ...p, fold: '0' })} />
+          ) : (
+            <AlertQueryTable scenario={scenario} filter={filter} primary compact label="Alerts in time order" selectedId={selectedId} onSelect={(a) => set({ id: a.alert_id })} />
+          )
         )}
       </div>
     </div>

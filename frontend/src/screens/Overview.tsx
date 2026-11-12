@@ -4,14 +4,17 @@
 
 import { useCallback, useMemo, useState } from 'react';
 
-import { api, type AlertFilter, type Overview } from '../api.ts';
+import { api, type AlertFilter, type IncidentSummaryRow, type Overview } from '../api.ts';
+import { Explain, Term } from '../components/Term.tsx';
+import { distinctLabels } from '../lib/explain.ts';
+import { compareQueue } from '../lib/format.ts';
 import { ChainStrip, HeatStrip } from '../charts/Attack.tsx';
 import { HBars, StackedHBars } from '../charts/Bars.tsx';
 import { ChartFrame, DETECTOR_ORDER, detectorTone, sevTone, type LegendItem } from '../charts/ChartFrame.tsx';
 import { TimeBars } from '../charts/TimeBars.tsx';
 import { AlertQueryTable, describeFilter } from '../components/AlertQueryTable.tsx';
 import { Button, ErrorNotice, ErrorState, SeverityCell, SkeletonLines, Time, detectorName } from '../components/ui.tsx';
-import { buildHash, storageGet, storageSet, useLoad, type RouteApi } from '../hooks.ts';
+import { buildHash, storageGet, storageSet, useLoad, useScreenContext, type RouteApi } from '../hooks.ts';
 import { epochSeconds, fmtDuration, fmtInt, fmtStep } from '../lib/format.ts';
 import { fmtPct, heatStep } from '../lib/scale.ts';
 
@@ -30,12 +33,22 @@ export function OverviewScreen({ scenario, route }: { scenario: string; route: R
   const setFilter = useCallback(
     (patch: Partial<AlertFilter>) => {
       route.setParams(Object.fromEntries(Object.entries(patch).map(([k, v]) => [k, v ?? null])) as Record<string, string | null>);
-      window.requestAnimationFrame(() => document.getElementById('ov-table')?.scrollIntoView({ block: 'start', behavior: 'auto' }));
+      // the alert table lives under "More detail": open it (its toggle handler renders the table)
+      document.querySelector('details.more-detail')?.setAttribute('open', '');
+      window.setTimeout(() => document.getElementById('ov-table')?.scrollIntoView({ block: 'start', behavior: 'auto' }), 50);
     },
     [route],
   );
   const clear = () => route.setParams(Object.fromEntries(FILTER_KEYS.map((k) => [k, null])));
   const active = FILTER_KEYS.some((k) => filter[k]);
+  const incidents = useLoad((signal) => api.incidentSummaries(scenario, signal), [scenario]);
+  const [more, setMore] = useState(() => active || storageGet('sentinel.overview.more') === '1');
+  useScreenContext(
+    'overview',
+    data
+      ? `Data source ${scenario}: ${data.alerts} stored alerts. Open incidents by severity: High ${data.status.open_by_severity.High ?? 0}, Medium ${data.status.open_by_severity.Medium ?? 0}, Low ${data.status.open_by_severity.Low ?? 0}; ${data.status.incidents} incidents in total (triage gap 300 s). Pending approvals: ${data.status.pending_approvals}. Alerts by detector: ${data.detectors.map((d) => `${d.detector} ${d.alerts}`).join(', ')}. ATT&CK-mapped alerts: ${data.attack.mapped_alerts} of ${data.attack.alerts}. IOC matching: ${data.ioc_loaded ? 'loaded' : 'not measured (no indicator list loaded)'}. Charts on screen: headline numbers, alerts over time by detector, incidents to look at first; under More detail: incident severity and status, detector comparison, ATT&CK techniques by tactic, top hosts and source IPs, attack chain, alert table.`
+      : '',
+  );
 
   if (error && !data) return <ErrorState what="the overview" error={error} onRetry={reload} />;
   if (!data) {
@@ -58,7 +71,7 @@ export function OverviewScreen({ scenario, route }: { scenario: string; route: R
           {data.timeseries.start && (
             <>
               {' '}
-              · <Time ts={data.timeseries.start} /> to <Time ts={data.timeseries.end} />
+              · <Time ts={data.timeseries.start} /> to <Time ts={data.timeseries.end} kind="data" />
             </>
           )}
         </span>
@@ -71,6 +84,21 @@ export function OverviewScreen({ scenario, route }: { scenario: string; route: R
         {error && <ErrorNotice what="the overview" error={error} onRetry={reload} />}
         <StatusRow data={data} />
         <VolumeChart data={data} log={log} setLog={(v) => (setLog(v), storageSet('sentinel.overview.log', v ? '1' : '0'))} filter={filter} setFilter={setFilter} />
+        <LookFirst rows={incidents.data?.incidents ?? null} error={incidents.error} />
+        <details
+          className="more-detail"
+          open={more}
+          onToggle={(e) => {
+            const o = (e.currentTarget as HTMLDetailsElement).open;
+            setMore(o);
+            storageSet('sentinel.overview.more', o ? '1' : '0');
+          }}
+        >
+          <summary>
+            More detail <span className="faint">: queue by status, detector comparison, ATT&amp;CK techniques, top hosts and IPs, attack chain, the alert table</span>
+          </summary>
+          {more && (
+        <div className="page-body">
         <div className="grid-2">
           <QueueCharts data={data} />
           <DetectorChart data={data} setFilter={setFilter} />
@@ -106,8 +134,58 @@ export function OverviewScreen({ scenario, route }: { scenario: string; route: R
             />
           </div>
         </section>
+        </div>
+          )}
+        </details>
       </div>
     </div>
+  );
+}
+
+/** The open incidents an analyst should open first (queue order), each named by host / IP and data time. */
+function LookFirst({ rows, error }: { rows: IncidentSummaryRow[] | null; error: import('../api.ts').ApiError | null }) {
+  const top = useMemo(() => (rows ?? []).filter((r) => (r.status ?? 'open') !== 'closed').map((r) => ({ ...r, status: r.status ?? 'open' })).sort(compareQueue).slice(0, 6), [rows]);
+  const labels = useMemo(() => distinctLabels(top), [top]);
+  return (
+    <section className="chart" aria-labelledby="ov-first-t">
+      <header className="chart-head">
+        <div>
+          <h3 className="chart-title" id="ov-first-t">
+            <Term id="incident">Incidents to look at first</Term>
+          </h3>
+          <Explain
+            what="The open incidents at the top of the queue: highest severity first, then not yet touched, then most recent. Each is named by its main host or source IP and when it started in the data."
+            why="This is where an analyst starts a shift. Open one to see what happened, in plain words, and the evidence."
+          />
+        </div>
+        <div className="chart-actions">
+          <a className="btn" href="#/incidents">
+            Open the queue
+          </a>
+        </div>
+      </header>
+      {error && !rows ? (
+        <p className="faint">Incidents could not be loaded ({error.status || 'API unreachable'}).</p>
+      ) : !rows ? (
+        <SkeletonLines lines={3} />
+      ) : top.length === 0 ? (
+        <p className="faint">No open incident. Build incidents on the Incidents screen (triage).</p>
+      ) : (
+        <ul className="look-first">
+          {top.map((r) => (
+            <li key={r.incident_id}>
+              <SeverityCell value={r.severity} />
+              <a className="lf-name mono" href={buildHash('/incidents', { id: r.incident_id })} title={`${r.incident_id}: ${labels.get(r.incident_id)}`}>
+                {labels.get(r.incident_id)}
+              </a>
+              <span className="num faint">{fmtInt(r.alerts)} alerts</span>
+              <span className="faint">{r.status}{r.detail.severity_row ? ` · rule ${r.detail.severity_row}` : ''}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="chart-note">Times are data times (the 2022 recording), in UTC.</p>
+    </section>
   );
 }
 
@@ -117,7 +195,9 @@ function StatusRow({ data }: { data: Overview }) {
   return (
     <div className="statusrow" role="group" aria-label="Status">
       <div className="status-cell">
-        <div className="k">Open incidents by severity</div>
+        <div className="k">
+          Open <Term id="incident-severity">incidents, by severity</Term>
+        </div>
         <div className="v">
           {SEVS.map((sev) => (
             <a key={sev} href={buildHash('/incidents', { sev, status: 'open' })} title={`Open ${sev} incidents`}>
@@ -125,15 +205,19 @@ function StatusRow({ data }: { data: Overview }) {
             </a>
           ))}
         </div>
-        <div className="s">{fmtInt(s.incidents)} incidents in total (triage gap 300 s)</div>
+        <div className="s">
+          {fmtInt(s.incidents)} in total, <Term id="triage-gap">gap</Term> 5 min
+        </div>
       </div>
       <div className="status-cell">
-        <div className="k">Alerts stored</div>
+        <div className="k">
+          <Term id="alert">Alerts</Term> received (replayed)
+        </div>
         <div className="v num">{fmtInt(data.alerts)}</div>
         <div className="s">{DETECTOR_ORDER.filter((d) => data.timeseries.series[d]).map((d) => `${detectorName(d)} ${fmtInt(data.timeseries.series[d]!.reduce((a, b) => a + b, 0))}`).join(' · ')}</div>
       </div>
       <div className="status-cell">
-        <div className="k">Oldest unreviewed High</div>
+        <div className="k">Oldest High incident nobody has opened</div>
         {oldest ? (
           <>
             <div className="v">
@@ -142,7 +226,7 @@ function StatusRow({ data }: { data: Overview }) {
               </a>
             </div>
             <div className="s mono" title={oldest.incident_id}>
-              {oldest.incident_id} · {fmtInt(oldest.alerts)} alerts · in queue since triage stored it
+              {oldest.incident_id} · {fmtInt(oldest.alerts)} alerts · waiting since it was created (not the data date)
             </div>
           </>
         ) : (
@@ -153,13 +237,15 @@ function StatusRow({ data }: { data: Overview }) {
         )}
       </div>
       <div className="status-cell">
-        <div className="k">Pending approvals</div>
+        <div className="k">
+          Actions waiting for <Term id="four-eyes">approval</Term>
+        </div>
         <div className="v">
           <a className="num" href="#/approvals">
             {fmtInt(s.pending_approvals)}
           </a>
         </div>
-        <div className="s">Requested actions waiting for a manager</div>
+        <div className="s">A second person must decide each one</div>
       </div>
     </div>
   );
@@ -186,7 +272,10 @@ function VolumeChart({ data, log, setLog, filter, setFilter }: { data: Overview;
     <ChartFrame
       id="ch-volume"
       title="Alerts over time, by detector"
+      term="detector"
       question="Where did alert volume spike, and which detector raised it? Drag across the bars to filter the alert table to that time."
+      what="How many alerts arrived in each time slice of the recording, stacked by the tool that raised them. Triangles under the axis mark where High (filled) and Medium (outline) incidents start."
+      why="Spikes are where the attack steps are likely to be; drag across bars to see those alerts in the table under More detail."
       legend={[...legend, { key: 'h', label: 'High incident start', tone: 'high', mark: 'dot' }, { key: 'm', label: 'Medium incident start', tone: 'medium', mark: 'hollow' }]}
       table={table}
       empty={ts.total === 0 ? 'No stored alerts for this data source. Replay one with app.main platform-ingest.' : undefined}
@@ -240,7 +329,10 @@ function QueueCharts({ data }: { data: Overview }) {
     <ChartFrame
       id="ch-queue"
       title="Incident severity and status"
+      term="incident-severity"
       question="How much of the queue is High, and how much of it has nobody touched yet?"
+      what="Incidents per severity, split by status: open (solid), investigating (hatched), contained or closed (outline); then how long they have waited."
+      why="A large solid High bar means serious work nobody has started."
       legend={[
         { key: 'o', label: 'open (solid)', tone: 'muted', mark: 'bar' },
         { key: 'i', label: 'investigating (hatched)', tone: 'muted', mark: 'line', dash: '2 2' },
@@ -251,7 +343,7 @@ function QueueCharts({ data }: { data: Overview }) {
         rows: SEVS.map((sev) => [sev, ...statuses.map((st) => s.by_severity_status[sev]?.[st] ?? 0), ...s.age_buckets.map((b) => s.age_in_queue[sev]?.[b] ?? 0)]),
       }}
       empty={s.incidents === 0 ? 'No incidents yet. Build them on the Incidents screen (triage, gap 300 s).' : undefined}
-      note="Age in queue counts from when triage stored the incident (the alert times are the 2022 replay). Click a bar to open those incidents."
+      note="Age in queue counts from the created date (when triage stored the incident), not the data date of its alerts (2022). Click a bar to open those incidents."
     >
       <StackedHBars rows={rows} unit="incidents" />
       <h4 className="section-title" style={{ marginTop: 'var(--sp-12)' }}>
@@ -300,7 +392,10 @@ function DetectorChart({ data, setFilter }: { data: Overview; setFilter: (p: Par
     <ChartFrame
       id="ch-detectors"
       title="Detector comparison"
+      term="detector"
       question="Which detector's alerts carry context (ATT&CK mapping, indicator matches) and which mostly repeat another's?"
+      what="For each tool: how many alerts, how many are linked to a known attack technique, how many match a known-bad indicator, and how many only copy another tool's alert."
+      why="A detector whose alerts carry more context gives the investigator more to work with; that is the study's question."
       table={{
         columns: ['detector', 'alerts', 'mapped to ATT&CK', 'IOC match', 'duplicate of Suricata'],
         rows: rows.map((r) => [detectorName(r.detector), r.alerts, fmtPct(r.mapped_share), r.ioc_share === null ? 'no indicator list loaded' : fmtPct(r.ioc_share), fmtPct(r.duplicate_share)]),
@@ -313,9 +408,15 @@ function DetectorChart({ data, setFilter }: { data: Overview; setFilter: (p: Par
           <tr>
             <th>Detector</th>
             <th>Alerts</th>
-            <th className="right">ATT&amp;CK mapped</th>
-            <th className="right">IOC match</th>
-            <th className="right">Duplicates</th>
+            <th className="right">
+              <Term id="attack-technique">Linked to a technique</Term>
+            </th>
+            <th className="right">
+              <Term id="ioc">Known-bad match</Term>
+            </th>
+            <th className="right">
+              <Term id="duplicate">Copies</Term>
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -359,7 +460,10 @@ function AttackChart({ data, filter, setFilter }: { data: Overview; filter: Aler
     <ChartFrame
       id="ch-attack"
       title="ATT&CK techniques by tactic"
+      term="attack-tactic"
       question="Which tactics do the mapped alerts point to, and which technique carries the volume? Click a cell to filter the alerts."
+      what="Columns are attacker goals (tactics); each cell is a technique with its alert count printed. Darker means more alerts."
+      why="It says what kind of attack the evidence suggests; click a cell to see those alerts."
       legend={[
         { key: 'h1', label: 'fewer alerts', tone: 'muted', mark: 'square' },
         { key: 'h4', label: 'more alerts (darker; count printed in each cell)', tone: 'accent', mark: 'square' },
@@ -399,7 +503,10 @@ function EntityChart({ data, kind, scenario }: { data: Overview; kind: 'host' | 
     <ChartFrame
       id={`ch-ent-${kind}`}
       title={kind === 'host' ? 'Top hosts' : 'Top source IPs'}
+      term="entity"
       question={kind === 'host' ? 'Which hosts raise the most alerts, and how severe are the incidents they are in?' : 'Which source addresses appear most, and in how severe incidents?'}
+      what={kind === 'host' ? 'The machines with the most alerts; the bar colour and glyph give the worst incident each one is in.' : 'The addresses traffic came from most often; colour and glyph give the worst incident each one is in.'}
+      why={kind === 'host' ? 'A host in a High incident is the first place to look.' : 'One source IP behind many alerts usually means one attacker.'}
       legend={[...SEVS.map((s): LegendItem => ({ key: s, label: `highest incident: ${s}`, tone: sevTone(s) })), { key: 'n', label: 'in no incident', tone: 'muted' }]}
       table={{ columns: [kind, 'alerts', 'highest incident severity', 'incidents'], rows: e.rows.map((r) => [r.value, r.alerts, r.severity ?? 'none', r.incidents]) }}
       empty={rows.length === 0 ? (kind === 'ip' ? 'No alert carries a source IP (only Wazuh data.srcip and Suricata src_ip are read).' : 'No alert carries a host IP.') : undefined}
@@ -420,7 +527,10 @@ function ChainChart({ data }: { data: Overview }) {
     <ChartFrame
       id="ch-chain"
       title="Attack chain"
+      term="kill-chain"
       question="Which kill-chain stages are observed, and where are the gaps?"
+      what="The attacker goals in their usual order, with the number of linked alerts under each; choose one incident to see only its chain."
+      why="Gaps are stages with no linked alert. A gap means no evidence, not that nothing happened."
       table={{ columns: ['stage', 'tactic', 'alerts', 'techniques'], rows: stages.map((s, i) => [i + 1, s.name, s.alerts, s.techniques.map((t) => t.technique_id).join(' ') || 'gap']) }}
       actions={
         <>

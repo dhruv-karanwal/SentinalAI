@@ -231,11 +231,13 @@ def test_study_results_skip_fake_runs(client: TestClient, tmp_path: Path, monkey
     (real / "manifest.json").write_text(json.dumps({"scenario": "russellmitchell", "variant": "fused",
                                                     "model": {"model_ids": {"single": "qwen", "graph": "qwen"}},
                                                     "cases": [{}, {}]}))
-    (real / "scores.json").write_text(json.dumps({"arms": {"single": {"coverage": {}}}, "baselines": {}, "matched_k": 3}))
+    (real / "scores.json").write_text(json.dumps({"arms": {"single": {"coverage": {}}}, "baselines": {}, "matched_k": 3,
+                                                  "study_part": "pilot"}))
     monkeypatch.setenv("SENTINEL_RUNS_DIR", str(runs))
     body = client.get("/study/results", headers=token(client, Role.ANALYST)).json()
     assert body["excluded_fake_runs"] == 1 and [r["run_id"] for r in body["runs"]] == ["matched-real"]
     assert body["runs"][0]["cases"] == 2 and "not paper results" in body["label"]
+    assert body["runs"][0]["study_part"] == "pilot"
     monkeypatch.setenv("SENTINEL_RUNS_DIR", str(tmp_path / "none"))
     assert client.get("/study/results", headers=token(client, Role.ANALYST)).json()["runs"] == []
 

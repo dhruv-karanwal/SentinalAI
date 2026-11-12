@@ -9,7 +9,7 @@ import { useMemo, useState } from 'react';
 import { Button, detectorName } from '../components/ui.tsx';
 import { useElementSize } from '../hooks.ts';
 import { fmtInt } from '../lib/format.ts';
-import { layout } from '../lib/graph.ts';
+import { layout, placeLabels } from '../lib/graph.ts';
 import { ChartFrame, DETECTOR_DASH, DETECTOR_ORDER, TONE_VAR, detectorTone, useTip, type LegendItem } from './ChartFrame.tsx';
 
 export interface GraphNode {
@@ -40,6 +40,8 @@ export interface GraphData {
 export const GRAPH_STEP = 60;
 export const GRAPH_W = 480;
 export const GRAPH_H = 320;
+/** approximate advance of the 10 px monospace label font (.graph-label) */
+const LABEL_CHAR_W = 6.2;
 
 export function mainDetector(by: Record<string, number>): string {
   let best = '';
@@ -144,7 +146,19 @@ function GraphSvg({ nodes, edges, pos, W, H, selected, onPick }: { nodes: GraphN
     if (focus) for (const e of edges) if (e.source === focus || e.target === focus) s.add(e.source).add(e.target);
     return s;
   }, [edges, focus]);
-  const labelled = new Set(nodes.slice(0, 14).map((n) => n.id));
+  // labels without overlap: most alerts first, each tries right / left / below / above its node;
+  // one that fits nowhere is shown only on hover or focus (the table under the graph has all names)
+  const radius = (n: GraphNode) => 3.5 + 6 * Math.sqrt(n.alerts / maxNode);
+  const boxes = useMemo(() => {
+    const order = [...nodes].sort((a, b) => b.alerts - a.alerts || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    const items = order.flatMap((n) => {
+      const p = pos.get(n.id);
+      return p ? [{ id: n.id, x: p.x * kx, y: p.y * ky, r: radius(n), text: n.value }] : [];
+    });
+    return new Map(placeLabels(items, width, height, LABEL_CHAR_W, 13).map((b) => [b.id, b]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodes, pos, kx, ky, width, height, maxNode]);
+  const hiddenLabels = nodes.length - boxes.size;
   const lines = (n: GraphNode) => [
     `${n.kind === 'host' ? 'Host' : 'Source IP'} ${n.value}`,
     `${fmtInt(n.alerts)} alerts`,
@@ -178,7 +192,8 @@ function GraphSvg({ nodes, edges, pos, W, H, selected, onPick }: { nodes: GraphN
         {nodes.map((n) => {
           const p = pos.get(n.id);
           if (!p) return null;
-          const r = 3.5 + 6 * Math.sqrt(n.alerts / maxNode);
+          const r = radius(n);
+          const box = boxes.get(n.id);
           const dim = focus && focus !== n.id && !linked.has(n.id);
           const sel = selected === n.id;
           const x = p.x * kx;
@@ -221,15 +236,26 @@ function GraphSvg({ nodes, edges, pos, W, H, selected, onPick }: { nodes: GraphN
               ) : (
                 <rect x={x - r * 0.85} y={y - r * 0.85} width={r * 1.7} height={r * 1.7} fill="var(--text)" stroke={sel ? 'var(--accent)' : 'var(--text)'} strokeWidth={sel ? 3 : 1} />
               )}
-              {(labelled.has(n.id) || focus === n.id || sel) && (
-                <text x={x + r + 3} y={y + 4} className="graph-label mono">
+              {box ? (
+                <text x={box.anchor === 'start' ? box.x0 : box.anchor === 'end' ? box.x1 : (box.x0 + box.x1) / 2} y={box.y1 - 3} textAnchor={box.anchor} className="graph-label mono">
                   {n.value}
                 </text>
+              ) : (
+                (focus === n.id || sel) && (
+                  <text x={x + r + 3} y={y + 4} className="graph-label graph-label-float mono">
+                    {n.value}
+                  </text>
+                )
               )}
             </g>
           );
         })}
       </svg>
+      {hiddenLabels > 0 && (
+        <div className="axis-caption faint">
+          {fmtInt(hiddenLabels)} of {fmtInt(nodes.length)} labels hidden to avoid overlap; hover or focus a node to read it, or open the table under the chart.
+        </div>
+      )}
     </div>
   );
 }

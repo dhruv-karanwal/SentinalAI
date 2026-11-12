@@ -119,9 +119,21 @@ class DecisionBody(BaseModel):
     reason: str = Field(min_length=1, max_length=2000)
 
 
+class GlossaryEntry(BaseModel):
+    term: str = Field(min_length=1, max_length=80)
+    definition: str = Field(default="", max_length=600)
+    why: str = Field(default="", max_length=600)
+
+
 class CopilotBody(BaseModel):
-    incident_id: str = Field(min_length=1, max_length=200)
+    """``mode="investigate"`` (default): the M5 agent on one incident. ``mode="explain"``: one short
+    grounded answer for the console's help chat (``app/api/explain.py``)."""
+    mode: str = Field(default="investigate", pattern=r"^(investigate|explain)$")
+    incident_id: Optional[str] = Field(default=None, min_length=1, max_length=200)
     question: str = Field(min_length=1, max_length=2000)
+    screen: Optional[str] = Field(default=None, max_length=80)
+    context: Optional[str] = Field(default=None, max_length=6000)
+    glossary: list[GlossaryEntry] = Field(default_factory=list, max_length=12)
 
 
 class StatusBody(BaseModel):
@@ -400,6 +412,35 @@ def create_app(services: Services, *, metrics: Any | None = None) -> FastAPI:
                    {"mode": result["mode"], "action": result["action"]})
         return result
 
+    def _explain(body: CopilotBody, p: Principal, client: Any) -> dict[str, Any]:
+        from app.agent.client import ModelRequestError
+        from app.api import explain as ex
+
+        incident = None
+        if body.incident_id is not None:
+            inc = repo.get_incident(body.incident_id)
+            if inc is None:
+                raise HTTPException(404, "no such incident")
+            incident = ex.incident_facts(inc)
+        if client is None:
+            raise HTTPException(503, "no model endpoint configured for the copilot")
+        if not ex.MODEL_LOCK.acquire(blocking=False):
+            raise HTTPException(429, "the local model is busy with another question; try again shortly")
+        glossary = [g.model_dump() for g in body.glossary]
+        try:
+            result = client.chat(ex.build_messages(body.question, body.screen, body.context, glossary, incident),
+                                 max_tokens=ex.MAX_OUTPUT_TOKENS, temperature=0.0)
+        except ModelRequestError as exc:
+            raise HTTPException(503, f"local model unreachable: {str(exc)[:200]}") from exc
+        finally:
+            ex.MODEL_LOCK.release()
+        repo.audit(p.username, p.role.value, "copilot.explain", body.incident_id or body.screen,
+                   {"output_tokens": result.output_tokens})
+        return {"mode": "explain", "status": "ok", "answer": [result.content.strip()],
+                "model": client.model_id, "sources": ex.sources(glossary, body.screen, body.context, incident),
+                "input_tokens": result.input_tokens, "output_tokens": result.output_tokens,
+                "note": "help answer from the glossary and the screen only; not a study result"}
+
     @app.post("/copilot/ask")
     def copilot_ask(body: CopilotBody,
                     p: Annotated[Principal, Depends(need("copilot.ask"))]) -> dict[str, Any]:
@@ -407,6 +448,10 @@ def create_app(services: Services, *, metrics: Any | None = None) -> FastAPI:
         from app.agent.copilot import ask
 
         client = services.extras.get("copilot_client")
+        if body.mode == "explain":
+            return _explain(body, p, client)
+        if body.incident_id is None:
+            raise HTTPException(422, "investigate mode needs an incident_id")
         if client is None:
             raise HTTPException(503, "no model endpoint configured for the copilot")
         inc = repo.get_incident(body.incident_id)

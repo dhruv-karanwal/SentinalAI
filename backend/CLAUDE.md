@@ -12,6 +12,14 @@
   migration `0003_user_disabled.sql`; create / reset take the password only from
   `SENTINEL_NEW_USER_PASSWORD` (409 when unset); deactivated users get 401 at login and on every token.
   Reports are `d2`: the API adds `charts` (timeline bins + placed entity graph) and the PDF draws them.
+- Explainable console (2026-11-13): `POST /copilot/ask` takes `mode: "explain"` (`app/api/explain.py`):
+  one chat request grounded in the glossary entries and screen summary the console sends plus
+  label-free incident facts, `MAX_OUTPUT_TOKENS` 300, temperature 0, `MODEL_LOCK` (429 when busy),
+  503 when no endpoint or the model is unreachable; audited as `copilot.explain`. `GET /alerts/runs`
+  (`analytics.alert_runs`: consecutive identical alerts folded, counts add up). `/incidents/summary`
+  and Executive `top_risks` carry `detail.main_host` / `main_ip` (`analytics.main_entities`, most
+  alerts). The report PDF places graph labels with `graph_layout.place_labels` (no overlap). Study
+  results carry `study_part`. Tests: `tests/test_explain.py` (FakeClient only).
 - Console support: `GET /scenarios` (`Repository.list_scenarios`, permission `read`); the copilot answer carries `claims`, `dropped_citations`, `dropped_claims` (real alert ids, never labels) next to the counts.
 - Secrets only from the environment: `SENTINEL_JWT_SECRET` (>= 32 chars), `SENTINEL_NEW_USER_PASSWORD` for `create-user`, DB/MinIO credentials. Never as CLI arguments, never in files.
 - Consumer writes in transactions of 1000 (`batch_size`); SQLite runs WAL. A per-row transaction makes a dev replay take >10 minutes.

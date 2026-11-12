@@ -26,7 +26,7 @@ LABEL_READERS = {"main.py", "detection/labels.py", "detection/sigma_report.py",
                  "detection/ml_baselines.py", "detection/triage_report.py"}
 # Detection-layer modules that must never see labels in any form.
 LABEL_FREE = ("detection/sigma_engine.py", "detection/triage.py", "detection/features.py",
-              "outputs/analytics.py", "outputs/graph_layout.py")
+              "outputs/analytics.py", "outputs/graph_layout.py", "api/explain.py")
 LABEL_WORDS = ("ground_truth", "GroundTruth", "TruthStore", "event_label", "time_label",
                "dev_labels", "TruthLabels", "labels.csv", "AttackTimeline")
 

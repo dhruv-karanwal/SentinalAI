@@ -1,6 +1,7 @@
 // Reports: stored incident reports. The body is the JSON the API built (timeline, citations,
 // techniques, recommendations); CSV and PDF are downloads of the same body.
 
+import { Term } from '../components/Term.tsx';
 import { useEffect, useMemo, useState } from 'react';
 
 import { api, ApiError, downloadReport, type Report, type ReportBody } from '../api.ts';
@@ -33,7 +34,7 @@ export function ReportsScreen({ route }: Props) {
 
   const columns = useMemo<Column<Report>[]>(
     () => [
-      { id: 'created', header: 'Created (UTC)', width: '152px', sortKey: (r) => r.created_utc, render: (r) => <Time ts={r.created_utc} /> },
+      { id: 'created', header: 'Created (UTC, console)', width: '152px', sortKey: (r) => r.created_utc, render: (r) => <Time ts={r.created_utc} /> },
       { id: 'sev', header: 'Severity', width: '82px', render: (r) => <SeverityCell value={r.body.incident.severity} /> },
       { id: 'alerts', header: 'Alerts', width: '56px', align: 'right', sortKey: (r) => r.body.incident.alerts, render: (r) => fmtInt(r.body.incident.alerts) },
       { id: 'incident', header: 'Incident', width: 'minmax(0, 1fr)', sortKey: (r) => r.incident_id, title: (r) => r.incident_id, render: (r) => <span className="mono">{r.incident_id}</span> },
@@ -97,7 +98,7 @@ function ReportDetail({ report, route }: { report: Report; route: Props['route']
 
   const columns = useMemo<Column<TimelineRow>[]>(
     () => [
-      { id: 'ts', header: 'Time (UTC)', width: '152px', sortKey: (r) => r.ts, render: (r) => <Time ts={r.ts} /> },
+      { id: 'ts', header: 'Time (UTC, data date)', width: '152px', sortKey: (r) => r.ts, render: (r) => <Time ts={r.ts} /> },
       { id: 'det', header: 'Detector', width: '80px', sortKey: (r) => r.detector, render: (r) => <DetectorTag value={r.detector} /> },
       { id: 'rule', header: 'Rule id', width: '88px', sortKey: (r) => r.rule_id, render: (r) => <span className="mono">{r.rule_id ?? '-'}</span> },
       { id: 'name', header: 'Rule name', width: 'minmax(0, 1fr)', sortKey: (r) => r.rule_name, title: (r) => r.rule_name ?? '', render: (r) => r.rule_name ?? <span className="faint">-</span> },
@@ -147,17 +148,17 @@ function ReportDetail({ report, route }: { report: Report; route: Props['route']
           </span>
           <span>
             <span className="k">Created</span>
-            <Time ts={report.created_utc} />
+            <Time ts={report.created_utc} kind="created" />
           </span>
         </div>
         <div className="meta-row">
           <span>
             <span className="k">First seen</span>
-            <Time ts={b.incident.first_ts} />
+            <Time ts={b.incident.first_ts} kind="data" />
           </span>
           <span>
             <span className="k">Last seen</span>
-            <Time ts={b.incident.last_ts} />
+            <Time ts={b.incident.last_ts} kind="data" />
           </span>
           {Object.entries(b.incident.detectors).map(([d, n]) => (
             <span key={d}>
@@ -196,7 +197,9 @@ function ReportDetail({ report, route }: { report: Report; route: Props['route']
       {tab === 'summary' && (
         <div className="tabpanel detail-scroll" role="tabpanel">
           <div className="section">
-            <h3>ATT&amp;CK techniques</h3>
+            <h3>
+              <Term id="attack-technique">ATT&amp;CK techniques</Term>
+            </h3>
             {b.techniques.length === 0 ? (
               <p className="muted">No alert of this incident maps to a technique.</p>
             ) : (
@@ -219,7 +222,9 @@ function ReportDetail({ report, route }: { report: Report; route: Props['route']
             )}
           </div>
           <div className="section">
-            <h3>Recommended actions</h3>
+            <h3>
+              Recommended actions (<Term id="playbook">playbooks</Term>)
+            </h3>
             <table className="plain-table">
               <thead>
                 <tr>

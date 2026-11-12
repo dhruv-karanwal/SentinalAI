@@ -172,3 +172,23 @@ export function storageSet(key: string, value: string): void {
     // private window or blocked storage: the setting lasts for this page only
   }
 }
+
+// ---- screen context for the help chat -------------------------------------------------------
+// A screen publishes a short plain-text summary of what it shows (numbers it already rendered,
+// the selected incident); the help chat sends it with a question so the model answers from the
+// screen, not from memory. Module state, no React re-render needed.
+
+let screenContext: { owner: string; text: string } = { owner: '', text: '' };
+
+export function getScreenContext(): string {
+  return screenContext.text;
+}
+
+export function useScreenContext(owner: string, text: string): void {
+  useEffect(() => {
+    screenContext = { owner, text: text.slice(0, 5000) };
+    return () => {
+      if (screenContext.owner === owner) screenContext = { owner: '', text: '' };
+    };
+  }, [owner, text]);
+}

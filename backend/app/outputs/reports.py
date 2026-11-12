@@ -168,14 +168,27 @@ def _chart_flowables(charts: dict[str, Any], width_pt: float) -> list[Any]:
             (x1, y1), (x2, y2) = pos[e["source"]], pos[e["target"]]
             d.add(Line(x1, y1, x2, y2, strokeColor=colors.HexColor(colour), strokeDashArray=dash,
                        strokeWidth=0.75 + 3.25 * (e["alerts"] / top_edge) ** 0.5))
+        from app.outputs.graph_layout import place_labels
+
+        # labels in top-down plot coordinates, most alerts first; one that would overlap is left out
+        ordered = sorted(nodes, key=lambda n: (-int(n["alerts"]), str(n["id"])))
+        boxes = place_labels([(str(n["id"]), n["x"] * scale, n["y"] * scale, 4.0,
+                               f"{n['value']} ({n['alerts']:,})") for n in ordered],
+                             gw * scale, gh * scale, char_w=3.1, line_h=7.0)
         for n in nodes:
             x, y = pos[n["id"]]
             host = n["kind"] == "host"
             d.add(Circle(x, y, 4, fillColor=colors.white if host else colors.HexColor("#1b1f24"),
                          strokeColor=colors.HexColor("#1b1f24"), strokeWidth=1))
-            d.add(String(x + 6, y - 2, f"{n['value']} ({n['alerts']:,})", fontSize=5.5))
+        by_id = {n["id"]: n for n in nodes}
+        for b in boxes:
+            n = by_id[b.id]
+            d.add(String(b.x0, gh * scale - b.y1 + 14 + 1.5, f"{n['value']} ({n['alerts']:,})", fontSize=5.5))
+        hidden = len(nodes) - len(boxes)
         d.add(String(0, 2, f"Entity graph: {g['nodes_shown']} of {g['nodes_total']} nodes; hollow = host, "
-                     "filled = source IP; edge width = alerts, colour and dash = main detector", fontSize=6))
+                     "filled = source IP; edge width = alerts, colour and dash = main detector"
+                     + (f"; {hidden} labels left out to avoid overlap" if hidden else ""),
+                     fontSize=6))
         out.append(d)
     return out
 

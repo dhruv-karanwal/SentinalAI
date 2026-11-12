@@ -12,6 +12,9 @@ import { fmtDuration, fmtInt } from '../lib/format.ts';
 import { bandScale, compact, linearScale, niceMax } from '../lib/scale.ts';
 import { useTip } from '../charts/ChartFrame.tsx';
 import { sevLevel } from './Overview.tsx';
+import { Term } from '../components/Term.tsx';
+import { distinctLabels, incidentLabel } from '../lib/explain.ts';
+import { useScreenContext } from '../hooks.ts';
 
 const SEVS = ['High', 'Medium', 'Low'] as const;
 
@@ -20,10 +23,20 @@ export function ExecutiveScreen({ scenario }: { scenario: string }) {
   const { data, error, reload } = useLoad((signal) => api.executive(scenario, signal), [scenario]);
   if (error && !data) return <ErrorState what="the executive summary" error={error} onRetry={reload} />;
   if (!data) return <SkeletonLines lines={8} />;
-  const q = data.queue;
-  const ttr = data.time_to_review;
   const observed = data.coverage.filter((c) => c.alerts > 0);
   const high = data.severity_trend.reduce((s, d) => s + d.High, 0);
+  return <ExecutiveBody data={data} scenario={scenario} role={session.role} high={high} observed={observed} />;
+}
+
+function ExecutiveBody({ data, scenario, role, high, observed }: { data: import('../api.ts').Executive; scenario: string; role: string; high: number; observed: Array<{ name: string }> }) {
+  const q = data.queue;
+  const ttr = data.time_to_review;
+  const session = { role };
+  const labels = distinctLabels(data.top_risks);
+  useScreenContext(
+    'executive',
+    `Executive summary of ${scenario}. Open incidents: High ${q.open_by_severity.High ?? 0}, Medium ${q.open_by_severity.Medium ?? 0}, Low ${q.open_by_severity.Low ?? 0}. Reviewed ${ttr.reviewed}, not reviewed ${ttr.unreviewed}. Pending approvals ${data.open_approvals.pending}. ATT&CK tactics observed: ${observed.map((c) => c.name).join(', ') || 'none'}. Top risks: ${data.top_risks.map((r) => `${r.severity} ${incidentLabel(r)} (${r.alerts} alerts)`).join('; ')}.`,
+  );
   return (
     <div className="page">
       <div className="page-head">
@@ -39,7 +52,9 @@ export function ExecutiveScreen({ scenario }: { scenario: string }) {
       <div className="page-body" style={{ maxWidth: 1180 }}>
         <div className="statusrow">
           <div className="status-cell">
-            <div className="k">Open incidents</div>
+            <div className="k">
+              Open <Term id="incident">incidents</Term>
+            </div>
             <div className="v">
               {SEVS.map((s) => (
                 <span key={s}>
@@ -61,7 +76,9 @@ export function ExecutiveScreen({ scenario }: { scenario: string }) {
             <div className="s">{data.open_approvals.oldest_utc ? <>oldest since <Time ts={data.open_approvals.oldest_utc} /></> : 'nothing waiting'}</div>
           </div>
           <div className="status-cell">
-            <div className="k">ATT&amp;CK tactics observed</div>
+            <div className="k">
+              <Term id="attack-tactic">ATT&amp;CK tactics</Term> observed
+            </div>
             <div className="v num">
               {observed.length} of {data.coverage.length}
             </div>
@@ -87,23 +104,26 @@ export function ExecutiveScreen({ scenario }: { scenario: string }) {
           <ChartFrame
             title="Top risks"
             question="Which open incidents deserve attention first?"
-            table={{ columns: ['incident', 'severity', 'why', 'alerts'], rows: data.top_risks.map((r) => [r.incident_id, r.severity, r.rule?.rule ?? '', r.alerts]) }}
+            term="incident-severity"
+            table={{ columns: ['incident', 'main host or IP, first seen (data date)', 'severity', 'why', 'alerts'], rows: data.top_risks.map((r) => [r.incident_id, labels.get(r.incident_id) ?? incidentLabel(r), r.severity, r.rule?.rule ?? '', r.alerts]) }}
             empty={data.top_risks.length === 0 ? 'No open High or Medium incident.' : undefined}
           >
+            <div className="wide-labels">
             <HBars
               unit="alerts"
               rows={data.top_risks.map((r) => ({
                 key: r.incident_id,
-                label: <span>{r.rule ? `${r.severity}: ${r.rule.rule}` : r.severity}</span>,
-                text: `${r.severity} incident ${r.incident_id}`,
+                label: <span className="mono">{labels.get(r.incident_id)}</span>,
+                text: `${r.severity}: ${labels.get(r.incident_id) ?? r.incident_id}`,
                 value: r.alerts,
                 tone: sevTone(r.severity),
                 sev: sevLevel(r.severity),
-                detail: [`first seen ${r.first_ts}`, `status ${r.status ?? 'open'}`],
+                detail: [`${r.incident_id}`, r.rule ? `why ${r.severity}: ${r.rule.rule} (rule ${r.rule.row})` : `severity ${r.severity}`, `first seen ${r.first_ts} (data date)`, `status ${r.status ?? 'open'}`],
                 onActivate: session.role === 'executive' ? undefined : () => (window.location.hash = buildHash('/incidents', { id: r.incident_id })),
               }))}
             />
-            <p className="chart-note">In plain words: the bar length is how many alerts each incident groups; the label says the triage rule that made it severe.</p>
+            </div>
+            <p className="chart-note">In plain words: each bar is one open incident, named by its main host or source IP and when it started in the data; the bar length is how many alerts it groups. Hover a bar for the triage rule that made it severe.</p>
           </ChartFrame>
           <ChartFrame
             title="Review and approvals"

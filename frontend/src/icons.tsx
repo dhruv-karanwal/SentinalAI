@@ -38,6 +38,10 @@ const PATHS = {
   print: <path d="M4.5 6V2h7v4M4.5 11.5h-2V6h11v5.5h-2M4.5 9.5h7v4.5h-7z" />,
   entity: <path d="M2.5 3.5h11v6h-11zM5.5 12.5h5M8 9.5v3" />,
   signOut: <path d="M6.5 2.5h-4v11h4M10 5l3 3-3 3M13 8H6" />,
+  about: <path d="M8 2a6 6 0 1 1 0 12A6 6 0 0 1 8 2ZM8 7.2v4.3M8 4.8v.1" />,
+  play: <path d="M5 3.2v9.6L12.5 8 5 3.2Z" />,
+  chat: <path d="M2.5 3h11v7.5H6.5L3.5 13.2v-2.7h-1zM5 6.8h6" />,
+  send: <path d="M2.5 8 13.5 2.8 10 13.2 7.6 8.6 2.5 8ZM7.6 8.6l5.9-5.8" />,
 } satisfies Record<string, ReactNode>;
 
 export type IconName = keyof typeof PATHS;

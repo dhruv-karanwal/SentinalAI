@@ -6,6 +6,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, can, setToken, setUnauthorizedHandler, type Session } from './api.ts';
 import type { AskEntry, AskStore } from './components/Findings.tsx';
 import { GlobalSearch } from './components/GlobalSearch.tsx';
+import { HelpChat } from './components/HelpChat.tsx';
+import { TourPanel } from './components/Tour.tsx';
+import { AboutScreen } from './screens/About.tsx';
 import { Notifications } from './components/Notifications.tsx';
 import { Button, Dialog, ScreenBoundary } from './components/ui.tsx';
 import { AppContext, buildHash, isTypingTarget, sendNav, storageGet, storageSet, useLoad, useRoute, type AppState, type TimeFormat } from './hooks.ts';
@@ -40,6 +43,7 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
+  { path: '/about', label: 'About', icon: 'about', key: 'h', about: 'How SentinelAI works: the problem, the pipeline, the study question, what each screen shows, limits and the glossary.' },
   { path: '/overview', label: 'Overview', icon: 'overview', key: 'o', about: 'Charts over the stored alerts and incidents; each chart filters the alert table under it.' },
   { path: '/incidents', label: 'Incidents', icon: 'incidents', key: 'i', about: 'The triage queue: incident table, detail with the detector strip, ATT&CK lanes, entity graph, evidence and findings.' },
   { path: '/alerts', label: 'Alerts', icon: 'alerts', key: 'a', about: 'Every stored alert with facet counts, saved filters and CSV export.' },
@@ -63,7 +67,7 @@ const SHORTCUTS: Array<[string, string]> = [
   ['/', 'Focus the screen filter'],
   ['Ctrl+K', 'Global search (alert id, IP, rule id, incident id)'],
   ['c', 'Copy the selected id'],
-  ['g then o / i / a / p / r / e / s / u', 'Overview / Incidents / Alerts / Approvals / Reports / Executive / Study / Audit'],
+  ['g then h / o / i / a / p / r / e / s / u', 'About / Overview / Incidents / Alerts / Approvals / Reports / Executive / Study / Audit'],
   ['Left / Right on a chart', 'Read the bins; Shift selects a range, Enter filters, Esc clears'],
   ['d', 'Compact or comfortable rows'],
   ['t', 'Dark or light theme'],
@@ -87,6 +91,11 @@ function visible(n: NavItem, role: Session['role']): boolean {
 
 function homeFor(role: Session['role']): string {
   return role === 'executive' ? '/executive' : '/overview';
+}
+
+/** Professor demo mode (Settings, per browser): land on About instead of the role's home. */
+function landingFor(role: Session['role'], demo: boolean): string {
+  return demo ? '/about' : homeFor(role);
 }
 
 /** Favicon from the brand mark in the current accent colour (read from the tokens, no hex here). */
@@ -115,6 +124,12 @@ export function App() {
   const [help, setHelp] = useState(false);
   const [askEntries, setAskEntries] = useState<AskEntry[]>([]);
   const [modelOffline, setModelOffline] = useState(false);
+  const [demo, setDemoState] = useState(() => storageGet('sentinel.demo') !== '0');
+  const [tour, setTour] = useState<number | null>(null);
+  const setDemo = useCallback((on: boolean) => {
+    storageSet('sentinel.demo', on ? '1' : '0');
+    setDemoState(on);
+  }, []);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const globalRef = useRef<HTMLInputElement | null>(null);
   const pendingG = useRef(0);
@@ -202,7 +217,9 @@ export function App() {
   useEffect(() => {
     if (!session) return;
     const raw = window.location.hash.replace(/^#\/?/, '');
-    if (!raw) window.location.replace(`#${homeFor(session.role)}`);
+    if (!raw) window.location.replace(`#${landingFor(session.role, demo)}`);
+    // demo mode: land on About once per sign-in
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
 
   // ---- global shortcuts ------------------------------------------------------------------------
@@ -316,6 +333,7 @@ export function App() {
   const sc = scenario ?? '';
   let screen;
   if (!current) screen = <ErrorPage title={`No such page: ${route.path || '/'}`} detail="The address does not match a screen your role can open." home={homeFor(session.role)} />;
+  else if (current.path === '/about') screen = <AboutScreen onTour={() => setTour(0)} />;
   else if (!scenario && !['/settings', '/security', '/users', '/study', '/approvals', '/audit', '/reports', '/ask'].includes(current.path))
     screen = scenarios.error ? (
       <ErrorPage title="No data source" detail={`The list of stored scenarios could not be loaded (${scenarios.error.status || 'API unreachable'}: ${scenarios.error.message}).`} home={homeFor(session.role)} onRetry={scenarios.reload} />
@@ -344,6 +362,8 @@ export function App() {
         onTheme={applyTheme}
         onDensity={applyDensity}
         onTimeFormat={setTimeFormat}
+        demo={demo}
+        onDemo={setDemo}
       />
     );
 
@@ -391,6 +411,9 @@ export function App() {
           </span>
           {scenarios.error && <span className="field-error">data sources: {scenarios.error.status || 'API unreachable'}</span>}
           <span className="spacer" />
+          <Button kind="ghost" icon="play" onClick={() => setTour(0)} title="A 6-stop walkthrough of the console">
+            Start here
+          </Button>
           <GlobalSearch inputRef={globalRef} scenario={scenario} />
           <Notifications />
           <Button kind="ghost" icon="help" onClick={() => setHelp(true)} title="Help and keyboard shortcuts (?)">
@@ -422,6 +445,8 @@ export function App() {
           <a href="#/security">Security notes</a>
         </footer>
       </div>
+      {tour !== null && <TourPanel step={tour} onStep={setTour} onClose={() => setTour(null)} />}
+      <HelpChat path={route.path} screenName={current?.label ?? 'Unknown page'} incidentId={route.path === '/incidents' ? (route.params.id ?? null) : null} />
       <div className="toasts">
         {toasts.map((t) => (
           <div key={t.id} className="toast" data-kind={t.kind} role={t.kind === 'error' ? 'alert' : 'status'}>

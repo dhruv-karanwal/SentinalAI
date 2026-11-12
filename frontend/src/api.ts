@@ -491,6 +491,8 @@ export interface StudyRun {
   arms: Record<string, ScoreRow>;
   baselines: Record<string, ScoreRow>;
   note: string | null;
+  /** pilot | held-out | adhoc, from scores.json (older files have none) */
+  study_part?: string | null;
 }
 
 export interface StudyResults {
@@ -498,6 +500,30 @@ export interface StudyResults {
   excluded_fake_runs: number;
   incomplete_runs: number;
   label: string;
+}
+
+export interface ExplainAnswer {
+  mode: 'explain';
+  status: string;
+  answer: string[];
+  model: string;
+  sources: string[];
+  note: string;
+}
+
+export interface AlertRun {
+  first_alert_id: string;
+  last_alert_id: string;
+  count: number;
+  detector: string;
+  rule_id: string | null;
+  rule_name: string | null;
+  severity: number | null;
+  host_ip: string | null;
+  src_ip: string | null;
+  techniques: string[];
+  first_ts: string;
+  last_ts: string;
 }
 
 export interface UserRow {
@@ -551,6 +577,10 @@ export const api = {
     request<{ id: number; status: string }>('POST', `/approvals/${id}/decision`, { approved, reason }),
   executeApproval: (id: number) => request<{ executed: boolean; mode: string; note: string }>('POST', `/approvals/${id}/execute`),
 
+  explain: (body: { question: string; screen?: string; context?: string; incident_id?: string | null; glossary: Array<{ term: string; definition: string; why: string }> }) =>
+    request<ExplainAnswer>('POST', '/copilot/ask', { mode: 'explain', ...body, incident_id: body.incident_id || undefined }),
+  alertRuns: (scenario: string, f: AlertFilter, limit: number, offset: number, signal?: AbortSignal) =>
+    request<{ runs: AlertRun[]; total_runs: number; total_alerts: number; offset: number }>('GET', `/alerts/runs${qs({ scenario, ...f, limit, offset })}`, undefined, signal),
   ask: (incident_id: string, question: string) => request<CopilotAnswer>('POST', '/copilot/ask', { incident_id, question }),
   audit: (signal?: AbortSignal) => request<{ entries: AuditEntry[] }>('GET', '/audit?limit=1000', undefined, signal),
   overview: (scenario: string, signal?: AbortSignal) => request<Overview>('GET', `/overview${qs({ scenario })}`, undefined, signal),

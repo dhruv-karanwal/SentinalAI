@@ -26,7 +26,9 @@ import {
   StatusTag,
   Time,
 } from '../components/ui.tsx';
-import { useApp, useLoad, type Route } from '../hooks.ts';
+import { Term } from '../components/Term.tsx';
+import { useApp, useLoad, useScreenContext, type Route } from '../hooks.ts';
+import { incidentLabel, mainFromNodes, whatHappened } from '../lib/explain.ts';
 import { Icon } from '../icons.tsx';
 import { compareQueue, epochSeconds, fmtDuration, fmtInt, parseEntity } from '../lib/format.ts';
 
@@ -310,9 +312,9 @@ function IncidentDetail({
 
   const alertColumns = useMemo<Column<AlertRowT>[]>(
     () => [
-      { id: 'ts', header: 'Time (UTC)', width: '146px', sortKey: (e) => e.t, render: (e) => <Time ts={e.ts} /> },
+      { id: 'ts', header: 'Time (UTC, data)', width: '146px', sortKey: (e) => e.t, render: (e) => <Time ts={e.ts} /> },
       { id: 'det', header: 'Detector', width: '74px', sortKey: (e) => e.detector, render: (e) => <DetectorTag value={e.detector} /> },
-      { id: 'level', header: 'Level', width: '74px', sortKey: (e) => ['high', 'medium', 'low', 'none'].indexOf(e.level), render: (e) => <SeverityCell value={e.level} /> },
+      { id: 'level', header: 'Level class', width: '74px', sortKey: (e) => ['high', 'medium', 'low', 'none'].indexOf(e.level), render: (e) => <SeverityCell value={e.level} /> },
       { id: 'rule', header: 'Rule id', width: '88px', sortKey: (e) => e.rule_id, render: (e) => <span className="mono">{e.rule_id ?? '-'}</span> },
       { id: 'name', header: 'Rule name', width: 'minmax(0, 1fr)', sortKey: (e) => e.rule_name, title: (e) => e.rule_name ?? '', render: (e) => e.rule_name ?? <span className="faint">-</span> },
     ],
@@ -396,6 +398,7 @@ function IncidentDetail({
         )}
       </div>
 
+      <WhatHappened incident={incident} analysis={analysis.data} />
       <SummaryStrip incident={incident} analysis={analysis.data} />
       <div className="section">
         <div className="meta-row">
@@ -626,7 +629,7 @@ function ResponsePanel({ incident }: { incident: Incident }) {
             <Id value={report.report_id} label="Copy report id" />
             <span>
               <span className="k">Created</span>
-              <Time ts={report.created_utc} />
+              <Time ts={report.created_utc} kind="created" />
             </span>
             <a href={`#/reports?id=${encodeURIComponent(report.report_id)}`}>Open in Reports</a>
             {can(session.role, 'report.create') && (
@@ -739,7 +742,7 @@ function ResponsePanel({ incident }: { incident: Incident }) {
                   <td className="mono">{a.action.target ?? '-'}</td>
                   <td>{a.requested_by}</td>
                   <td>
-                    <Time ts={a.created_utc} />
+                    <Time ts={a.created_utc} kind="created" />
                   </td>
                 </tr>
               ))}
@@ -845,6 +848,22 @@ function RequestApprovalDialog({
   );
 }
 
+// ---- what happened (deterministic, from the incident's own data; never from the model) ---------
+
+function WhatHappened({ incident, analysis }: { incident: Incident; analysis: IncidentAnalysis | null }) {
+  const rule = analysis?.summary.rule ?? null;
+  const text = whatHappened(incident, rule, analysis ? mainFromNodes(analysis.graph.nodes) : null);
+  useScreenContext('incident', `Selected incident ${incident.incident_id} (${incidentLabel(incident)}). What happened: ${text} Status: ${incident.status}.`);
+  return (
+    <p className="what-happened" aria-label="What happened">
+      <span className="k">
+        What happened <span className="faint">(built from this incident's stored data, not by the AI)</span>
+      </span>
+      {text}
+    </p>
+  );
+}
+
 // ---- one-glance summary strip ---------------------------------------------------------------
 
 function SummaryStrip({ incident, analysis }: { incident: Incident; analysis: IncidentAnalysis | null }) {
@@ -854,7 +873,9 @@ function SummaryStrip({ incident, analysis }: { incident: Incident; analysis: In
   return (
     <div className="summary-strip" role="group" aria-label="Incident summary">
       <div className="why">
-        <div className="k">Why this severity {s?.rule ? `(triage rule ${s.rule.row})` : ''}</div>
+        <div className="k">
+          Why this severity {s?.rule ? <>(<Term id="triage-rule">triage rule {s.rule.row}</Term>)</> : ''}
+        </div>
         <span>
           <SeverityCell value={incident.severity} />{' '}
           {s?.rule ? `because ${s.rule.rule}.` : incident.detail.severity_row ? `triage rule ${incident.detail.severity_row}` : 'no triage rule recorded'}
@@ -864,13 +885,17 @@ function SummaryStrip({ incident, analysis }: { incident: Incident; analysis: In
             <span className="tag">detectors {inputs.detectors ?? '?'}</span>
             <span className="tag">max level {inputs.max_level ?? '?'}</span>
             <span className="tag">ATT&amp;CK {inputs.attack_mapped ? 'mapped' : 'not mapped'}</span>
-            <span className="tag">IOC {inputs.ioc_match ? 'match' : 'no match'}</span>
+            <span className="tag">
+              <Term id="ioc">IOC</Term> {inputs.ioc_match ? 'match' : 'no match'}
+            </span>
             <span className="tag">{fmtInt(inputs.size ?? incident.alert_ids.length)} alerts</span>
           </span>
         )}
       </div>
       <div>
-        <div className="k">First / last seen (UTC)</div>
+        <div className="k">
+          First / last seen (UTC, <Term id="data-date">data date</Term>)
+        </div>
         <div>
           <Time ts={incident.first_ts} />
         </div>
@@ -880,7 +905,9 @@ function SummaryStrip({ incident, analysis }: { incident: Incident; analysis: In
         </div>
       </div>
       <div>
-        <div className="k">Detectors agreeing</div>
+        <div className="k">
+          <Term id="detector">Detectors</Term> agreeing
+        </div>
         <div className="num" style={{ fontWeight: 600 }}>
           {dets.length} <span className="faint" style={{ fontWeight: 400 }}>of 3</span>
         </div>

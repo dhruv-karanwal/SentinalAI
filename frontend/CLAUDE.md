@@ -32,13 +32,17 @@ src/icons.tsx           the whole icon set (16 px, 1.5 px stroke, currentColor) 
 src/api.ts              typed client, in-memory token, PERMISSIONS mirror of backend auth.py
 src/hooks.ts            AppContext, hash routing (#/screen?id=..&ev=..), useLoad, nav events
 src/lib/                pure logic with tests: format, virtual (windowing), bins (strip), highlight,
-                        scale (scales, ticks, bins), graph (force layout + graph.fixture.json), contrast, study
+                        scale (scales, ticks, bins), graph (force layout + graph.fixture.json + placeLabels),
+                        contrast, study, explain (glossary search, whatHappened, incident labels, folded runs)
+src/content/            glossary.ts (the ONE glossary: Term tooltips, About, chat fallback) and about.ts
+                        (pipeline stages, study question, screen guide, limits, tour stops, suggested questions)
 src/charts/             SVG charts: ChartFrame (question, legend, tooltip, hidden table), TimeBars, Bars
                         (HBars, StackedHBars, DotPairs, MiniBar), Attack (HeatStrip, ChainStrip, Lanes), EntityGraph
 src/components/         DataTable, SplitPane, TimeStrip (canvas), EvidencePane, Findings, ui, AlertQueryTable,
-                        GlobalSearch, Notifications
+                        AlertRunsTable (folded repeats), GlobalSearch, Notifications, Term (+ Explain), Tour, HelpChat
 src/v2.css              v2 styles (charts, sign-in, shell, facets, print); tokens only
-src/screens/            Overview, Incidents, Alerts, Approvals, Reports, Ask, Executive, Study, Audit, Users,
+src/explain.css         explainable-console styles (DESIGN.md section 12); tokens only
+src/screens/            About, Overview, Incidents, Alerts, Approvals, Reports, Ask, Executive, Study, Audit, Users,
                         Entity, Settings (+ SecurityNotes), ErrorPage, SignIn
 src/App.tsx             shell (top bar, rail), global shortcuts, toasts, ScreenBoundary
 scripts/shots.mjs       DevTools-protocol screenshot runner (no dependency)
@@ -83,6 +87,17 @@ scripts/shots.mjs       DevTools-protocol screenshot runner (no dependency)
 - The permission table in `api.ts` only decides what to show; the API decides what is allowed,
   and a 403 is displayed.
 
+- **Explain, don't decorate** (DESIGN.md 12): a new term goes into `content/glossary.ts` (definition at
+  most two sentences, "why it matters here"), never inline in a screen; new sections get a What / Why
+  pair. The "What happened" sentence and incident labels are deterministic (`lib/explain.ts`), never
+  model output. A screen that the help chat should understand publishes a plain-text summary with
+  `useScreenContext`; it holds only numbers the screen already shows.
+- **Help chat and the model:** only `POST /copilot/ask` with `mode: "explain"` (one request, <= 300
+  output tokens, 429 when busy). Never test it against the real model while a pilot runs; screenshots
+  of the online state use a fetch mock labelled MOCK FOR SCREENSHOT.
+- Demo mode (`sentinel.demo`, on unless set to 0), the collapsed "More detail" (`sentinel.overview.more`)
+  are also in `localStorage`.
+
 ## Gotchas
 
 - Overview and Executive read `/overview` and `/executive` (aggregates only); the first call after an
@@ -97,5 +112,9 @@ scripts/shots.mjs       DevTools-protocol screenshot runner (no dependency)
   `Finding` component still copes with an API that sends counts only.
 - Vite serves an intermediate file state if two writes to one module land within its watcher
   debounce; if a screen breaks after a scripted edit, reload once before debugging.
+- The facet sidebar styles every `button` as a full-width grid row; a `<Term>` "?" inside a facet or
+  legend needs the reset in `explain.css` (`.facet .term-q`).
+- `element.focus()` from a script does not open a `<Term>` tooltip in headless Chrome (no focus
+  event without a focused window); test it with a real Tab key press (`shots.mjs` `key` step).
 - The in-app Browser pane scales a 1366 px viewport down to its own width, so its screenshots
   are too small to judge type; use `scripts/shots.mjs` for the visual loop.

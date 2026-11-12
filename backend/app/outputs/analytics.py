@@ -327,6 +327,29 @@ class AlertIndex:
                 "rules": [{"value": v, "alerts": n, "label": names.get(v)} for v, n in rank(rules)]}
 
 
+def _run_key(f: Fact) -> tuple[Any, ...]:
+    return (f.detector, f.rule_id, f.rule_name, f.severity, f.host, f.src)
+
+
+def alert_runs(rows: Sequence[Fact]) -> list[dict[str, Any]]:
+    """Consecutive alerts (time order) that repeat the same detector, rule, level, host and source IP,
+    collapsed into one row with a count. Nothing is dropped: the counts add up to ``len(rows)``."""
+    out: list[dict[str, Any]] = []
+    i = 0
+    while i < len(rows):
+        j = i
+        key = _run_key(rows[i])
+        while j + 1 < len(rows) and _run_key(rows[j + 1]) == key:
+            j += 1
+        a, b = rows[i], rows[j]
+        out.append({"first_alert_id": a.alert_id, "last_alert_id": b.alert_id, "count": j - i + 1,
+                    "detector": a.detector, "rule_id": a.rule_id, "rule_name": a.rule_name,
+                    "severity": a.severity, "host_ip": a.host, "src_ip": a.src,
+                    "techniques": list(a.techniques), "first_ts": iso(a.ts), "last_ts": iso(b.ts)})
+        i = j + 1
+    return out
+
+
 def bin_facts(rows: Sequence[Fact], lo: float | None, hi: float | None, target: int = 120) -> dict[str, Any]:
     if lo is None or hi is None:
         return {"start": None, "end": None, "bin_seconds": None, "bins": 0, "series": {}, "total": 0}
@@ -384,6 +407,36 @@ def incident_row(inc: Mapping[str, Any]) -> dict[str, Any]:
             "last_ts": str(inc["last_ts"]), "severity": inc["severity"], "status": inc.get("status"),
             "alerts": len(inc.get("alert_ids") or timeline or []), "created_utc": str(inc.get("created_utc")),
             "detail": detail}
+
+
+def main_entities(alert_ids: Sequence[str], by_id: Mapping[str, Fact]) -> dict[str, Any]:
+    """The host and the source IP with the most alerts in an incident (ties: smallest value), so a
+    list can name an incident by its main entity. The stored ``entities`` list is sorted by value."""
+    hosts: Counter[str] = Counter()
+    srcs: Counter[str] = Counter()
+    for aid in alert_ids:
+        f = by_id.get(aid)
+        if f is None:
+            continue
+        if f.host:
+            hosts[f.host] += 1
+        if f.src:
+            srcs[f.src] += 1
+
+    def top(c: Counter[str]) -> str | None:
+        return min(c.items(), key=lambda kv: (-kv[1], kv[0]))[0] if c else None
+
+    return {"main_host": top(hosts), "main_ip": top(srcs)}
+
+
+def with_main_entities(rows: list[dict[str, Any]], incidents: Mapping[str, Mapping[str, Any]],
+                       by_id: Mapping[str, Fact]) -> list[dict[str, Any]]:
+    """``incident_row``-shaped rows with ``detail.main_host`` / ``detail.main_ip`` added."""
+    out = []
+    for r in rows:
+        inc = incidents.get(r["incident_id"]) or {}
+        out.append({**r, "detail": {**r.get("detail", {}), **main_entities(inc.get("alert_ids") or [], by_id)}})
+    return out
 
 
 def queue_summary(incidents: Sequence[Mapping[str, Any]], approvals: Sequence[Mapping[str, Any]],
