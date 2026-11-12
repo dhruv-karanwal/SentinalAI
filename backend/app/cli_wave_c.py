@@ -375,7 +375,7 @@ def _run_pilot(args: argparse.Namespace) -> int:
                              retriever=retriever, repo=stores.repo,
                              vectors=retriever.store if retriever else None,
                              embedder=retriever.embedder if retriever else None,
-                             resume=True, retrieval_mode=mode)
+                             resume=True, retrieval_mode=mode, study_part="pilot")
         wall = round(time.perf_counter() - started, 1)
         arms = report["scores"]["arms"]
         log("done", s, v, t, run_id=report["run_id"], wall_seconds=wall,

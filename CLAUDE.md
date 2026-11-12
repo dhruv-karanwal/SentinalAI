@@ -56,6 +56,7 @@ multi-agent comparison, the verifier, statistics.
 | C3 | **Done (code)**: matched-budget runner (`agent/matched.py`: single vs graph, same cases, same budgets, same verifier, scored before and after the verifier next to the same baselines), CLI `rag-index`, `rag-eval`, `pilot-estimate`, `run-matched`, `run-pilot` (`app/cli_wave_c.py`). **2026-11-10:** pilot config in study.json (`pilot.variants` = wazuh, suricata, aminer, fused, oracle, noise-wazuh; `select` reachable; `retrieval` hybrid; spread first): 12 runs, 168 cases x 2 arms = 336 case runs, token bound 13,440,000; resumable runs (`--resume`, `run-pilot` always). **Real pilot not run (no model); GATE after it** |
 | D | **Offline parts done (2026-11-10)**: `app/outputs/` reports (JSON body, CSV, PDF via reportlab; timeline, citations, ATT&CK techniques, playbook recommendations), approval workflow + gated simulated executor (`action.execute`, four-eyes, once only, migration 0002), feedback API + `feedback-report` (no retraining), `POST /copilot/ask` (M5 tools + verifier), Grafana dashboard JSON, `docs/security-notes.md`, Jira disabled stub. **React console built 2026-11-10** (user's go before the pilot gate): `frontend/` (React 19 + TypeScript + Vite 8, plain CSS tokens, no UI kit), screens Incidents, Alerts, Approvals, Reports, Ask, Audit, Sign in; design authority `frontend/DESIGN.md`; API additions `GET /scenarios` and verifier detail in copilot answers. Findings/Ask verified only in the model-offline state. **Console v2 2026-11-12** (`phase3/wave-d-ui-v2`): own SVG chart module (`frontend/src/lib/scale.ts`, `graph.ts`, `charts/`), sign-in with pipeline schematic, Overview (status row, alerts over time, queue, ATT&CK heat strip, top entities, detector comparison, kill chain, filtered table), Entity, incident summary strip + ATT&CK lanes + entity graph, Alerts facets / saved filters / CSV, report preview + d2 PDF charts, Approvals rules + trail, Audit chart, Executive, Study (results files only; empty until a real run), Settings, Users, notifications, global search; backend `app/api/console.py` + `app/outputs/analytics.py` + `graph_layout.py`, migration 0003 |
 | E | Only after the user says go |
+| F (final runs) | **Tooling done 2026-11-12** (branch `phase3/final-runs`): `study/stats.py` (paired bootstrap, Holm; family in `experiments/config/statistics.json`), `study/freeze.py` (`protocol-freeze`, `--allow-held-out` only with a matching freeze, logged), `study/final_runs.py` (plan `experiments/config/final_study.json`: phases i spread r1, ii spread r2-3, iii earliest r1; per-scenario checkpoints), `study/paper_assets.py` (`export-paper-assets` -> `results/`); the user's go of 2026-11-12 covers pilot, freeze and held-out |
 
 **Where we stopped (2026-11-09) and what comes next:** see the last section of
 `docs/session-notes.md` ("Final report, 2026-11-09"). In short: Waves B2-B4 and
@@ -121,6 +122,11 @@ S=../data/samples/synthetic_ait_ads
 ../.venv/Scripts/python.exe -m app.main run-matched --scenario russellmitchell --variant fused --select reachable --limit 2 --dry-run
 # the whole pilot from study.json (spread first, resumable, progress in data/processed/runs/pilot-progress.jsonl)
 ../.venv/Scripts/python.exe -m app.main run-pilot --truncations spread --dry-run
+# final study: freeze the protocol (model configured), then the held-out plan (resumable)
+../.venv/Scripts/python.exe -m app.main protocol-freeze --model-digest <digest>
+../.venv/Scripts/python.exe -m app.main run-final --allow-held-out --dry-run
+../.venv/Scripts/python.exe -m app.main run-final --allow-held-out --confirm --phases i
+../.venv/Scripts/python.exe -m app.main export-paper-assets     # results/ from run files
 # passwords and secrets only from the environment, never as arguments
 ../.venv/Scripts/python.exe -m app.main create-user --username alice --role analyst   # needs SENTINEL_NEW_USER_PASSWORD
 ../.venv/Scripts/python.exe -m app.main serve      # API on 127.0.0.1:8000; needs SENTINEL_JWT_SECRET
@@ -226,6 +232,12 @@ backend/app/
   agent/matched.py        estimate_matched (dry-run bound + method), matched_hash (+ retrieval mode),
                           resume_run_id, run_matched (both arms, run log, resume via per-case checkpoints)
   cli_wave_c.py           rag-index, rag-eval (all modes), pilot-estimate, run-matched, run-pilot
+  cli_final.py            protocol-freeze, final-plan, run-final (--allow-held-out), study-stats,
+                          export-paper-assets
+  study/stats.py          paired_bootstrap (stratified, seeded), holm, effect_sizes, compare_family
+  study/freeze.py         FROZEN_CODE, compute_freeze / verify_freeze, authorize_held_out -> HeldOutPermit
+  study/final_runs.py     load_final_plan, plan_runs, run_final (per-scenario checkpoints), case_rows
+  study/paper_assets.py   summarize, export_paper_assets (CSV, LaTeX, SVG, provenance, README)
   agent/copilot.py        CopilotToolkit (CaseToolkit + analyst question in the brief), ask() -> verified answer
   outputs/playbooks.py    PLAYBOOK rows (technique prefix -> actions), STATE_CHANGING, recommend()
   outputs/reports.py      build_report (label-free, deterministic, MAX_ROWS 500), render_csv, render_pdf
@@ -580,6 +592,14 @@ experiments/config/study.json  frozen split; variant seed, shuffled/noise refere
   tested. Level classes are triage-only (Wazuh >= 12 high, 7-11 medium; Suricata 1 high, 2
   medium; Sigma critical/high, medium); `Alert.severity` is never rescaled. A rebuild deletes the
   scenario's incidents except those a report refers to. Report the gap with every incident number.
+- Held-out scenarios are reachable only through a `HeldOutPermit` (`prepare_run(..., permit=)`),
+  which `authorize_held_out` issues only when every hash in `experiments/freeze/protocol-freeze.json`
+  matches (study.json, statistics.json, final_study.json, relevance set, prompts, `FROZEN_CODE`,
+  model id, seeds); each attempt is logged. Editing a frozen file after the freeze breaks the
+  permit: that is intended (re-run affected runs and note it). Analysis code is not frozen.
+  `repeat` is in the matched config hash only when set, so pilot run ids did not change.
+- Matched `scores.json` carries `per_case` (every score row per case) and `study_part`;
+  `export-paper-assets` reads only `pilot` and `held-out` parts, never typed-in numbers.
 - Study code iterates `AIT_ADS_DETECTORS`, never `Detector`: `Detector.SIGMA`
   exists for the platform, and a study variant `sigma` appears only if
   `variants.extra_detectors` lists it (it does not). `test_frozen_sections_are_unchanged`

@@ -34,7 +34,8 @@ Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
   d2 PDF charts, Approvals rules + audit trail, Audit chart, Executive, Study (empty until a real
   run), Settings, Users (env-supplied passwords), notifications, global search. Backend
   `app/api/console.py`, `app/outputs/analytics.py`, `graph_layout.py`, migration 0003.
-  482 passed, 4 skipped; mypy clean (83 files); frontend 32 tests, tsc clean, build 421 kB.
+  482 passed, 4 skipped on the branch; after merging main (PR #11, final-study tooling): 504 passed,
+  4 skipped, mypy clean (88 files); frontend 32 tests, tsc clean, build 421 kB.
   Screenshots in `docs/ui/`; per-screen loop in `docs/session-notes.md`.
   Open: Study with real results, Findings with a real model answer, paper printing, CVD simulation.
 
@@ -81,3 +82,14 @@ ollama list
 ../.venv/Scripts/python.exe -m pytest -q
 ../.venv/Scripts/python.exe -m mypy
 ```
+
+## Final runs agent (branch `phase3/final-runs`, worktree `D:\Projects\ERA-final`)
+**Last update:** 2026-11-12 IST.
+- Built (tests first): `app/study/stats.py` (paired bootstrap + Holm), `app/study/freeze.py`
+  (`protocol-freeze`, `--allow-held-out` permit, access log), `app/study/final_runs.py` (plan of
+  `experiments/config/final_study.json`, per-scenario checkpoints, per-case rows),
+  `app/study/paper_assets.py` (`export-paper-assets` -> `results/`), CLI `app/cli_final.py`
+  (`protocol-freeze`, `final-plan`, `run-final`, `study-stats`, `export-paper-assets`).
+  Matched runs now write `per_case` scores and `study_part` (pilot / held-out / adhoc).
+- Model: segmented download `data/processed/downloads/final_fetch.py` (log `final-fetch.log`).
+- Decisions: `docs/session-notes.md`, "Final runs agent, 2026-11-12".
