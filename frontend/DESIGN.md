@@ -404,3 +404,85 @@ visibility toggle" and "errors announced". Rejected again: the Enterprise Gatewa
 pattern, Fira fonts from Google Fonts, the blue-tinted palette, 150-300 ms hovers and the GSAP
 scroll reveal, line charts for alert volume (bars per bin show bursts; a line interpolates
 between bins that do not exist), Heroicons / Lucide, pie charts (forbidden by the brief).
+
+## 12. Explainable console (2026-11-13)
+
+Brief: "make the console understandable to a professor who has never seen it; system worthy, not
+AI generated". Review of the v2 screenshots found: no page explains the project, Overview is eight
+stacked chart blocks in analyst jargon, Alerts shows 200 identical rows, Executive "Top risks" has
+rows with the same label, the Study page reads as broken when empty, graph labels overlap, no
+glossary or help. The Approvals and Executive "In plain words" lines are the voice to copy.
+
+### 12.1 Pieces
+
+- **Glossary** (`src/content/glossary.ts`, the one source): 41 terms, each a plain definition
+  (at most two sentences, tested) and "why it matters here". Used by `<Term>`, the About page and
+  the help chat's offline answers.
+- **`<Term id>`** (`components/Term.tsx`): the word plus a 14 px round "?" button. The tooltip opens
+  on hover and on keyboard focus, closes on Esc, blur or pointer leave, is `role="tooltip"` tied with
+  `aria-describedby`, and is `position: fixed` from the button rect so a scrolling pane never clips
+  it. Text nodes only. Used on Overview, Incidents, Alerts, Executive, Reports, Approvals, Study, About.
+- **What / Why pair** (`<Explain>`; `ChartFrame` props `what`, `why`, `term`): one line "What you're
+  looking at", one line "Why it matters", under every Overview section and the Study page.
+- **About** (`/about`, first in the rail; landing page in Professor demo mode, which is on by default
+  and switched in Settings, `localStorage` `sentinel.demo`): the problem, the five pipeline stages
+  as hairline boxes with the real component names, the study question in one sentence, the live
+  results status from `/study/results` (pilot vs final vs in progress; never a number), what each
+  screen shows (links), limits and honesty notes, the filterable glossary.
+- **Guided tour** ("Start here" in the top bar and on About): six stops About, Overview, Incidents,
+  Alerts, Approvals, Study; a non-modal panel bottom left (never over the chat launcher) with Skip,
+  Back, Next and a six-step progress rule; Esc ends it.
+- **Help chat** (`components/HelpChat.tsx`): an "Explain" launcher on the footer bar at the bottom
+  right (it covers no content: the footer reserves its width), a 400 px panel above it. It sends the
+  question, the screen name, a plain-text screen summary (`useScreenContext`), the selected incident
+  and the matching glossary entries to `POST /copilot/ask` in `mode: "explain"` (one request, at most
+  300 output tokens, temperature 0; the API answers 429 instead of queueing a second one). Each
+  answer says "answered by local model <id>" or "answered from the glossary (no model)". Offline (no
+  endpoint, Ollama unreachable, role without `copilot.ask`, model busy): a deterministic glossary
+  search, with the status "Local model offline: showing glossary answers only"; the model is tried
+  again after 60 s. Suggested questions per screen (`content/about.ts`). Esc closes and returns
+  focus to the launcher. Answers are plain text.
+- **Overview in two layers**: four headline numbers in plain words, alerts over time, "Incidents to
+  look at first" (queue order, each named by its main host or source IP and first-seen data time);
+  everything else under a collapsed "More detail" (remembered per browser; a chart filter opens it).
+- **"What happened"** at the top of incident detail: one or two sentences built by
+  `lib/explain.ts whatHappened` from the incident's own data (time span, alert count, detectors,
+  main host and source IP by alert count, most frequent rule, triage rule). Never from the model;
+  the label says so.
+- **Folded alert rows** (`components/AlertRunsTable.tsx`, `GET /alerts/runs`): consecutive alerts
+  with the same detector, rule, level, host and source IP are one row with "×14,436 · same rule,
+  same host"; the chevron button expands up to 50 of them inline; "Fold repeats" turns it off (URL
+  `fold=0`). "Level (detector-native)" is renamed "Detector's own severity" / "Own level".
+- **Distinct incident labels** (`incidentLabel`, `distinctLabels`): main host (most alerts), else
+  main source IP, plus first-seen data time to the minute; a repeat gets the incident id appended.
+  The API adds `detail.main_host` / `main_ip` to `/incidents/summary` and Executive `top_risks`
+  (the stored `entities` list is sorted by value, so its first item is not the main one).
+- **Graph labels without overlap** (`lib/graph.ts placeLabels`, `graph_layout.place_labels` for the
+  PDF): most alerts first, each label tries right, left, below, above; a spot must stay inside the
+  plot and clear of placed labels and other nodes. A label that fits nowhere shows on hover / focus,
+  and the caption says how many are hidden; the adjacency table keeps every name.
+- **Dates**: `<Time kind="data" | "created">` adds a faint "data date" or "created" word (and the
+  meaning in the hover text) wherever 2022 dataset times and console creation times appear together
+  (report detail, incident response, approvals, column headers "(UTC, data date)").
+- **Study**: a "What this page shows" block with terms; runs split by study part (pilot, final
+  held-out, ad hoc) with a selector; every row names scenario and variant; the empty state says what
+  will appear.
+
+### 12.2 Tokens
+
+No new colour token. New component styles live in `src/explain.css` (tokens only). The "?" uses
+`--border-strong` (>= 3:1 on every surface, measured in section 3) and `--text-muted`; the tooltip
+is `--raised` with `--text` and `--text-muted` (both measured in section 3); the offline chat status
+uses `--sev-medium` text on `--surface` (4.5:1 or more, section 3). Motion: none added.
+
+### 12.3 Skill run (2026-11-13)
+
+`ui-ux-pro-max` `--design-system` (density 8, motion 1, variance 2) and `ux` searches for tooltip
+focus, onboarding tour, progressive disclosure, dialog focus, live regions and graph labels. Kept:
+Minimalism & Swiss; "users can skip tutorials: Skip and Back buttons"; "focus not obscured: chat
+widgets must not cover focus" (the launcher sits on the footer, the tour panel avoids it); "one
+atomic status message" (the chat status line); "compact labels: expose the full text to keyboard and
+pointer" (hidden graph labels on focus, titles on truncated cells); network graph "the adjacency
+view is the accessible source of truth". Rejected again: the Trust & Authority landing pattern,
+Fira fonts, the blue / green palette, 200-250 ms hovers and scroll reveals. The chat-panel query
+returned no database match; its design follows the existing Dialog and toast rules instead.

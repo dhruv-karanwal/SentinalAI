@@ -2215,3 +2215,32 @@ mypy clean (88 files). The only conflict was this file (both branches appended a
   tactics, score and an excerpt from the correct chunk; `chunk_id` never reaches the model, and
   recall numbers rank techniques, not chunks. The crashed case had no checkpoint, so it re-runs.
   The config hash does not include retriever code: the pilot resumes in the same run directories.
+
+### Explainable console (2026-11-13, branch `phase3/wave-e-explainable-ui`)
+User brief: make the console understandable to a professor who has never seen it; build now; the dev
+pilot is running on the same GPU, so nothing under backend/app/study, backend/app/agent, experiments
+or data was changed, Ollama was not restarted, and the model was never called.
+
+- Built (tests first): see DESIGN.md section 12 for the list. Backend: explain mode of
+  `/copilot/ask` (`app/api/explain.py`), `GET /alerts/runs`, `analytics.main_entities`,
+  `graph_layout.place_labels` (console + PDF), `study_part` in study results.
+- Found while checking: the incident `entities` list is sorted by value, so "first entity" is not the
+  main one (the 11,208-alert incident listed host 10.143.0.103 first; by alert count its main host is
+  10.143.2.4). Labels and "What happened" now use alert counts (`main_host` / `main_ip`, graph nodes).
+- Study page: the pilot's result files were already there when checked (12 pilot runs + 2 ad hoc, 1
+  FakeClient run excluded). Rows named only "fused · single" repeated across scenarios and the ad hoc
+  smoke runs; rows now name the scenario, and runs are split pilot / final / ad hoc. No numbers were
+  interpreted or copied anywhere.
+- Verification: my own API on 127.0.0.1:8001 (no model endpoint) over a scratch copy of the UI-dev
+  stores (SQLite backup API, read-only on the source) and a console on 5174; `scripts/shots.mjs` at
+  1366 x 768 in both themes. Results: no horizontal scroll on About, Overview, Incidents, Alerts,
+  Executive; 0 row overflows; 0 overlapping graph labels (3-node and 16-node incidents; 1 of 16 labels
+  hidden and the caption says so); Term tooltip opens on a Tab focus and closes on Esc; chat offline
+  state ("Local model offline: showing glossary answers only", answered from the glossary), Esc closes
+  the chat and focus returns to the launcher; tour moves About -> Overview; tab walk skip link, top
+  bar, rail with a visible ring; 0 console errors.
+- The chat's online state was checked with a fetch mock (the screenshot text says MOCK FOR
+  SCREENSHOT): label "answered by local model sentinel-qwen2.5-7b-32k" and status "Local model
+  online". Not checked: a real model answer (pilot running), the report PDF graph labels in a rendered
+  PDF (unit-tested only), a colour-vision-deficiency simulation, screen-reader output.
+- Tests: pytest 517 passed, 4 skipped; mypy clean (89 files); frontend 41 tests pass, tsc clean, build ok.

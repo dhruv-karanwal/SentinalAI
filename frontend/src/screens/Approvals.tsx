@@ -1,6 +1,7 @@
 // Approvals: requests for state-changing actions. A manager or admin who did not make the
 // request decides it with a reason; an approved request is executed once, by a simulated executor.
 
+import { Term } from '../components/Term.tsx';
 import { useEffect, useMemo, useState } from 'react';
 
 import { api, ApiError, can, type Approval } from '../api.ts';
@@ -41,7 +42,7 @@ export function ApprovalsScreen({ route }: Props) {
       { id: 'action', header: 'Action', width: '128px', sortKey: (a) => a.action.action_type, render: (a) => <span className="mono">{a.action.action_type}</span> },
       { id: 'target', header: 'Target', width: 'minmax(0, 1fr)', sortKey: (a) => a.action.target ?? null, render: (a) => <span className="mono">{a.action.target ?? '-'}</span> },
       { id: 'by', header: 'Requested by', width: '104px', sortKey: (a) => a.requested_by, render: (a) => a.requested_by },
-      { id: 'at', header: 'Requested (UTC)', width: '152px', sortKey: (a) => a.created_utc, render: (a) => <Time ts={a.created_utc} /> },
+      { id: 'at', header: 'Requested (UTC, created)', width: '152px', sortKey: (a) => a.created_utc, render: (a) => <Time ts={a.created_utc} /> },
     ],
     [],
   );
@@ -213,7 +214,9 @@ function ApprovalDetail({ approval: a, me, onChanged }: { approval: Approval; me
         </div>
 
         <div className="section">
-          <h3>Rules for this request</h3>
+          <h3>
+            Rules for this request (<Term id="four-eyes">four-eyes approval</Term>)
+          </h3>
           <ul className="rules">
             <li data-hit={own || undefined}>
               <Icon name={own ? 'warning' : 'check'} /> Four-eyes: the requester cannot decide.{' '}
@@ -273,7 +276,9 @@ function ApprovalDetail({ approval: a, me, onChanged }: { approval: Approval; me
 
         {a.status === 'approved' && !a.executed_utc && (
           <div className="section">
-            <h3>Execution</h3>
+            <h3>
+              <Term id="simulated">Execution</Term>
+            </h3>
             {can(session.role, 'action.execute') ? (
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                 {confirmExecute ? (
@@ -319,7 +324,9 @@ function EvidenceSummary({ incidentId }: { incidentId: string }) {
   const { data, error } = useLoad((signal) => api.analysis(incidentId, signal), [incidentId]);
   return (
     <div className="section">
-      <h3>Evidence</h3>
+      <h3>
+        <Term id="evidence">Evidence</Term>
+      </h3>
       {error && <p className="field-error">The incident could not be loaded: {describeError(error)}</p>}
       {!data && !error && <SkeletonLines lines={2} />}
       {data && (
@@ -333,7 +340,7 @@ function EvidenceSummary({ incidentId }: { incidentId: string }) {
           <dt>Alerts</dt>
           <dd className="num">
             {fmtInt(data.summary.alerts)} from {data.summary.detectors_agreeing} detector{data.summary.detectors_agreeing === 1 ? '' : 's'},{' '}
-            <Time ts={data.summary.first_ts} /> to <Time ts={data.summary.last_ts} />
+            <Time ts={data.summary.first_ts} /> to <Time ts={data.summary.last_ts} kind="data" />
           </dd>
           <dt>Entities</dt>
           <dd className="mono">

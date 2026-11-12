@@ -80,7 +80,7 @@ def study_results(runs_dir: Path) -> dict[str, Any]:
                          "model_ids": model.get("model_ids"), "retrieval_mode": manifest.get("retrieval_mode"),
                          "cases": len(manifest.get("cases") or []), "matched_k": scores.get("matched_k"),
                          "arms": scores["arms"], "baselines": scores.get("baselines", {}),
-                         "note": scores.get("note")})
+                         "note": scores.get("note"), "study_part": scores.get("study_part")})
     return {"runs": runs, "excluded_fake_runs": excluded_fake, "incomplete_runs": incomplete,
             "label": "dev scenarios, pilot numbers, not paper results"}
 
@@ -155,6 +155,18 @@ def add_console_routes(app: FastAPI, repo: Any, search_index: Any, extras: dict[
             out = [{k: v for k, v in r.items() if k != "record"} for r in out]
         return {"alerts": out, "total": len(rows), "offset": offset, "filter": f.describe()}
 
+    @app.get("/alerts/runs")
+    def alert_runs(p: Read, scenario: str, detector: Q = None, level: Q = None, rule_id: Q = None,
+                   technique: Q = None, host: Q = None, ip: Q = None, since: Q = None, until: Q = None,
+                   limit: Annotated[int, Query(ge=1, le=500)] = 200,
+                   offset: Annotated[int, Query(ge=0)] = 0) -> dict[str, Any]:
+        """The filtered alerts in time order with consecutive identical rows collapsed (see
+        ``analytics.alert_runs``); pages over runs, totals over runs and alerts."""
+        rows = index_for(scenario).select(flt(detector, level, rule_id, technique, host, ip, since, until))
+        runs = an.alert_runs(rows)
+        return {"runs": runs[offset:offset + limit], "total_runs": len(runs), "total_alerts": len(rows),
+                "offset": offset}
+
     @app.get("/alerts/facets")
     def alert_facets(p: Read, scenario: str, detector: Q = None, level: Q = None, rule_id: Q = None,
                      technique: Q = None, host: Q = None, ip: Q = None, since: Q = None,
@@ -184,7 +196,10 @@ def add_console_routes(app: FastAPI, repo: Any, search_index: Any, extras: dict[
 
     @app.get("/incidents/summary")
     def incident_summaries(p: Read, scenario: str) -> dict[str, Any]:
-        return {"incidents": [an.incident_row(i) for i in repo.list_incidents(scenario)]}
+        incidents = repo.list_incidents(scenario)
+        by_id = index_for(scenario).by_id
+        return {"incidents": an.with_main_entities([an.incident_row(i) for i in incidents],
+                                                   {i["incident_id"]: i for i in incidents}, by_id)}
 
     @app.get("/incidents/{incident_id}/analysis")
     def incident_analysis(incident_id: str, p: Read) -> dict[str, Any]:
@@ -234,9 +249,11 @@ def add_console_routes(app: FastAPI, repo: Any, search_index: Any, extras: dict[
         ids = {i["incident_id"] for i in incidents}
         approvals = [a for a in repo.list_approvals() if a["incident_id"] in ids]
         audit = [e for e in repo.audit_entries(limit=100_000) if e.get("target") in ids]
-        return {"scenario": scenario,
-                **an.executive_summary(incidents, approvals, audit, an.kill_chain(idx.facts, load_kb(extras)),
-                                       time.time())}
+        out = an.executive_summary(incidents, approvals, audit, an.kill_chain(idx.facts, load_kb(extras)),
+                                   time.time())
+        out["top_risks"] = an.with_main_entities(out["top_risks"], {i["incident_id"]: i for i in incidents},
+                                                 idx.by_id)
+        return {"scenario": scenario, **out}
 
     @app.get("/study/results")
     def study(p: Read) -> dict[str, Any]:

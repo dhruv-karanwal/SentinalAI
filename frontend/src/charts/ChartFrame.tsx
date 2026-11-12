@@ -4,6 +4,8 @@
 
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react';
 
+import { Explain, Term } from '../components/Term.tsx';
+
 export type Tone = 'wazuh' | 'suricata' | 'aminer' | 'sigma' | 'high' | 'medium' | 'low' | 'accent' | 'ref' | 'muted';
 
 export const TONE_VAR: Record<Tone, string> = {
@@ -133,9 +135,14 @@ interface FrameProps {
   empty?: ReactNode;
   className?: string;
   id?: string;
+  /** glossary id: a "?" after the title */
+  term?: string;
+  /** plain-language pair shown instead of the question line (explainable console) */
+  what?: ReactNode;
+  why?: ReactNode;
 }
 
-export function ChartFrame({ title, question, legend = [], table, actions, note, children, empty, className, id }: FrameProps) {
+export function ChartFrame({ title, question, legend = [], table, actions, note, children, empty, className, id, term, what, why }: FrameProps) {
   const ref = useRef<HTMLElement | null>(null);
   const [tip, setTip] = useState<Tip | null>(null);
   const show = useCallback((target: Element | { x: number; y: number }, lines: string[]) => {
@@ -156,9 +163,9 @@ export function ChartFrame({ title, question, legend = [], table, actions, note,
       <header className="chart-head">
         <div>
           <h3 className="chart-title" id={id ? `${id}-t` : undefined}>
-            {title}
+            {term ? <Term id={term}>{title}</Term> : title}
           </h3>
-          <p className="chart-q">{question}</p>
+          {what || why ? <Explain what={what ?? question} why={why ?? ''} /> : <p className="chart-q">{question}</p>}
         </div>
         {actions && <div className="chart-actions">{actions}</div>}
       </header>

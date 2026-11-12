@@ -105,3 +105,49 @@ def layout(node_ids: Sequence[str], edges: Sequence[tuple[str, str]], width: flo
             xs[i] = PAD if xs[i] < PAD else (width - PAD if xs[i] > width - PAD else xs[i])
             ys[i] = PAD if ys[i] < PAD else (height - PAD if ys[i] > height - PAD else ys[i])
     return [Placed(nid, xs[i], ys[i]) for i, nid in enumerate(node_ids)]
+
+
+@dataclass(frozen=True)
+class LabelBox:
+    id: str
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+    anchor: str
+
+
+def _hit(a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> bool:
+    return not (a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1])
+
+
+def place_labels(nodes: Sequence[tuple[str, float, float, float, str]], width: float, height: float,
+                 char_w: float, line_h: float, gap: float = 3.0) -> list[LabelBox]:
+    """Greedy label placement without overlap (console graph and report PDF).
+
+    ``nodes`` are ``(id, x, y, radius, text)`` in priority order (most alerts first). Each label tries
+    right, left, below, above its node; a spot is taken only if it stays inside the plot and hits no
+    placed label and no other node. A label that fits nowhere is left out (the console shows it on
+    hover and focus; the adjacency table always has every name). Deterministic: no randomness.
+    """
+    node_boxes = [(nid, (x - r, y - r, x + r, y + r)) for nid, x, y, r, _ in nodes]
+    placed: list[LabelBox] = []
+    for nid, x, y, r, text in nodes:
+        w = len(text) * char_w
+        h = line_h
+        candidates = [
+            ("start", (x + r + gap, y - h / 2, x + r + gap + w, y + h / 2)),
+            ("end", (x - r - gap - w, y - h / 2, x - r - gap, y + h / 2)),
+            ("middle", (x - w / 2, y + r + gap, x + w / 2, y + r + gap + h)),
+            ("middle", (x - w / 2, y - r - gap - h, x + w / 2, y - r - gap)),
+        ]
+        for anchor, box in candidates:
+            if box[0] < 0 or box[1] < 0 or box[2] > width or box[3] > height:
+                continue
+            if any(_hit(box, (p.x0, p.y0, p.x1, p.y1)) for p in placed):
+                continue
+            if any(other != nid and _hit(box, nb) for other, nb in node_boxes):
+                continue
+            placed.append(LabelBox(nid, box[0], box[1], box[2], box[3], anchor))
+            break
+    return placed

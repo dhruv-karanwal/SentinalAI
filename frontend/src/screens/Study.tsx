@@ -8,7 +8,8 @@ import { api, type ScoreRow, type StudyRun } from '../api.ts';
 import { DotPairs, HBars } from '../charts/Bars.tsx';
 import { ChartFrame, type LegendItem } from '../charts/ChartFrame.tsx';
 import { EmptyState, ErrorState, SkeletonLines } from '../components/ui.tsx';
-import { useLoad } from '../hooks.ts';
+import { useLoad, useScreenContext } from '../hooks.ts';
+import { Explain, Term } from '../components/Term.tsx';
 import { Icon } from '../icons.tsx';
 import { fmtDuration, fmtInt } from '../lib/format.ts';
 import { fmtPct, heatStep } from '../lib/scale.ts';
@@ -16,6 +17,14 @@ import { coverageOf, noiseRunFor, precisionOf, refsFor } from '../lib/study.ts';
 
 const ARMS = ['single', 'single+verifier', 'graph', 'graph+verifier'];
 const LABEL = 'dev scenarios, pilot numbers, not paper results';
+const PART_ORDER = ['pilot', 'held-out', 'adhoc'];
+const PART_TEXT: Record<string, string> = {
+  pilot: 'The matched-budget pilot on the dev scenarios (run-pilot)',
+  'held-out': 'Final runs on the held-out scenarios, after the protocol freeze',
+  adhoc: 'Single runs made by hand (run-matched), e.g. smoke tests; not part of the pilot',
+};
+/** scores.json says which part of the study a run belongs to; older files without it are dev pilot material. */
+const partOfRun = (r: StudyRun): string => r.study_part ?? (r.split === 'held-out' ? 'held-out' : 'pilot');
 
 const cov = (r: ScoreRow | undefined): number | null => coverageOf(r);
 const prec = (r: ScoreRow | undefined): number | null => precisionOf(r);
@@ -25,9 +34,20 @@ export function StudyScreen() {
   const truncations = useMemo(() => [...new Set((data?.runs ?? []).map((r) => r.truncation ?? 'unknown'))].sort(), [data]);
   const [trunc, setTrunc] = useState<string | null>(null);
   const t = trunc ?? truncations[0] ?? null;
-  const runs = useMemo(() => (data?.runs ?? []).filter((r) => (r.truncation ?? 'unknown') === t), [data, t]);
+  const [partPick, setPartPick] = useState<string | null>(null);
+  const allParts = useMemo(() => [...new Set((data?.runs ?? []).map(partOfRun))].sort((a, b) => PART_ORDER.indexOf(a) - PART_ORDER.indexOf(b)), [data]);
+  const part = partPick ?? allParts[0] ?? null;
+  const runs = useMemo(() => (data?.runs ?? []).filter((r) => (r.truncation ?? 'unknown') === t && partOfRun(r) === part), [data, t, part]);
   const main = runs.filter((r) => !(r.variant ?? '').startsWith('noise-'));
   const noiseFor = (r: StudyRun) => noiseRunFor(r, runs);
+  const partOf = partOfRun;
+  const parts = [...new Set((data?.runs ?? []).map(partOf))];
+  useScreenContext(
+    'study',
+    data
+      ? `Study page. ${data.runs.length} finished runs with a real model (${parts.join(', ') || 'none'}); ${data.incomplete_runs} runs without scores yet; ${data.excluded_fake_runs} fake-model runs excluded. ${data.runs.length === 0 ? 'No results to show yet: the page is empty on purpose.' : 'Charts: coverage of reachable attack phases, citation precision, unsupported-claim rate before and after the verifier, tokens per arm, detector variant by arm.'}`
+      : '',
+  );
 
   if (error && !data) return <ErrorState what="study results" error={error} onRetry={reload} />;
   if (!data) return <SkeletonLines lines={6} />;
@@ -37,6 +57,15 @@ export function StudyScreen() {
         <h1>Study</h1>
         <span className="muted">Matched-budget pilot: single agent vs multi-agent graph, before and after the evidence verifier</span>
         <span className="spacer" />
+        {allParts.length > 1 && (
+          <span className="seg-toggle" role="group" aria-label="Which runs">
+            {allParts.map((x) => (
+              <button key={x} type="button" className="btn" aria-pressed={x === part} onClick={() => setPartPick(x)} title={PART_TEXT[x] ?? x}>
+                {x === 'held-out' ? 'final (held-out)' : x}
+              </button>
+            ))}
+          </span>
+        )}
         {truncations.length > 1 && (
           <span className="seg-toggle" role="group" aria-label="Truncation rule">
             {truncations.map((x) => (
@@ -51,19 +80,38 @@ export function StudyScreen() {
         <div className="banner" role="note">
           <Icon name="warning" />
           <span>
-            <strong>{LABEL}.</strong> Headline: event_label coverage on alert-reachable phases, after the verifier. Held-out scenarios stay untouched until Wave E.
+            <strong>{parts.includes('held-out') ? 'Contains final (held-out) runs; pilot runs are marked pilot.' : `${LABEL}.`}</strong> Headline: event_label coverage on alert-reachable phases, after the verifier. Held-out scenarios stay untouched until the protocol is frozen.
           </span>
         </div>
+        <section className="chart" aria-labelledby="st-what">
+          <h3 className="chart-title" id="st-what">
+            What this page shows
+          </h3>
+          <Explain
+            what={
+              <>
+                The same <Term id="agent">investigation agent</Term> and <Term id="multi-agent">multi-agent graph</Term> run on the same cases with different alert sources (Wazuh, Suricata, AMiner, all fused, and the <Term id="oracle">oracle</Term> and{' '}
+                <Term id="noise">noise</Term> controls), under a <Term id="matched-budget">matched budget</Term>. Each arm is scored before and after the <Term id="verifier">evidence verifier</Term>, next to simple <Term id="baseline">baselines</Term>.
+              </>
+            }
+            why={
+              <>
+                It answers the research question: how much does the alert source change how many attack steps are found (<Term id="coverage">coverage</Term> of <Term id="reachable-phase">reachable phases</Term>) and how often the AI claims things the evidence does not support (<Term id="unsupported-claim">unsupported claims</Term>)?
+              </>
+            }
+          />
+          <p className="chart-note">Every number is read from the run files (scores.json). Nothing is typed in, estimated or interpolated; the files carry no confidence intervals, so none are drawn.</p>
+        </section>
         {data.runs.length === 0 ? (
-          <EmptyState title="No pilot results yet">
+          <EmptyState title="No results yet: this page is empty on purpose">
             No matched run with a real model has finished. Results appear here when <span className="mono">run-pilot</span> (or <span className="mono">run-matched</span>) writes{' '}
-            <span className="mono">scores.json</span> under data/processed/runs/. {data.excluded_fake_runs > 0 && `${data.excluded_fake_runs} FakeClient run${data.excluded_fake_runs === 1 ? ' was' : 's were'} excluded (plumbing checks, never results).`}{' '}
+            <span className="mono">scores.json</span> under data/processed/runs/. Then this page draws, per alert source and arm: coverage of the reachable attack phases, citation precision, the unsupported-claim rate before and after the verifier, and the tokens used. {data.excluded_fake_runs > 0 && `${data.excluded_fake_runs} FakeClient run${data.excluded_fake_runs === 1 ? ' was' : 's were'} excluded (plumbing checks, never results).`}{' '}
             {data.incomplete_runs > 0 && `${data.incomplete_runs} run${data.incomplete_runs === 1 ? ' is' : 's are'} incomplete (no scores.json yet).`}
           </EmptyState>
         ) : (
           <>
             <p className="faint" style={{ margin: 0, fontSize: 'var(--fs-12)' }}>
-              {fmtInt(data.runs.length)} run{data.runs.length === 1 ? '' : 's'} · truncation {t} · {data.excluded_fake_runs} FakeClient run{data.excluded_fake_runs === 1 ? '' : 's'} excluded · {data.incomplete_runs} incomplete
+              {fmtInt(data.runs.length)} run{data.runs.length === 1 ? '' : 's'} ({parts.map((x) => `${fmtInt(data.runs.filter((r) => partOf(r) === x).length)} ${x}`).join(', ')}) · truncation {t} · {data.excluded_fake_runs} FakeClient run{data.excluded_fake_runs === 1 ? '' : 's'} excluded · {data.incomplete_runs} incomplete
             </p>
             <CoverageChart runs={main} noiseFor={noiseFor} metric={cov} title="Coverage: event_label, alert-reachable phases" question="Does an arm cover more attack phases than citing by detector order, and how close does it get to citing everything?" />
             <CoverageChart runs={main} noiseFor={noiseFor} metric={prec} title="Citation precision (event_label)" question="Of the alerts an arm cites, what share are attack-labelled?" />
@@ -88,7 +136,7 @@ function CoverageChart({ runs, noiseFor, metric, title, question }: { runs: Stud
         key: `${run.run_id}:${arm}`,
         label: (
           <span>
-            <span className="mono">{run.variant}</span> · {arm}
+            <span className="faint">{run.scenario}</span> <span className="mono">{run.variant}</span> · {arm}
           </span>
         ),
         text: `${run.scenario} ${run.variant} ${arm}`,
@@ -125,7 +173,7 @@ function ClaimsChart({ runs }: { runs: StudyRun[] }) {
   const rows = runs.flatMap((run) =>
     ['single', 'graph'].map((arm) => ({
       key: `${run.run_id}:${arm}`,
-      label: `${run.variant} · ${arm}`,
+      label: `${run.scenario} ${run.variant} · ${arm}`,
       before: run.arms[arm]?.unsupported_claim_rate ?? null,
       after: run.arms[`${arm}+verifier`]?.unsupported_claim_rate ?? null,
     })),
@@ -153,7 +201,7 @@ function CostChart({ runs }: { runs: StudyRun[] }) {
       const tokens = r ? r.input_tokens + r.output_tokens : 0;
       return {
         key: `${run.run_id}:${arm}`,
-        label: `${run.variant} · ${arm}`,
+        label: `${run.scenario} ${run.variant} · ${arm}`,
         text: `${run.variant} ${arm}`,
         value: tokens,
         tone: 'accent' as const,

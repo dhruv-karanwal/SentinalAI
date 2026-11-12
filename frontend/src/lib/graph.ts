@@ -102,3 +102,46 @@ export function layout(nodeIds: readonly string[], edges: ReadonlyArray<readonly
   }
   return nodeIds.map((id, i) => ({ id, x: xs[i]!, y: ys[i]! }));
 }
+
+// ---- labels ----------------------------------------------------------------------------------
+// Same rule as place_labels in backend/app/outputs/graph_layout.py (the report PDF): nodes in
+// priority order (most alerts first) try right, left, below, above; a spot is taken only inside
+// the plot and clear of every placed label and every other node. A label that fits nowhere is left
+// out and shown on hover / focus; the adjacency table under the graph always has every name.
+
+export interface LabelBox {
+  id: string;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  anchor: 'start' | 'end' | 'middle';
+}
+
+type Box = [number, number, number, number];
+
+const hit = (a: Box, b: Box) => !(a[2] <= b[0] || b[2] <= a[0] || a[3] <= b[1] || b[3] <= a[1]);
+
+export function placeLabels(nodes: ReadonlyArray<{ id: string; x: number; y: number; r: number; text: string }>, width: number, height: number, charW: number, lineH: number, gap = 3): LabelBox[] {
+  const nodeBoxes = nodes.map((n) => [n.id, [n.x - n.r, n.y - n.r, n.x + n.r, n.y + n.r] as Box] as const);
+  const placed: LabelBox[] = [];
+  for (const n of nodes) {
+    const w = n.text.length * charW;
+    const h = lineH;
+    const { x, y, r } = n;
+    const candidates: Array<[LabelBox['anchor'], Box]> = [
+      ['start', [x + r + gap, y - h / 2, x + r + gap + w, y + h / 2]],
+      ['end', [x - r - gap - w, y - h / 2, x - r - gap, y + h / 2]],
+      ['middle', [x - w / 2, y + r + gap, x + w / 2, y + r + gap + h]],
+      ['middle', [x - w / 2, y - r - gap - h, x + w / 2, y - r - gap]],
+    ];
+    for (const [anchor, box] of candidates) {
+      if (box[0] < 0 || box[1] < 0 || box[2] > width || box[3] > height) continue;
+      if (placed.some((p) => hit(box, [p.x0, p.y0, p.x1, p.y1]))) continue;
+      if (nodeBoxes.some(([id, nb]) => id !== n.id && hit(box, nb))) continue;
+      placed.push({ id: n.id, x0: box[0], y0: box[1], x1: box[2], y1: box[3], anchor });
+      break;
+    }
+  }
+  return placed;
+}

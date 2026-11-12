@@ -12,6 +12,8 @@ interface Props {
   onTheme: (t: 'dark' | 'light') => void;
   onDensity: (d: 'compact' | 'comfortable') => void;
   onTimeFormat: (f: TimeFormat) => void;
+  demo: boolean;
+  onDemo: (on: boolean) => void;
 }
 
 function Choice<T extends string>({ name, legend, value, options, onChange, hint }: { name: string; legend: string; value: T; options: Array<[T, string]>; onChange: (v: T) => void; hint: string }) {
@@ -33,7 +35,7 @@ function Choice<T extends string>({ name, legend, value, options, onChange, hint
   );
 }
 
-export function SettingsScreen({ theme, density, timeFormat, scenarios, onTheme, onDensity, onTimeFormat }: Props) {
+export function SettingsScreen({ theme, density, timeFormat, scenarios, onTheme, onDensity, onTimeFormat, demo, onDemo }: Props) {
   const def = storageGet('sentinel.defaultScenario') ?? '';
   return (
     <div className="page">
@@ -43,6 +45,14 @@ export function SettingsScreen({ theme, density, timeFormat, scenarios, onTheme,
       </div>
       <div className="page-body" style={{ maxWidth: 720 }}>
         <div className="chart">
+          <Choice
+            name="demo"
+            legend="Professor demo mode"
+            value={demo ? 'on' : 'off'}
+            options={[['on', 'On: start on "How SentinelAI works"'], ['off', 'Off: start on the home screen of your role']]}
+            onChange={(v) => onDemo(v === 'on')}
+            hint="For a first-time reader. Remembered in this browser. The tour and the Explain chat work in both modes."
+          />
           <Choice name="theme" legend="Theme" value={theme} options={[['dark', 'Dark'], ['light', 'Light']]} onChange={onTheme} hint="Shortcut: t. Printing always uses the light theme." />
           <Choice
             name="density"

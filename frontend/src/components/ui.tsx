@@ -47,14 +47,21 @@ export function StatusTag({ value }: { value: string }) {
 
 // ---- time, ids -------------------------------------------------------------------------------
 
-/** Absolute UTC time; the relative time is in the hover text. */
-export function Time({ ts }: { ts: string | null | undefined }) {
+/**
+ * Absolute UTC time; the relative time is in the hover text. `kind` labels the date where 2022
+ * dataset times and console creation times appear together: "data date" or "created".
+ */
+export function Time({ ts, kind }: { ts: string | null | undefined; kind?: 'data' | 'created' }) {
   const app = useAppMaybe();
   if (!ts) return <span className="faint">-</span>;
+  const what = kind === 'data' ? 'data date: when it happened in the 2022 dataset' : kind === 'created' ? 'created: when this console stored it' : '';
   return (
-    <time className="mono num" dateTime={ts} title={`${relTime(ts)} (UTC)`}>
-      {fmtTime(ts, app?.timeFormat ?? 'iso')}
-    </time>
+    <>
+      <time className="mono num" dateTime={ts} title={`${relTime(ts)} (UTC)${what ? `; ${what}` : ''}`}>
+        {fmtTime(ts, app?.timeFormat ?? 'iso')}
+      </time>
+      {kind && <span className="date-kind"> {kind === 'data' ? 'data date' : 'created'}</span>}
+    </>
   );
 }
 
