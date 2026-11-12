@@ -179,3 +179,37 @@ def test_summary_and_executive_name_the_main_entity(client: TestClient) -> None:
     assert rows and all("main_host" in r["detail"] and "main_ip" in r["detail"] for r in rows)
     ex = client.get("/executive?scenario=synthetic", headers=h).json()
     assert all("main_host" in r["detail"] for r in ex["top_risks"])
+
+
+# ---------------------------------------------------------------- model status (no generation)
+
+def test_copilot_status_probes_without_generation(services: Services) -> None:  # noqa: F811
+    fake = FakeClient([])
+    services.extras["copilot_client"] = fake
+    services.extras["model_probe"] = lambda: True
+    c = TestClient(create_app(services))
+    r = c.get("/copilot/status", headers=token(c, Role.ANALYST))
+    assert r.status_code == 200, r.text
+    assert r.json() == {"state": "online", "model": fake.model_id}
+    assert fake.calls == []  # the probe never sends a chat request
+
+
+def test_copilot_status_offline_busy_and_unconfigured(services: Services) -> None:  # noqa: F811
+    c = TestClient(create_app(services))
+    h = token(c, Role.ANALYST)
+    assert c.get("/copilot/status", headers=h).json() == {"state": "offline", "model": None,
+                                                          "reason": "no model endpoint configured"}
+    services.extras["copilot_client"] = FakeClient([])
+    services.extras["model_probe"] = lambda: False
+    assert c.get("/copilot/status", headers=h).json()["state"] == "offline"
+    services.extras["model_probe"] = lambda: True
+    assert ex.MODEL_LOCK.acquire(blocking=False)
+    try:
+        assert c.get("/copilot/status", headers=h).json()["state"] == "busy"
+    finally:
+        ex.MODEL_LOCK.release()
+
+
+def test_copilot_status_needs_copilot_permission(services: Services) -> None:  # noqa: F811
+    c = TestClient(create_app(services))
+    assert c.get("/copilot/status", headers=token(c, Role.EXECUTIVE)).status_code == 403

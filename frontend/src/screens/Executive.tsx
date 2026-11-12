@@ -38,7 +38,7 @@ function ExecutiveBody({ data, scenario, role, high, observed }: { data: import(
     `Executive summary of ${scenario}. Open incidents: High ${q.open_by_severity.High ?? 0}, Medium ${q.open_by_severity.Medium ?? 0}, Low ${q.open_by_severity.Low ?? 0}. Reviewed ${ttr.reviewed}, not reviewed ${ttr.unreviewed}. Pending approvals ${data.open_approvals.pending}. ATT&CK tactics observed: ${observed.map((c) => c.name).join(', ') || 'none'}. Top risks: ${data.top_risks.map((r) => `${r.severity} ${incidentLabel(r)} (${r.alerts} alerts)`).join('; ')}.`,
   );
   return (
-    <div className="page">
+    <div className="page draw-charts">
       <div className="page-head">
         <h1>Executive summary</h1>
         <span className="muted">

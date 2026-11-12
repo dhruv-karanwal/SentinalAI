@@ -13,6 +13,7 @@
 //   {"size": [1366, 768]}              {"shot": "incidents-dark"}
 //   {"signin": "ui-manager"}           (signs out first if needed)
 //   {"signout": true}                 back to the sign-in page
+//   {"motion": "reduce"}              emulates prefers-reduced-motion
 //   {"tabwalk": 12}                    presses Tab N times; prints each focused element and its outline
 
 import { spawn } from 'node:child_process';
@@ -191,6 +192,10 @@ async function run() {
       await sleep(200);
     } else if (step.density) {
       await evaluate(`(() => { if (document.documentElement.dataset.density !== ${JSON.stringify(step.density)}) document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true })); })()`);
+      await sleep(200);
+    } else if (step.motion) {
+      // {"motion": "reduce"} or {"motion": "no-preference"}: emulates prefers-reduced-motion
+      await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: step.motion }] });
       await sleep(200);
     } else if (step.size) {
       await send('Emulation.setDeviceMetricsOverride', { width: step.size[0], height: step.size[1], deviceScaleFactor: 1, mobile: false });

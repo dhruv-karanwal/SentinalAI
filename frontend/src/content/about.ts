@@ -102,3 +102,56 @@ export const SUGGESTED: Record<string, string[]> = {
   '/study': ['What is coverage?', 'What is the noise control?', 'What is an unsupported claim?'],
   '/ask': ['What is the copilot?', 'What is an unsupported claim?', 'What is a citation?'],
 };
+
+// ---- wave F: About story (2026-11-13) ------------------------------------------------------
+
+/** The hero pipeline: six stages as the user's brief names them, with real module names. */
+export const HERO_STAGES: ReadonlyArray<{ name: string; sub: string }> = [
+  { name: 'Ingest', sub: 'replay collector' },
+  { name: 'Normalize', sub: 'alert normalizer' },
+  { name: 'Detect', sub: 'Sigma · ATT&CK · triage' },
+  { name: 'Investigate', sub: 'agent · LangGraph' },
+  { name: 'Report', sub: 'JSON · CSV · PDF' },
+  { name: 'Review', sub: 'four-eyes approvals' },
+];
+
+export interface SourceOption {
+  id: string;
+  label: string;
+  /** glossary id for the "?" */
+  term: string;
+  what: string;
+}
+
+/** Alert sources of the study (experiment variants), in the order the study reports them. */
+export const STUDY_SOURCES: readonly SourceOption[] = [
+  { id: 'wazuh', label: 'Wazuh', term: 'detector', what: 'Only the rule-based host detector\'s alerts.' },
+  { id: 'suricata', label: 'Suricata', term: 'detector', what: 'Only the network signature detector\'s alerts (almost none carry the dataset\'s event link: caveat).' },
+  { id: 'aminer', label: 'AMiner', term: 'detector', what: 'Only the anomaly detector\'s alerts.' },
+  { id: 'fused', label: 'Fused', term: 'detector', what: 'Every eligible alert from all three detectors.' },
+  { id: 'oracle', label: 'Oracle', term: 'oracle', what: 'Only alerts the dataset links to an attack step: an upper reference, not a real detector.' },
+  { id: 'noise', label: 'Noise', term: 'noise', what: 'Harmless alerts, as many as the detector would give: a control that should find nothing.' },
+  { id: 'shuffled', label: 'Shuffled', term: 'shuffled', what: 'A random draw from the pool of the same size: a control for "any alerts at all".' },
+];
+
+export const ARMS: ReadonlyArray<{ id: string; label: string; verified: boolean }> = [
+  { id: 'single', label: 'single agent', verified: false },
+  { id: 'single+verifier', label: 'single + verifier', verified: true },
+  { id: 'graph', label: 'multi-agent', verified: false },
+  { id: 'graph+verifier', label: 'multi + verifier', verified: true },
+];
+
+/** SAMPLE for the verifier demo. Synthetic (TEST-NET address, made-up path); not from a run. */
+export const VERIFIER_SAMPLE = {
+  line: '192.0.2.10 - - [<TIME>] "POST /wp-login.php HTTP/1.1" 200 4210 "-" "WPScan v3.8.22"',
+  claims: [
+    { text: 'The client identified itself as WPScan', quote: 'WPScan v3.8.22' },
+    { text: 'The attacker downloaded the user database', quote: 'GET /backup/users.sql' },
+  ],
+} as const;
+
+/** The verifier's quote rule (agent/verifier.py, case_scoring.py): exact, case-sensitive substring, >= 8 chars. */
+export function quoteSupported(line: string, quote: string): { kept: boolean; reason: string } {
+  if (quote.length < 8) return { kept: false, reason: 'dropped: quote shorter than 8 characters' };
+  return line.includes(quote) ? { kept: true, reason: 'kept: exact substring of the log line' } : { kept: false, reason: 'dropped: quote not found in log line' };
+}

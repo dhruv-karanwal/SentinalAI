@@ -3,6 +3,7 @@
 // visually hidden table with the same numbers as the text alternative.
 
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useSeen } from '../components/motion.tsx';
 
 import { Explain, Term } from '../components/Term.tsx';
 
@@ -145,6 +146,7 @@ interface FrameProps {
 export function ChartFrame({ title, question, legend = [], table, actions, note, children, empty, className, id, term, what, why }: FrameProps) {
   const ref = useRef<HTMLElement | null>(null);
   const [tip, setTip] = useState<Tip | null>(null);
+  const seen = useSeen(ref); // draw-in once on first view (motion.css, .draw-charts pages only)
   const show = useCallback((target: Element | { x: number; y: number }, lines: string[]) => {
     const host = ref.current?.getBoundingClientRect();
     if (!host) return;
@@ -159,7 +161,7 @@ export function ChartFrame({ title, question, legend = [], table, actions, note,
   const api = useMemo(() => ({ show, hide }), [show, hide]);
   const width = ref.current?.clientWidth ?? 0;
   return (
-    <section className={`chart${className ? ` ${className}` : ''}`} ref={ref} aria-labelledby={id ? `${id}-t` : undefined} id={id}>
+    <section className={`chart${className ? ` ${className}` : ''}`} ref={ref} aria-labelledby={id ? `${id}-t` : undefined} id={id} data-drawn={seen ? '1' : '0'}>
       <header className="chart-head">
         <div>
           <h3 className="chart-title" id={id ? `${id}-t` : undefined}>

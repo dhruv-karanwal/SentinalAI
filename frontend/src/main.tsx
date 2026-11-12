@@ -2,6 +2,7 @@ import './tokens.css';
 import './app.css';
 import './v2.css';
 import './explain.css';
+import './motion.css';
 
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';

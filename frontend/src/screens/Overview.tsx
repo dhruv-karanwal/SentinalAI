@@ -5,6 +5,7 @@
 import { useCallback, useMemo, useState } from 'react';
 
 import { api, type AlertFilter, type IncidentSummaryRow, type Overview } from '../api.ts';
+import { Count, Reveal } from '../components/motion.tsx';
 import { Explain, Term } from '../components/Term.tsx';
 import { distinctLabels } from '../lib/explain.ts';
 import { compareQueue } from '../lib/format.ts';
@@ -63,7 +64,7 @@ export function OverviewScreen({ scenario, route }: { scenario: string; route: R
     );
   }
   return (
-    <div className="page">
+    <div className="page draw-charts">
       <div className="page-head">
         <h1>Overview</h1>
         <span className="muted num">
@@ -171,16 +172,16 @@ function LookFirst({ rows, error }: { rows: IncidentSummaryRow[] | null; error: 
       ) : top.length === 0 ? (
         <p className="faint">No open incident. Build incidents on the Incidents screen (triage).</p>
       ) : (
-        <ul className="look-first">
-          {top.map((r) => (
-            <li key={r.incident_id}>
+        <ul className="look-first cards">
+          {top.map((r, i) => (
+            <Reveal as="li" key={r.incident_id} i={i} sev={(r.severity ?? '').toLowerCase()}>
               <SeverityCell value={r.severity} />
               <a className="lf-name mono" href={buildHash('/incidents', { id: r.incident_id })} title={`${r.incident_id}: ${labels.get(r.incident_id)}`}>
                 {labels.get(r.incident_id)}
               </a>
               <span className="num faint">{fmtInt(r.alerts)} alerts</span>
               <span className="faint">{r.status}{r.detail.severity_row ? ` · rule ${r.detail.severity_row}` : ''}</span>
-            </li>
+            </Reveal>
           ))}
         </ul>
       )}
@@ -201,7 +202,7 @@ function StatusRow({ data }: { data: Overview }) {
         <div className="v">
           {SEVS.map((sev) => (
             <a key={sev} href={buildHash('/incidents', { sev, status: 'open' })} title={`Open ${sev} incidents`}>
-              <SeverityCell value={sev} /> <span className="num">{fmtInt(s.open_by_severity[sev] ?? 0)}</span>
+              <SeverityCell value={sev} /> <Count value={s.open_by_severity[sev] ?? 0} />
             </a>
           ))}
         </div>
@@ -213,7 +214,7 @@ function StatusRow({ data }: { data: Overview }) {
         <div className="k">
           <Term id="alert">Alerts</Term> received (replayed)
         </div>
-        <div className="v num">{fmtInt(data.alerts)}</div>
+        <div className="v num"><Count value={data.alerts} /></div>
         <div className="s">{DETECTOR_ORDER.filter((d) => data.timeseries.series[d]).map((d) => `${detectorName(d)} ${fmtInt(data.timeseries.series[d]!.reduce((a, b) => a + b, 0))}`).join(' · ')}</div>
       </div>
       <div className="status-cell">
@@ -242,7 +243,7 @@ function StatusRow({ data }: { data: Overview }) {
         </div>
         <div className="v">
           <a className="num" href="#/approvals">
-            {fmtInt(s.pending_approvals)}
+            <Count value={s.pending_approvals} />
           </a>
         </div>
         <div className="s">A second person must decide each one</div>

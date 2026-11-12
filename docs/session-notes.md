@@ -2244,3 +2244,57 @@ or data was changed, Ollama was not restarted, and the model was never called.
   online". Not checked: a real model answer (pilot running), the report PDF graph labels in a rendered
   PDF (unit-tested only), a colour-vision-deficiency simulation, screen-reader output.
 - Tests: pytest 517 passed, 4 skipped; mypy clean (89 files); frontend 41 tests pass, tsc clean, build ok.
+
+
+## Motion console (`phase3/wave-f-motion-ui`), 2026-11-13
+
+User's go (build now, no plan step). Pilot state checked first: `pilot-progress.jsonl` shows 12/12
+runs `done` (last 2026-11-12 22:25 UTC, shaw noise-wazuh), no run-pilot / run-final process,
+`ollama ps` empty. So the one allowed real chat call was made (below). Nothing under
+`backend/app/study`, `backend/app/agent`, `experiments/`, `data/` or the Ollama config was changed.
+
+Built: `frontend/src/motion.css` (mission-control layer, motion tokens, floating chat, About story,
+reduced-motion block), `components/motion.tsx` (useSeen, Reveal, Count, DrawOnView, tiltHandlers),
+`lib/motion.ts` + `lib/chat.ts` (tested), `HelpChat.tsx` rewritten (FAB + panel + bottom sheet),
+`About.tsx` rebuilt, Overview counters + look-first cards, `ChartFrame` draw-in flag, rail indicator
+and page transition in `App.tsx`, `shots.mjs` step `motion`. Backend: `GET /copilot/status`
+(`app/api/app.py`, probe `GET {base_url}/models`, 2 s timeout; 3 tests in `tests/test_explain.py`).
+Removed the old footer chat CSS (`explain.css`).
+
+Checks (real output):
+- `npm test`: 54 pass, 0 fail (new: easing, counters, stepper, packets, chat reducer open / close /
+  minimise / clear / limit, focus trap, 429 / 503 / 0 / 500 notes, chips per screen, storage that
+  throws, long-answer wrap rule, reduced-motion block, verifier quote rule). `npm run build` ok
+  (JS 496 kB / 151 kB gzip, CSS 60 kB). pytest 520 passed, 4 skipped; mypy clean (89 files).
+- The frontend has no DOM test runner (no new dependency), so the chat's DOM behaviour was checked in
+  the headless-Chrome loop: focus moves to the question box on open (`help-q`), Esc closes and focus
+  returns to the button (`fab open=false`), no message overflows its bubble, the bottom sheet is
+  390 x 620 at 390 px wide, the button's z-index (90) is above the tour (55).
+- Screenshot loop (`data/processed/ui-shots/wave-f/`, 1366 x 768, dark and light): About hero / study
+  / verifier / screens, Overview, Incidents (11,208-alert incident), Alerts, Study, chat open,
+  minimised, real answer, phone sheet; About animation frames `about-anim-f1..f4` 250 ms apart (packet
+  transforms differ per frame: translateX 94.9 / 72.5 / 50.1 / 27.7 / 5.3 px at one instant).
+  Console errors: 0 in every run. Horizontal scroll: none at 1366 and 390 px.
+- Frame time while scrolling the table 40 px per frame for 2 s (headless, unthrottled, so a lower
+  bound on real cost): 11,208-alert incident avg 6.0 ms, p95 10.1 ms, max 20 ms (331 frames); Alerts
+  avg 5.7, p95 10.0, max 20.1 ms. Elements with a running animation inside table rows: 0.
+- Reduced motion (emulated): `document.getAnimations().length` 0 on About, reveals at opacity 1,
+  packets hidden.
+- Tab walk on Overview: every stop shows the 2 px ring.
+- Real model, one call through the chat on Incidents, question "what is rule H2?": 10.0 s end to end
+  (includes loading `sentinel-qwen2.5-7b-32k` cold; no model was resident). Answer: "Rule H2 is a
+  triage rule indicating that three or more detectors agree on an alert. This makes the incident
+  severe enough to be rated High." Grounded in the glossary row (triage rule: "H2 three or more
+  detectors agree"), with one imprecision: the rule is about the incident's alerts, not one alert.
+  The status probe showed "online" before the call without loading the model.
+
+Decisions: verifier demo uses a labelled SAMPLE (TEST-NET line) with the real quote rule, not pilot
+transcript text, because the transcripts sit next to per-case scores and a new route to them would
+risk label leakage. The study diagram is marked SCHEMATIC except Fused, which uses the real detector
+shares. The `frontend-design` skill named in the brief is not installed; ui-ux-pro-max was run.
+The other session's dev pair (5173 / 8000) was left running; this work used its own pair on
+5174 / 8001 (stopping the other API was refused, correctly).
+
+Not checked: a real screen recording (frames only), Safari / Firefox, a CVD simulation of the new
+glow tokens, the chat with a screen reader, frame time on a throttled CPU, the tour together with
+the open chat panel on a 1024 px screen.
