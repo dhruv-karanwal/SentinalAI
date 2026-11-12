@@ -93,3 +93,5 @@ ollama list
   Matched runs now write `per_case` scores and `study_part` (pilot / held-out / adhoc).
 - Model: segmented download `data/processed/downloads/final_fetch.py` (log `final-fetch.log`).
 - Decisions: `docs/session-notes.md`, "Final runs agent, 2026-11-12".
+- Model ready 2026-11-12 21:30: `sentinel-qwen2.5-7b-32k` (42 tok/s, 7.2/8.2 GB VRAM). Smoke test
+  done; prompt revision 1 (m5-v2). Next: pilot (spread) in the background.

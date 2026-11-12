@@ -2180,3 +2180,26 @@ Decisions (conservative, recorded as made):
 
 After merging main (PR #11, final-study tooling) into the branch: pytest 504 passed, 4 skipped;
 mypy clean (88 files). The only conflict was this file (both branches appended a section).
+
+### Model and M6 smoke test (2026-11-12)
+- Installer: 8 segments, 1,689,667,936 bytes, SHA-256 `106ef3d2...5564` (match), silent install exit
+  0, Ollama 0.40.15. `qwen2.5:7b-instruct` (id `845dbda0ea48`, 4.7 GB) pulled in 26 min (ETA was
+  1 h 35 min at the start: under the 3 h rule, so the 7B model is kept).
+- Ollama 0.40.15 defaults to a 4k context on an 8 GB GPU and truncates silently. Decision: a derived
+  model `sentinel-qwen2.5-7b-32k` (Modelfile: `FROM qwen2.5:7b-instruct`, `PARAMETER num_ctx 32768`,
+  `PARAMETER temperature 0`; id `27d8d9d16c31`) instead of a global environment change. It is the
+  model id of every pilot and final run.
+- Measured: generation 42.4 tok/s, prompt 751 tok/s (`/api/generate`, 200 tokens); `ollama ps`
+  6.8 GB, 9 % CPU / 91 % GPU, context 32768; nvidia-smi 7,242 / 8,188 MiB.
+- Smoke test (russellmitchell, fused, reachable, limit 2; dev only):
+  - run-agent m5-v1: attack case `failed / unparseable`: the model wrote
+    `{"action": "list_alerts", ...}` (tool name in `action`), and after the repair message repeated
+    it. The benign case (0 alerts in the fused window) was answered `benign` correctly.
+  - run-matched m5-v1: single as above; graph ok on both cases (trace through all six agents +
+    verifier), attack case covered, verdicts 2/2, but all 5 claims dropped by the verifier
+    (`suricata.event_type` "field not in record" x4, one quote not in the log lines). That is the
+    hallucination the verifier measures, not a bug: no change.
+  - **Revision 1 (m5-v2)**: SYSTEM_PROMPT gains a concrete tool-call example and the sentence that
+    `action` is never the tool name; REPAIR_MESSAGE (shared by both arms) repeats both forms.
+    Re-run: single ok 2/2, 3 tool calls, 15/15 claims kept; graph ok + one `tool_budget_exceeded`.
+    Wall time ~30 s per case and arm.

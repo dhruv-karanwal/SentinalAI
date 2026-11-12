@@ -27,7 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from app.agent.tools import TIME_MASK, TOOL_NAMES
 from app.evaluation.metrics import QUOTE_MIN_CHARS
 
-PROMPT_VERSION = "m5-v1"
+PROMPT_VERSION = "m5-v2"  # m5-v2 (2026-11-12): tool-call example + forms in the repair
 
 SYSTEM_PROMPT = f"""You are a security analyst investigating one case: a time window of a \
 monitored network and the alerts that intrusion detectors raised in it. Decide whether the \
@@ -37,6 +37,8 @@ Reply with exactly ONE JSON object and nothing else (no markdown, no prose). Two
 
 1. Call a tool:
 {{"action": "call_tool", "tool": "<tool name>", "arguments": {{...}}}}
+For example: {{"action": "call_tool", "tool": "list_alerts", "arguments": {{"detector": "wazuh"}}}}
+"action" is always "call_tool" or "final", never the tool name; the tool name goes in "tool".
 
 2. Final answer (ends the case):
 {{"action": "final", "verdict": "attack" or "benign", "findings": [
@@ -68,7 +70,9 @@ make claims about alert_id, offset or time fields.
 """
 
 REPAIR_MESSAGE = ("Your last reply was not valid: {error}. Reply again with exactly one JSON object "
-                  "in one of the two forms, and nothing else.")
+                  "in one of the two forms, and nothing else: "
+                  '{{"action": "call_tool", "tool": "<tool name>", "arguments": {{...}}}} or '
+                  '{{"action": "final", "verdict": "attack" or "benign", "findings": [...]}}.')
 TOOL_BUDGET_MESSAGE = ("The tool budget is used up ({calls} calls). Reply now with your final "
                        "answer as one JSON object with action \"final\".")
 
