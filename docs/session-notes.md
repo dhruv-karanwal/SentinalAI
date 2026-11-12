@@ -2203,3 +2203,15 @@ mypy clean (88 files). The only conflict was this file (both branches appended a
     `action` is never the tool name; REPAIR_MESSAGE (shared by both arms) repeats both forms.
     Re-run: single ok 2/2, 3 tool calls, 15/15 claims kept; graph ok + one `tool_budget_exceeded`.
     Wall time ~30 s per case and arm.
+
+### Pilot crash and retriever fix (2026-11-12 / 13)
+- The pilot stopped after 5 of 12 runs (russellmitchell wazuh, suricata, aminer, fused, oracle done;
+  noise-wazuh had 9/14 case checkpoints) with `UnboundLocalError: cid` in
+  `AttackRetriever._search_blended` (`rag/retriever.py`): the output row used the BM25 loop variable
+  `cid`, unbound when a `search_attack` query has no lexical match, and otherwise naming the last
+  BM25 chunk instead of the excerpt's chunk. Fix: use the chosen chunk id. Test first
+  (`test_hybrid_query_without_lexical_match_and_chunk_ids`, red with the pilot's error, then green).
+- Impact on finished work: none on what the model saw. `search_attack` sends technique id, name,
+  tactics, score and an excerpt from the correct chunk; `chunk_id` never reaches the model, and
+  recall numbers rank techniques, not chunks. The crashed case had no checkpoint, so it re-runs.
+  The config hash does not include retriever code: the pilot resumes in the same run directories.

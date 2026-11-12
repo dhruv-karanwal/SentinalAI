@@ -95,3 +95,6 @@ ollama list
 - Decisions: `docs/session-notes.md`, "Final runs agent, 2026-11-12".
 - Model ready 2026-11-12 21:30: `sentinel-qwen2.5-7b-32k` (42 tok/s, 7.2/8.2 GB VRAM). Smoke test
   done; prompt revision 1 (m5-v2). Next: pilot (spread) in the background.
+- 2026-11-13: pilot crashed after 5/12 runs (`cid` UnboundLocalError in the hybrid retriever when
+  a query has no BM25 match); fixed test-first, nothing the model saw changed; pilot resumed
+  from its checkpoints (`data/processed/downloads/run_pilot.ps1`, log `runs/pilot-console.log`).

@@ -113,9 +113,12 @@ class AttackRetriever:
         out = []
         for tid, score in ranked:
             # the excerpt: the chunk with the best dense score, else the best lexical one
-            c = self._chunks[dense_chunk[tid] if tid in dense_chunk else chunk_of[tid]]
+            # (fix 2026-11-12: chunk_id is the chosen chunk, not a leftover loop variable that was
+            # unbound when BM25 matched nothing)
+            chosen = dense_chunk[tid] if tid in dense_chunk else chunk_of[tid]
+            c = self._chunks[chosen]
             out.append({"technique_id": tid, "name": c.name, "tactics": list(c.tactics),
-                        "score": round(score, 6), "chunk_id": cid, "text": c.text})
+                        "score": round(score, 6), "chunk_id": chosen, "text": c.text})
         return out
 
 

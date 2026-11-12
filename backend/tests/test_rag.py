@@ -210,3 +210,20 @@ def test_hybrid_is_the_convex_blend_of_normalized_scores(kb: AttackKB) -> None:
     zero = [g["technique_id"] for g in AttackRetriever(store, HashEmbedder(), mode="hybrid", kb=kb,
                                                        alpha=0.0).search(q, 3)]
     assert zero[:len(lex)] == lex  # alpha = 0 ranks like lexical
+
+
+def test_hybrid_query_without_lexical_match_and_chunk_ids(kb: AttackKB) -> None:
+    # pilot crash 2026-11-12: a query with no BM25 match raised UnboundLocalError ('cid'), and
+    # chunk_id named the last BM25 chunk instead of the chunk the excerpt came from
+    store = SqliteVectorStore()
+    AttackRetriever(store, HashEmbedder()).index(kb)
+    hybrid = AttackRetriever(store, HashEmbedder(), mode="hybrid", kb=kb)
+    hits = hybrid.search("zzqx qqvv", 3)  # no token of the synthetic bundle
+    assert hits and all(h["score"] >= 0 for h in hits)
+    chunks = {c.chunk_id: c for c in attack_chunks(kb)}
+    for mode in ("hybrid", "lexical"):
+        r = AttackRetriever(store, HashEmbedder(), mode=mode, kb=kb)
+        for h in r.search("credential access brute force password", 3):
+            c = chunks[h["chunk_id"]]
+            assert c.technique_id == h["technique_id"] and c.text == h["text"]
+    assert AttackRetriever(store, HashEmbedder(), mode="lexical", kb=kb).search("zzqx qqvv", 3) == []

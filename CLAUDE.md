@@ -559,6 +559,8 @@ experiments/config/study.json  frozen split; variant seed, shuffled/noise refere
 - The local ATT&CK bundle (v20.1) has no `x_mitre_detection` text: chunks hold name, tactics and
   description. The relevance set is frozen (sha256 pinned in tests/test_rag.py); a new set is a new
   versioned file, never an edit. Retrieval numbers are measured, never estimated.
+- Hybrid/lexical search must work when BM25 matches nothing (`search_attack` queries can be
+  free text with no KB token): pinned by `test_hybrid_query_without_lexical_match_and_chunk_ids`.
 - bge-small loads only from `data/models/fastembed` with `local_files_only=True`; a missing cache
   raises `EmbeddingUnavailable` (never a download). Unit tests use the `HashEmbedder` test double.
 - ML features never include labels, phase, scenario, alert id, raw timestamps or source
