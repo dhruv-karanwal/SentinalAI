@@ -111,8 +111,8 @@ def estimate_matched(prep: PreparedRun, settings: AgentSettings,
 
 def matched_hash(prep: PreparedRun, settings: AgentSettings, model_ids: dict[str, str],
                  study_config_path: str | Path, graph: GraphSettings,
-                 retrieval: str | None = None) -> str:
-    payload = {
+                 retrieval: str | None = None, repeat: int | None = None) -> str:
+    payload: dict[str, Any] = {
         "retrieval": retrieval,
         "study_config_sha256": hashlib.sha256(Path(study_config_path).read_bytes()).hexdigest(),
         "model": settings.model.public(), "model_ids": model_ids, "agent": asdict(settings.agent),
@@ -122,14 +122,17 @@ def matched_hash(prep: PreparedRun, settings: AgentSettings, model_ids: dict[str
         "scenario": prep.scenario, "variant": prep.variant, "truncation": prep.truncation,
         "case_ids": [c.case_id for c in prep.cases],
     }
+    if repeat is not None:  # final study repeats; absent for the pilot, so its hashes are unchanged
+        payload["repeat"] = repeat
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
 def resume_run_id(prep: PreparedRun, settings: AgentSettings, model_ids: dict[str, str],
                   study_config_path: str | Path, graph: GraphSettings = GraphSettings(),
-                  retrieval: str | None = None) -> str:
+                  retrieval: str | None = None, repeat: int | None = None) -> str:
     """The stable run directory name a resumable run of this configuration uses."""
-    return f"matched-{matched_hash(prep, settings, model_ids, study_config_path, graph, retrieval)[:16]}"
+    digest = matched_hash(prep, settings, model_ids, study_config_path, graph, retrieval, repeat)
+    return f"matched-{digest[:16]}"
 
 
 def _record(run: CaseRun, verification: dict[str, Any]) -> dict[str, Any]:
@@ -158,19 +161,40 @@ def _arm_row(prep: PreparedRun, scores: list[CaseScore], runs: Sequence[CaseRun]
     return row
 
 
+def _per_case(prep: PreparedRun, scores: dict[str, list[CaseScore]],
+              runs: dict[str, list[CaseRun]]) -> list[dict[str, Any]]:
+    """One row per case: kind, reachability, and every score row's per-case score + verdict.
+
+    Lets the statistics pair cases across arms and variants without re-running anything.
+    """
+    out = []
+    for i, case in enumerate(prep.cases):
+        rows = {}
+        for name, sc in scores.items():
+            run = runs[name.split("+")[0]][i]
+            rows[name] = {**asdict(sc[i]), "verdict": run.verdict, "status": run.status,
+                          "input_tokens": run.input_tokens, "output_tokens": run.output_tokens,
+                          "tool_calls": run.tool_calls, "latency_seconds": run.latency_seconds}
+        out.append({"index": i, "case_id": case.case_id, "kind": case.kind.value,
+                    "phase": case.phase, "reachable": case.phase in prep.reachable, "rows": rows})
+    return out
+
+
 def run_matched(prep: PreparedRun, settings: AgentSettings, clients: dict[str, ChatClient], *,
                 output_dir: str | Path, study_config_path: str | Path,
                 retriever: Retriever | None = None, repo: Repository | None = None,
                 vectors: VectorStore | None = None, embedder: Embedder | None = None,
                 graph: GraphSettings = GraphSettings(), now: datetime | None = None,
                 on_case: Callable[[int, str, CaseRun], None] | None = None,
-                resume: bool = False, retrieval_mode: str | None = None) -> dict[str, Any]:
+                resume: bool = False, retrieval_mode: str | None = None,
+                repeat: int | None = None, study_part: str = "adhoc") -> dict[str, Any]:
     started = now or datetime.now(timezone.utc)
     model_ids = {arm: clients[arm].model_id for arm in ARMS}
     retrieval = (retrieval_mode or "dense") if retriever is not None else None
-    digest = matched_hash(prep, settings, model_ids, study_config_path, graph, retrieval)
+    digest = matched_hash(prep, settings, model_ids, study_config_path, graph, retrieval, repeat)
+    split = "held-out" if prep.scenario in prep.config.split.held_out else "dev"
     if resume:
-        run_id = resume_run_id(prep, settings, model_ids, study_config_path, graph, retrieval)
+        run_id = resume_run_id(prep, settings, model_ids, study_config_path, graph, retrieval, repeat)
         run_dir = Path(output_dir) / run_id
         if (run_dir / "scores.json").exists():
             return {"run_id": run_id, "run_dir": str(run_dir), "config_hash": digest, "skipped": True,
@@ -254,19 +278,25 @@ def run_matched(prep: PreparedRun, settings: AgentSettings, clients: dict[str, C
     k = matched_k(sum(s.cited for s in scores["graph+verifier"] + scores["single+verifier"])
                   / max(1, 2 * len(prep.cases)))
     rows = {name: _arm_row(prep, s, runs[name.split("+")[0]]) for name, s in scores.items()}
+    note = ("DEV-SCENARIO MATCHED-BUDGET RUN (pilot material on a dev scenario; not held-out "
+            "results). Both arms and the baselines are scored on the same cases."
+            if split == "dev" else
+            "HELD-OUT MATCHED-BUDGET RUN (final study, after the protocol freeze). Both arms and "
+            "the baselines are scored on the same cases.")
     score_report = {
-        "note": ("DEV-SCENARIO MATCHED-BUDGET RUN (pilot material on a dev scenario; not held-out "
-                 "results). Both arms and the baselines are scored on the same cases."),
+        "note": note, "scenario_split": split, "study_part": study_part, "repeat": repeat,
         "scenario": prep.scenario, "variant": prep.variant, "truncation": prep.truncation,
         "headline": "coverage by event_label on alert-reachable phases; time_label = sensitivity",
         "verifier_note": "each arm is reported before and after the evidence verifier",
         "matched_k": k, "arms": rows,
         "baselines": baseline_summaries(prep.cases, prep.views, prep.pool, prep.config.baselines,
                                         prep.reachable, matched=k),
+        "per_case": _per_case(prep, scores, runs),
     }
     manifest = {
         "run_id": run_id, "config_hash": digest, "started_utc": started.isoformat(),
-        "scenario": prep.scenario, "scenario_split": "dev", "variant": prep.variant,
+        "scenario": prep.scenario, "scenario_split": split, "study_part": study_part,
+        "repeat": repeat, "variant": prep.variant,
         "truncation": prep.truncation, "study_config": Path(study_config_path).name,
         "model": {"model_ids": model_ids, **settings.model.public()},
         "agent_budgets_both_arms": asdict(settings.agent), "graph_settings": asdict(graph),

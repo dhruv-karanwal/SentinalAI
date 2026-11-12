@@ -2061,3 +2061,33 @@ Not done / not verified:
 - 1024 px width: no horizontal scroll measured on Incidents; the layout below 1024 px was not
   reviewed.
 - The shaw scenario was not rendered (russellmitchell only).
+
+## Final runs agent, 2026-11-12
+
+Branch `phase3/final-runs` (worktree `D:\Projects\ERA-final`; the UI agent keeps
+`D:\Projects\ERA` on `phase3/wave-d-ui-v2`). The worktree's `data/raw`, `data/models` and
+`data/processed/*` link to the main checkout; `data/platform/` is this worktree's own
+(the UI agent's `data/platform/` is never touched). The user's prompt of 2026-11-12 is the go for
+the pilot, the freeze and the held-out study (Wave E).
+
+Decisions (conservative, recorded as made):
+- **Downloads.** No aria2c. The earlier curl job had died at 1.16 GB; its resumed file failed the
+  SHA-256 check (got `57b570db...`, want `106ef3d2...`) and was deleted. One connection measured
+  84-290 kB/s, six parallel range requests 4.4 MB/s, so the installer is fetched by
+  `data/processed/downloads/final_fetch.py` (8 resumable range segments, SHA-256 check, silent
+  install, `ollama pull`, log `final-fetch.log`), started detached (`Start-Process -WindowStyle
+  Hidden`). The 3 h rule is judged on the ETA measured with the segmented fetch (~3 MB/s).
+- **Statistics** (`app/study/stats.py`, from the earlier part of this session): paired percentile
+  bootstrap (10,000 resamples, stratified by scenario, seed 20261112), Holm over the family
+  declared in `experiments/config/statistics.json` (10 comparisons H1-H10) before any held-out
+  run. Primary analysis = spread truncation, repeat 1.
+- **Freeze** (`app/study/freeze.py`): hashes study.json, statistics.json, final_study.json, the
+  relevance set, both prompt sets, the tool/study/scoring code (`FROZEN_CODE`, LF-normalised),
+  model id, seeds. Analysis-only code (stats, exporter, CLIs) is not frozen: it reads run files.
+  `--allow-held-out` works only with a matching freeze; every attempt goes to
+  `held-out-access.jsonl`.
+- **Repeats.** `repeat` enters the matched config hash only when set (pilot hashes unchanged).
+  With temperature 0 (frozen) the repeats measure run-to-run nondeterminism of the local runtime,
+  not sampling variance; this is a limitation, not a reason to change the protocol.
+- **Earliest truncation** in the final study: repeat 1 only (phase iii).
+- **Verdict accuracy** counts a failed case (no verdict) as incorrect.

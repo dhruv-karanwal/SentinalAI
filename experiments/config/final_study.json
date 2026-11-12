@@ -1,0 +1,12 @@
+{
+  "note": "Final (held-out) study plan, declared before the protocol freeze and hashed into it. Phases run in order; every phase runs scenario by scenario and writes a per-scenario checkpoint. Arms: single and graph, each scored before and after the verifier (single, single+verifier, graph, graph+verifier). The model, temperature (0), budgets, prompts and retrieval mode are those of study.json / the code at the freeze. With temperature 0 the repeats measure run-to-run nondeterminism of the local runtime, not sampling variance.",
+  "scenarios": ["fox", "harrison", "santos", "wardbeck", "wheeler", "wilson"],
+  "variants": ["wazuh", "suricata", "aminer", "fused", "oracle", "noise-wazuh"],
+  "select": "reachable",
+  "retrieval": "hybrid",
+  "phases": [
+    {"name": "i", "truncation": "spread", "repeats": [1], "note": "primary: all variants x both arms x all held-out scenarios, repeat 1"},
+    {"name": "ii", "truncation": "spread", "repeats": [2, 3], "note": "repeats 2 and 3"},
+    {"name": "iii", "truncation": "earliest", "repeats": [1], "note": "truncation sensitivity: earliest-100 cap, repeat 1"}
+  ]
+}
