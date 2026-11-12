@@ -116,3 +116,19 @@ def test_tool_errors_count_as_calls_and_go_back_to_the_model(pool: AlertPool) ->
     client = FakeClient([tool("get_alert", alert_id="al-0"), final("benign", [])])
     run = investigate(client, kit(pool), AGENT, MODEL)
     assert run.tool_calls == 1 and "unknown alert id" in client.calls[1][-1]["content"]
+
+
+def test_prompt_v2_shows_the_tool_call_form_and_the_repair_repeats_it() -> None:
+    # smoke test 2026-11-12 (qwen2.5 7B): the model put the tool name in "action"; m5-v2
+    # adds a concrete example and repeats both forms in the repair message
+    import json as _json
+
+    from app.agent.protocol import PROMPT_VERSION, REPAIR_MESSAGE, SYSTEM_PROMPT, parse_reply
+    assert PROMPT_VERSION == "m5-v2"
+    example = '{"action": "call_tool", "tool": "list_alerts", "arguments": {"detector": "wazuh"}}'
+    assert example in SYSTEM_PROMPT
+    assert 'never the tool name' in SYSTEM_PROMPT
+    repair = REPAIR_MESSAGE.format(error="x")
+    assert '"action": "call_tool", "tool":' in repair and '"action": "final"' in repair
+    call = parse_reply(example)
+    assert _json.loads(example)["tool"] == "list_alerts" and call is not None
