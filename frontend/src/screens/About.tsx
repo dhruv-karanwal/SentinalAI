@@ -196,7 +196,7 @@ function Hero({ overview, loading, onTour, scenario }: { overview: Overview | nu
           <circle
             key={`p${i}`}
             className="pkt"
-            data-tone={(['wazuh', 'aminer', 'high', 'accent', 'wazuh'] as const)[i]}
+            data-tone={(['wazuh', 'aminer', 'high', 'ref', 'wazuh'] as const)[i]}
             cx={x0 + i * step + r}
             cy={50}
             r={4}

@@ -67,7 +67,7 @@ export function EntityScreen({ scenario, kind, value }: { scenario: string; kind
                 ),
                 text: `${r.rule_id} ${r.rule_name ?? ''}`,
                 value: r.alerts,
-                tone: 'accent',
+                tone: 'ref',
                 onActivate: () => (window.location.hash = buildHash('/alerts', { rule_id: r.rule_id, ...(kind === 'host' ? { host: value } : { ip: value }) })),
               }))}
             />

@@ -122,7 +122,7 @@ export function AlertsScreen({ scenario, route, searchRef }: { scenario: string;
               </h3>
               <ul>
                 {f.values.map((v) => {
-                  const tone: Tone = name === 'detector' ? detectorTone(v.value) : 'accent';
+                  const tone: Tone = name === 'detector' ? detectorTone(v.value) : 'ref';
                   const pressed = filter[name] === v.value;
                   const text = name === 'detector' ? detectorName(v.value) : v.value;
                   return (

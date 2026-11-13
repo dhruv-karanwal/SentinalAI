@@ -100,7 +100,7 @@ export function AuditScreen({ route, searchRef }: Props) {
             title="Activity over time"
             question="When did people act, and when were requests refused?"
             legend={[
-              { key: 'write', label: 'changes', tone: 'accent' },
+              { key: 'write', label: 'changes', tone: 'ref' },
               { key: 'sign-in', label: 'sign-ins', tone: 'muted' },
               { key: 'refused', label: 'denied, failed or refused', tone: 'high' },
             ]}
@@ -113,7 +113,7 @@ export function AuditScreen({ route, searchRef }: Props) {
               binSeconds={activity.step}
               height={96}
               label="Audit activity over time"
-              tones={{ write: 'accent', 'sign-in': 'muted', refused: 'high' }}
+              tones={{ write: 'ref', 'sign-in': 'muted', refused: 'high' }}
               names={{ write: 'changes', 'sign-in': 'sign-ins', refused: 'refused' }}
             />
           </ChartFrame>

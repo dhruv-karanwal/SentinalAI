@@ -348,7 +348,7 @@ function QueueCharts({ data }: { data: Overview }) {
     >
       <StackedHBars rows={rows} unit="incidents" />
       <h4 className="section-title" style={{ marginTop: 'var(--sp-12)' }}>
-        Age in queue of incidents not closed (count per age band; darker = more)
+        Age in queue of incidents not closed (count per age band; stronger colour = more)
       </h4>
       <table className="data-table">
         <thead>
@@ -463,11 +463,11 @@ function AttackChart({ data, filter, setFilter }: { data: Overview; filter: Aler
       title="ATT&CK techniques by tactic"
       term="attack-tactic"
       question="Which tactics do the mapped alerts point to, and which technique carries the volume? Click a cell to filter the alerts."
-      what="Columns are attacker goals (tactics); each cell is a technique with its alert count printed. Darker means more alerts."
+      what="Columns are attacker goals (tactics); each cell is a technique with its alert count printed. A stronger olive means more alerts."
       why="It says what kind of attack the evidence suggests; click a cell to see those alerts."
       legend={[
-        { key: 'h1', label: 'fewer alerts', tone: 'muted', mark: 'square' },
-        { key: 'h4', label: 'more alerts (darker; count printed in each cell)', tone: 'accent', mark: 'square' },
+        { key: 'h1', label: 'fewer alerts', tone: 'heat-1', mark: 'square' },
+        { key: 'h4', label: 'more alerts (stronger olive; count printed in each cell)', tone: 'heat-4', mark: 'square' },
       ]}
       table={{
         columns: ['tactic', 'technique', 'name', 'alerts'],

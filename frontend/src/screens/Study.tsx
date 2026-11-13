@@ -142,14 +142,14 @@ function CoverageChart({ runs, noiseFor, metric, title, question }: { runs: Stud
         text: `${run.scenario} ${run.variant} ${arm}`,
         value: v,
         display: fmtPct(v),
-        tone: arm.endsWith('verifier') ? ('accent' as const) : ('muted' as const),
+        tone: arm.endsWith('verifier') ? ('verified' as const) : ('muted' as const),
         detail: r ? [`${r.covered} of ${r.cases} reachable attack cases`] : [],
         refs: refsFor(run, noiseFor(run), arm, metric),
       };
     }),
   );
   const legend: LegendItem[] = [
-    { key: 'v', label: 'after verifier (headline)', tone: 'accent' },
+    { key: 'v', label: 'after verifier (headline)', tone: 'verified' },
     { key: 'b', label: 'before verifier', tone: 'muted' },
     { key: 'all', label: 'cite-all ceiling', tone: 'ref', mark: 'ref', dash: '1 2' },
     { key: 'k', label: 'top-k detector order, matched k', tone: 'ref', mark: 'ref', dash: '4 2' },
@@ -184,7 +184,7 @@ function ClaimsChart({ runs }: { runs: StudyRun[] }) {
       question="How often do the arms claim something the evidence does not support, and what does the verifier remove?"
       legend={[
         { key: 'b', label: 'before verifier (hallucination measure)', tone: 'muted', mark: 'hollow' },
-        { key: 'a', label: 'after verifier', tone: 'accent', mark: 'dot' },
+        { key: 'a', label: 'after verifier', tone: 'verified', mark: 'dot' },
       ]}
       table={{ columns: ['run, arm', 'before verifier', 'after verifier'], rows: rows.map((r) => [r.label, fmtPct(r.before), fmtPct(r.after)]) }}
       note={`${LABEL}. Axis 0 % to 100 % of claims.`}
@@ -204,7 +204,7 @@ function CostChart({ runs }: { runs: StudyRun[] }) {
         label: `${run.scenario} ${run.variant} · ${arm}`,
         text: `${run.variant} ${arm}`,
         value: tokens,
-        tone: 'accent' as const,
+        tone: 'ref' as const,
         detail: r ? [`input ${fmtInt(r.input_tokens)}, output ${fmtInt(r.output_tokens)}`, `latency ${fmtDuration(r.latency_seconds)} over ${run.cases} cases`, `${fmtInt(r.tool_calls)} tool calls, ${r.budget_hit} budget stops`] : ['no run summary'],
       };
     }),

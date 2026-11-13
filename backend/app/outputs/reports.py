@@ -110,8 +110,8 @@ def render_csv(body: dict[str, Any]) -> str:
 
 # Print colours for the PDF charts (the light-theme detector tokens of the console) and the dash
 # pattern that also tells the detectors apart without colour.
-DETECTOR_PRINT = {"wazuh": ("#086a58", None), "suricata": ("#a3407a", (4, 2)),
-                  "aminer": ("#756600", (1, 2)), "sigma": ("#5c6670", (6, 2, 1, 2))}
+DETECTOR_PRINT = {"wazuh": ("#a3440a", None), "suricata": ("#6b1d49", (4, 2)),
+                  "aminer": ("#08706a", (1, 2)), "sigma": ("#625b52", (6, 2, 1, 2))}
 
 
 def _chart_flowables(charts: dict[str, Any], width_pt: float) -> list[Any]:
@@ -137,7 +137,7 @@ def _chart_flowables(charts: dict[str, Any], width_pt: float) -> list[Any]:
                 if not c:
                     continue
                 bh = (h - bottom - top) * c / peak
-                colour, _ = DETECTOR_PRINT.get(det, ("#5c6670", None))
+                colour, _ = DETECTOR_PRINT.get(det, ("#625b52", None))
                 d.add(Rect(left + i * bw, y, max(bw - 0.5, 0.5), bh, fillColor=colors.HexColor(colour),
                            strokeColor=None))
                 y += bh
@@ -148,7 +148,7 @@ def _chart_flowables(charts: dict[str, Any], width_pt: float) -> list[Any]:
                      "alerts per bin, stacked by detector)", fontSize=6))
         x = left + plot_w - 4
         for det in reversed(list(series)):
-            colour, _ = DETECTOR_PRINT.get(det, ("#5c6670", None))
+            colour, _ = DETECTOR_PRINT.get(det, ("#625b52", None))
             label = f"{det} {sum(series[det]):,}"
             x -= 6 + 3.2 * len(label)
             d.add(Rect(x, h - 8, 5, 5, fillColor=colors.HexColor(colour), strokeColor=None))
@@ -164,7 +164,7 @@ def _chart_flowables(charts: dict[str, Any], width_pt: float) -> list[Any]:
         top_edge = max((e["alerts"] for e in g["edges"]), default=1)
         for e in g["edges"]:
             det = max(e["by_detector"].items(), key=lambda kv: kv[1])[0]
-            colour, dash = DETECTOR_PRINT.get(det, ("#5c6670", None))
+            colour, dash = DETECTOR_PRINT.get(det, ("#625b52", None))
             (x1, y1), (x2, y2) = pos[e["source"]], pos[e["target"]]
             d.add(Line(x1, y1, x2, y2, strokeColor=colors.HexColor(colour), strokeDashArray=dash,
                        strokeWidth=0.75 + 3.25 * (e["alerts"] / top_edge) ** 0.5))
@@ -178,8 +178,8 @@ def _chart_flowables(charts: dict[str, Any], width_pt: float) -> list[Any]:
         for n in nodes:
             x, y = pos[n["id"]]
             host = n["kind"] == "host"
-            d.add(Circle(x, y, 4, fillColor=colors.white if host else colors.HexColor("#1b1f24"),
-                         strokeColor=colors.HexColor("#1b1f24"), strokeWidth=1))
+            d.add(Circle(x, y, 4, fillColor=colors.white if host else colors.HexColor("#1b1815"),
+                         strokeColor=colors.HexColor("#1b1815"), strokeWidth=1))
         by_id = {n["id"]: n for n in nodes}
         for b in boxes:
             n = by_id[b.id]

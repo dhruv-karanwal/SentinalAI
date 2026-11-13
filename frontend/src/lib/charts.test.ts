@@ -140,12 +140,17 @@ test('layout reproduces the Python fixture exactly', () => {
 test('chart and text tokens meet WCAG contrast in both themes', () => {
   const themes = readThemes(readFileSync(new URL('../tokens.css', import.meta.url), 'utf-8'));
   for (const [name, t] of Object.entries(themes)) {
-    const surfaces = ['--bg', '--surface', '--raised'].map((k) => t[k]!);
-    for (const s of surfaces) {
-      for (const k of ['--text', '--text-muted', '--text-faint', '--accent', '--sev-high', '--sev-medium', '--sev-low', '--det-wazuh', '--det-suricata', '--det-aminer']) {
-        assert.ok(contrast(t[k]!, s) >= 4.5, `${name} ${k} on ${s}: ${contrast(t[k]!, s).toFixed(2)}`);
+    for (const sk of ['--bg', '--surface', '--raised', '--selected']) {
+      const s = t[sk]!;
+      for (const k of ['--text', '--text-muted', '--text-faint', '--accent', '--sev-high', '--sev-medium', '--sev-low', '--verified', '--det-wazuh', '--det-suricata', '--det-aminer']) {
+        assert.ok(contrast(t[k]!, s) >= 4.5, `${name} ${k} on ${sk}: ${contrast(t[k]!, s).toFixed(2)}`);
       }
-      assert.ok(contrast(t['--ref']!, s) >= 3, `${name} --ref on ${s}`);
+      assert.ok(contrast(t['--ref']!, s) >= 3, `${name} --ref on ${sk}: ${contrast(t['--ref']!, s).toFixed(2)}`);
+    }
+    assert.ok(contrast(t['--on-accent']!, t['--accent']!) >= 4.5, `${name} --on-accent on --accent: ${contrast(t['--on-accent']!, t['--accent']!).toFixed(2)}`);
+    for (const sk of ['--bg', '--surface']) {
+      // control boundary (WCAG 1.4.11)
+      assert.ok(contrast(t['--border-strong']!, t[sk]!) >= 3, `${name} --border-strong on ${sk}: ${contrast(t['--border-strong']!, t[sk]!).toFixed(2)}`);
     }
     for (const k of ['--heat-1', '--heat-2', '--heat-3', '--heat-4']) {
       assert.ok(contrast(t['--text']!, t[k]!) >= 4.5, `${name} text on ${k}: ${contrast(t['--text']!, t[k]!).toFixed(2)}`);

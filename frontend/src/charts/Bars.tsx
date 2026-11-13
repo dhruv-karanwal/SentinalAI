@@ -181,7 +181,7 @@ export function DotPairs({ rows, beforeLabel, afterLabel }: { rows: Array<{ key:
 }
 
 /** Tiny inline bar for facet lists: share of the largest value, with the count printed next to it. */
-export function MiniBar({ value, max, tone = 'accent' }: { value: number; max: number; tone?: Tone }) {
+export function MiniBar({ value, max, tone = 'ref' }: { value: number; max: number; tone?: Tone }) {
   return (
     <span className="minibar" aria-hidden="true">
       <span style={{ width: `${max > 0 ? Math.max(2, (value / max) * 100) : 0}%`, background: TONE_VAR[tone] }} />

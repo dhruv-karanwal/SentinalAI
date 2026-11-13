@@ -170,7 +170,7 @@ export function Lanes({ lanes, bins, start, binSeconds, onPick }: { lanes: Lane[
                     width={Math.max(1.5, step - 0.5)}
                     y={y0 + LANE - 2 - hh}
                     height={hh}
-                    fill="var(--accent)"
+                    fill="var(--ref)"
                     onPointerEnter={(e) => tip.show(e.currentTarget, lines(li, b))}
                     onPointerLeave={() => tip.hide()}
                     onClick={() => onPick?.(start + b * binSeconds, start + (b + 1) * binSeconds)}
