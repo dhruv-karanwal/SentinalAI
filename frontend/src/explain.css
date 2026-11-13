@@ -24,8 +24,8 @@
 }
 .term-q:hover,
 .term-q[aria-expanded="true"] {
-  color: var(--accent);
-  border-color: var(--accent);
+  color: var(--text);
+  border-color: var(--text);
 }
 .term-tip {
   position: fixed;
@@ -101,7 +101,7 @@
 }
 .about-question {
   padding-left: var(--sp-12);
-  border-left: 2px solid var(--accent);
+  border-left: 2px solid var(--border-strong);
 }
 .about-small {
   margin: var(--sp-8) 0 0;
@@ -241,7 +241,7 @@
   gap: var(--sp-4);
   font-weight: 600;
   font-size: var(--fs-13);
-  color: var(--accent);
+  color: var(--text);
 }
 .limits {
   margin: 0;
@@ -280,7 +280,7 @@
   z-index: 55;
   width: 380px;
   padding: var(--sp-12) var(--sp-16);
-  border: 1px solid var(--accent);
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius-m);
   background: var(--surface);
   box-shadow: var(--float-shadow);
@@ -307,7 +307,7 @@
   background: var(--border);
 }
 .tour-progress span[data-on] {
-  background: var(--accent);
+  background: var(--text);
 }
 .tour-actions {
   display: flex;
@@ -341,7 +341,7 @@
 .what-happened {
   margin: 0;
   padding: var(--sp-8) var(--sp-12);
-  border-left: 2px solid var(--accent);
+  border-left: 2px solid var(--border-strong);
   background: var(--raised);
   font-size: var(--fs-13);
   line-height: 20px;

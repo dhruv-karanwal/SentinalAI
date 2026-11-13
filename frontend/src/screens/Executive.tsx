@@ -142,7 +142,7 @@ function ExecutiveBody({ data, scenario, role, high, observed }: { data: import(
             <HBars
               unit="incidents"
               rows={[
-                { key: 'r', label: 'reviewed', text: 'Incidents reviewed (status changed at least once)', value: ttr.reviewed, tone: 'accent' },
+                { key: 'r', label: 'reviewed', text: 'Incidents reviewed (status changed at least once)', value: ttr.reviewed, tone: 'ref' },
                 { key: 'u', label: 'not reviewed', text: 'Incidents never reviewed', value: ttr.unreviewed, tone: 'muted' },
               ]}
             />

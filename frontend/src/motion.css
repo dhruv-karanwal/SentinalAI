@@ -2,15 +2,15 @@
    Rules: animate transform and opacity only; nothing on table rows beyond hover; every animation
    stops under prefers-reduced-motion (block at the end). */
 
-/* ---- texture: blueprint grid + faint scanlines behind the app (fixed, one layer, no repaint) -- */
+/* ---- texture: faint warm grain + fine horizontal lines behind the app (fixed, one layer, no repaint) -- */
 
 body {
   background-color: var(--bg);
   background-image:
-    repeating-linear-gradient(0deg, var(--scanline) 0 1px, transparent 1px 3px),
-    linear-gradient(var(--grid-line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
-  background-size: 100% 3px, 32px 32px, 32px 32px;
+    repeating-linear-gradient(0deg, var(--fine-line) 0 1px, transparent 1px 6px),
+    repeating-linear-gradient(45deg, var(--grain) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(-45deg, var(--grain) 0 1px, transparent 1px 4px);
+  background-size: auto;
   background-attachment: fixed;
 }
 .main {
@@ -46,7 +46,7 @@ body {
   font: 600 var(--fs-11) / 16px var(--font-mono);
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--accent);
+  color: var(--text-muted);
 }
 
 /* scrolling pages keep room under their last block so the chat button never hides it */
@@ -85,7 +85,6 @@ body {
   width: 2px;
   height: 28px;
   background: var(--accent);
-  box-shadow: 0 0 10px var(--glow-accent);
   transform: translateY(var(--ind-y, -100px));
   transition: transform var(--dur-mid) var(--ease-out);
   pointer-events: none;
@@ -115,7 +114,7 @@ body {
   transform: scale(0.97);
 }
 .btn.primary:hover {
-  box-shadow: 0 0 0 1px var(--accent), 0 0 14px var(--glow-accent);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 :focus-visible {
   transition: outline-offset var(--dur-fast) var(--ease-out);
@@ -237,7 +236,7 @@ body {
   position: absolute;
   inset: 0 0 auto 0;
   height: 1px;
-  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  background: linear-gradient(90deg, transparent, var(--border-strong), transparent);
   opacity: 0.5;
 }
 .look-first.cards {
@@ -268,7 +267,7 @@ body {
   width: 3px;
   border-radius: 2px;
   background: var(--edge, var(--sev-low));
-  box-shadow: 0 0 10px var(--edge-glow, transparent);
+  box-shadow: 0 0 6px var(--edge-glow, transparent);
 }
 .look-first.cards li[data-sev="high"] {
   --edge: var(--sev-high);
@@ -276,7 +275,6 @@ body {
 }
 .look-first.cards li[data-sev="medium"] {
   --edge: var(--sev-medium);
-  --edge-glow: var(--glow-medium);
 }
 .look-first.cards li[data-sev="high"]::before {
   animation: edge-pulse 2.4s ease-in-out infinite;
@@ -318,7 +316,7 @@ body {
   border-radius: 50%;
   background: var(--accent);
   color: var(--on-accent);
-  box-shadow: var(--lift-shadow), 0 0 18px var(--glow-accent);
+  box-shadow: var(--lift-shadow), 0 0 8px var(--glow-accent);
   cursor: pointer;
   transition: transform var(--dur-mid) var(--ease-spring), box-shadow var(--dur-mid) var(--ease-out);
 }
@@ -377,7 +375,6 @@ body {
 }
 .fab-dot[data-state="online"] {
   background: var(--online);
-  box-shadow: 0 0 8px var(--glow-online);
 }
 .fab-dot[data-state="busy"] {
   background: var(--sev-medium);
@@ -469,7 +466,6 @@ body {
 }
 .fab-status[data-state="online"] i {
   background: var(--online);
-  box-shadow: 0 0 6px var(--glow-online);
 }
 .fab-status[data-state="busy"] i {
   background: var(--sev-medium);
@@ -675,8 +671,7 @@ body {
   transform: translateX(3px);
 }
 .story-steps a[aria-current="step"]::before {
-  background: var(--accent);
-  box-shadow: 0 0 8px var(--glow-accent);
+  background: var(--text);
   transform: scale(1);
 }
 .story-main {
@@ -709,7 +704,7 @@ body {
   padding: var(--sp-24);
   border: 1px solid var(--glass-edge);
   border-radius: 12px;
-  background: radial-gradient(120% 80% at 10% 0%, var(--glow-accent), transparent 55%), var(--glass);
+  background: var(--glass);
 }
 .hero h1 {
   margin: var(--sp-8) 0;
@@ -774,12 +769,11 @@ body {
 }
 .pipe-svg .node-glow {
   fill: none;
-  stroke: var(--accent);
+  stroke: var(--ref);
   stroke-width: 2;
   opacity: 0.15;
   animation: stage-lit 2s var(--ease-out) infinite;
   animation-delay: calc((var(--s) - 1) * 0.4s);
-  filter: drop-shadow(0 0 6px var(--glow-accent));
 }
 @keyframes stage-lit {
   0%,
@@ -802,8 +796,7 @@ body {
   font: 400 10px var(--font-mono);
 }
 .pipe-svg .pkt {
-  fill: var(--accent);
-  filter: drop-shadow(0 0 4px var(--glow-accent));
+  fill: var(--ref);
   animation: pkt-run 2s linear infinite;
   animation-delay: calc(var(--seg) * 0.4s);
 }
@@ -813,8 +806,8 @@ body {
 .pipe-svg .pkt[data-tone="wazuh"] {
   fill: var(--det-wazuh);
 }
-.pipe-svg .pkt[data-tone="accent"] {
-  fill: var(--accent);
+.pipe-svg .pkt[data-tone="ref"] {
+  fill: var(--ref);
 }
 .pipe-svg .pkt[data-tone="aminer"] {
   fill: var(--det-aminer);
@@ -845,9 +838,9 @@ body {
   margin: var(--sp-8) 0 var(--sp-12);
 }
 .study-src button[aria-pressed="true"] {
-  background: var(--accent);
-  color: var(--on-accent);
-  border-color: var(--accent);
+  background: var(--selected);
+  color: var(--text);
+  border-color: var(--border-strong);
 }
 .study-flow {
   display: grid;
@@ -900,10 +893,9 @@ body {
   place-items: center;
   gap: var(--sp-4);
   aspect-ratio: 1;
-  border: 1px solid var(--accent);
+  border: 1px solid var(--border-strong);
   border-radius: 50%;
   background: var(--raised);
-  box-shadow: 0 0 22px var(--glow-accent);
   text-align: center;
   font-size: var(--fs-12);
   font-weight: 600;
@@ -940,7 +932,7 @@ body {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--ref);
   animation: lane-run 2.6s linear infinite;
   animation-delay: calc(var(--k) * -0.65s + var(--l) * -0.2s);
 }
@@ -954,7 +946,7 @@ body {
   top: 0;
   bottom: 0;
   padding-left: 4px;
-  border-left: 2px dashed var(--online);
+  border-left: 2px dashed var(--verified);
   font: 600 9px/18px var(--font-mono);
   color: var(--text-muted);
 }
@@ -1012,12 +1004,10 @@ body {
   transition: border-color var(--dur-mid) var(--ease-out), box-shadow var(--dur-mid) var(--ease-out);
 }
 .vcard[data-v="kept"] {
-  border-color: var(--online);
-  box-shadow: 0 0 14px var(--glow-online);
+  border-color: var(--verified);
 }
 .vcard[data-v="dropped"] {
   border-color: var(--sev-high);
-  box-shadow: 0 0 14px var(--glow-high);
 }
 .vcard .vtag {
   display: inline-block;
@@ -1028,8 +1018,8 @@ body {
   animation: fade-in var(--dur-mid) var(--ease-out) both;
 }
 .vcard[data-v="kept"] .vtag {
-  color: var(--online);
-  box-shadow: inset 0 0 0 1px var(--online);
+  color: var(--verified);
+  box-shadow: inset 0 0 0 1px var(--verified);
 }
 .vcard[data-v="dropped"] .vtag {
   color: var(--sev-high);
@@ -1052,7 +1042,7 @@ body {
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg, transparent, var(--glow-accent), transparent);
+  background: linear-gradient(90deg, transparent, var(--sheen), transparent);
   animation: scan 0.9s var(--ease-out) both;
   transform: translateX(-100%);
 }
@@ -1071,7 +1061,7 @@ body {
   letter-spacing: 0.06em;
 }
 
-/* screen cards with tilt + glow (pointer sets --rx/--ry/--gx/--gy) */
+/* screen cards with tilt (pointer sets --rx/--ry/--gx/--gy) */
 .tilt-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
@@ -1099,31 +1089,14 @@ body {
 .tilt:hover,
 .tilt:focus-visible {
   text-decoration: none;
-  box-shadow: var(--lift-shadow), 0 0 0 1px var(--accent);
-}
-.tilt::after {
-  content: "";
-  position: absolute;
-  left: -60px;
-  top: -60px;
-  width: 120px;
-  height: 120px;
-  border-radius: 50%;
-  background: radial-gradient(circle, var(--glow-accent), transparent 70%);
-  opacity: 0;
-  transform: translate(var(--gx, 0px), var(--gy, 0px));
-  transition: opacity var(--dur-mid) var(--ease-out);
-  pointer-events: none;
-}
-.tilt:hover::after {
-  opacity: 1;
+  box-shadow: var(--lift-shadow), 0 0 0 1px var(--border-strong);
 }
 .tilt-name {
   display: flex;
   align-items: center;
   gap: var(--sp-4);
   font-weight: 600;
-  color: var(--accent);
+  color: var(--text);
 }
 
 @media (max-width: 900px) {

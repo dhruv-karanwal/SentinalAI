@@ -72,40 +72,43 @@ Tokens are CSS custom properties on `:root[data-theme="dark"]` (default) and
 
 ### Colour
 
+Palette since wave G (2026-11-13): **warm graphite + phosphor lime** (section 14). The old
+blue palette is gone; `palette.test.ts` fails on any blue hue in `tokens.css`.
+
 | Token | Dark | Light | Use |
 |---|---|---|---|
-| `--bg` | `#0f1113` | `#f6f7f8` | page |
-| `--surface` | `#15181b` | `#ffffff` | panes, tables |
-| `--raised` | `#1c2024` | `#eceef1` | row hover, table header, inputs |
-| `--selected` | `#1f2a3a` | `#dde8f8` | selected row (plus a 2 px accent bar at the row start) |
-| `--border` | `#2a2f35` | `#d5d9de` | 1 px hairlines between regions (separators, not controls) |
-| `--border-strong` | `#6f7883` | `#77818c` | control outlines (inputs, buttons, toggles) |
-| `--text` | `#e3e6ea` | `#1b1f24` | primary text |
-| `--text-muted` | `#a3abb5` | `#4a545f` | secondary text, column headers |
-| `--text-faint` | `#8a939e` | `#5d6772` | units, placeholders, timestamps' relative part |
-| `--accent` | `#5b9dff` | `#1f5fbf` | focus ring, primary action, links, selection bar. Nothing else |
-| `--on-accent` | `#0b1220` | `#ffffff` | text on a primary button |
-| `--sev-high` | `#f0624d` | `#b42318` | severity High; also destructive / error text |
-| `--sev-medium` | `#e0a030` | `#8a5600` | severity Medium |
-| `--sev-low` | `#8f9aa6` | `#56606b` | severity Low |
-| `--det-wazuh` | `#2bb39a` | `#086a58` | detector identity |
-| `--det-suricata` | `#d18ab8` | `#a3407a` | detector identity |
-| `--det-aminer` | `#d9c74a` | `#756600` | detector identity |
-| `--det-sigma` | `#9aa3ad` | `#5c6670` | detector identity (hollow mark) |
+| `--bg` | `#151311` | `#f3f0e8` | page (warm charcoal / warm paper) |
+| `--surface` | `#1d1a17` | `#fbf9f4` | panes, tables |
+| `--raised` | `#26221e` | `#ece8de` | row hover, table header, inputs |
+| `--selected` | `#302c1f` | `#e3e8cc` | selected row (plus a 2 px accent bar at the row start) |
+| `--border` | `#3a352f` | `#d9d3c6` | 1 px hairlines between regions (separators, not controls) |
+| `--border-strong` | `#7d766b` | `#7a7266` | control outlines (inputs, buttons, toggles) |
+| `--text` | `#ece8df` | `#1b1815` | primary text (bone / ink) |
+| `--text-muted` | `#a39d91` | `#514b43` | secondary text, column headers |
+| `--text-faint` | `#9a9488` | `#625b52` | units, placeholders, timestamps' relative part |
+| `--accent` | `#c8f03c` | `#4f6b0e` | logo, active nav mark, primary action, focus ring, chat button, links. Nothing else |
+| `--on-accent` | `#151311` | `#ffffff` | text on a lime / olive fill |
+| `--sev-high` | `#ff6b57` | `#b3261e` | severity High (signal red); also destructive / error / dropped |
+| `--sev-medium` | `#e8a33a` | `#8a5300` | severity Medium (amber) |
+| `--sev-low` | `#a39a8c` | `#5e574e` | severity Low (warm slate) |
+| `--verified` | `#3fbf8f` | `#1d6b4f` | verifier kept / verified (teal-green, never the lime) |
+| `--det-wazuh` | `#f08a4b` | `#a3440a` | detector identity (copper, mid lightness) |
+| `--det-suricata` | `#f7b3d6` | `#6b1d49` | detector identity (rose; lightest in dark, darkest in light) |
+| `--det-aminer` | `#2fa89f` | `#08706a` | detector identity (sea green, darkest in dark) |
+| `--det-sigma` | `#a39d91` | `#625b52` | detector identity (neutral, hollow mark) |
+| `--heat-1..4` | `#2a2a1c` .. `#4b5b21` | `#ebead4` .. `#b8c76c` | heat cells, olive ramp, counts printed in the cell |
 | `--mark` | `#4a3d0c` | `#ffe58a` | highlighted matched span in a log line (plus an underline in `--sev-medium`) |
 
-Measured contrast (WCAG 2 relative luminance, computed 2026-11-10 for every text-like token on
-`--bg`, `--surface`, `--raised` and `--selected`):
+Measured contrast (WCAG 2, computed 2026-11-13, asserted by `lib/charts.test.ts` for every text-like
+token on `--bg`, `--surface`, `--raised` and `--selected`): all text, accent, severity, verified and
+detector tokens >= 4.5:1 in both themes; `--on-accent` on `--accent` 14.1 dark, 6.1 light; `--text`
+on every heat step >= 4.5; `--border-strong` >= 3:1 on `--bg` and `--surface`. `--border` hairlines
+are low contrast by design: they separate regions and carry no information.
 
-- Text tokens, accent, severity and detector colours: minimum 4.52:1 dark (`--sev-high` on
-  `--selected`), 4.64:1 light (`--det-aminer` on `--selected`). All >= 4.5:1.
-- `--on-accent` on `--accent`: 6.88 dark, 6.09 light. `--text` on `--mark`: 8.54 / 13.27.
-- `--border-strong` against the three surfaces: minimum 3.66 dark, 3.41 light (>= 3:1).
-- `--border` hairlines are 1.3-1.4:1 by design: they separate regions and carry no information.
-
-Not yet checked: a colour-vision-deficiency simulation. Detector hues are taken from the
-Okabe-Ito family (bluish green, reddish purple, yellow, plus a neutral), and no colour is the
-only carrier of meaning (below); run a CVD simulation on the first rendered screenshots.
+Colour-vision deficiency (measured, `lib/palette.test.ts`): the three detector hues are spread over
+lightness as well as hue, so after a Machado 2009 (severity 1) protanopia, deuteranopia or tritanopia
+simulation every pair stays >= 0.10 apart in OKLab in both themes (lead's measurement: minimum 0.109
+dark under protanopia, 0.114 light under deuteranopia). Colour is still never the only carrier:
 
 **Never colour alone.**
 - Severity = glyph + word. High: three stacked bars filled; Medium: two of three; Low: one of
@@ -577,3 +580,39 @@ layers). Rejected: Inter from Google Fonts (no web fonts), GSAP (CSS + rAF cover
 the navy / green palette (the measured tokens stay; only the dark base moved). The `frontend-design`
 skill named in the brief is not installed in this session; the direction was set by hand from the
 brief.
+
+## 14. Palette: warm graphite + phosphor lime (wave G, 2026-11-13)
+
+Why: the blue palette read as every other dark SOC dashboard. The console now looks like an
+instrument panel lit by an old phosphor display: warm charcoal surfaces (no blue tint), bone text,
+and one lime accent that marks only what an analyst acts on. Token values are in section 3.
+
+### 14.1 Where the lime goes (and nowhere else)
+
+Logo, the active nav indicator, primary buttons, the focus ring, the floating chat button and links.
+It is never a data colour: no chart series, heat step, severity, detector or verifier state uses it.
+Text on a lime fill is `--on-accent` (near-black in dark, white on the light-theme olive).
+
+### 14.2 Semantic colours
+
+- Severity: High signal red, Medium amber, Low warm slate; glyph + word as before (section 3).
+- Verifier: kept / verified = `--verified` (teal-green, measured apart from the lime);
+  dropped / unsupported = the `--sev-high` red family with a strike or dashed rule.
+- Detectors: copper (Wazuh), rose (Suricata), sea green (AMiner), neutral hollow (Sigma). Spread over
+  lightness as well as hue so they survive protanopia, deuteranopia and tritanopia; dash patterns
+  and names stay the non-colour cue. The PDF uses the light-theme values (`DETECTOR_PRINT` in
+  `backend/app/outputs/reports.py`), because it prints on white.
+- Heat strips and the ATT&CK grid: an olive ramp `--heat-1..4`, counts printed in every cell.
+
+### 14.3 Texture and glow
+
+The blue blueprint grid and scanlines are replaced by a faint warm grain / fine-line layer
+(`--grain`, `--fine-line`, about 2-3 % opacity, one fixed background layer). Glows exist only on
+High severity and the chat button, with a small radius; everything else uses borders.
+
+### 14.4 Skill run
+
+`ui-ux-pro-max` colour search ("security dashboard dark lime accent") returned slate-navy
+dashboards with a green accent: rejected (that is the blue look this wave removes). Kept from it:
+a visible focus ring on every control and "colour never alone" for charts. The brief pinned the
+palette; values were then tuned by measurement (contrast and CVD scripts) before they were written.

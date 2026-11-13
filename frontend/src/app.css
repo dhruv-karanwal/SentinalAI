@@ -251,7 +251,7 @@ a:hover {
 
 .btn[aria-pressed="true"] {
   background: var(--selected);
-  border-color: var(--accent);
+  border-color: var(--border-strong);
 }
 
 .input,
@@ -397,10 +397,15 @@ a:hover {
   border-color: var(--sev-high);
 }
 
-.tag[data-tone="approved"],
-.tag[data-tone="verified"] {
+.tag[data-tone="approved"] {
   color: var(--text);
   border-color: var(--text);
+  font-weight: 600;
+}
+
+.tag[data-tone="verified"] {
+  color: var(--verified);
+  border-color: var(--verified);
   font-weight: 600;
 }
 
@@ -432,7 +437,7 @@ a:hover {
 
 .split > .divider:hover,
 .split > .divider:focus-visible {
-  background: linear-gradient(to right, transparent 1px, var(--accent) 1px, var(--accent) 4px, transparent 4px);
+  background: linear-gradient(to right, transparent 1px, var(--border-strong) 1px, var(--border-strong) 4px, transparent 4px);
 }
 
 .pane-head {
@@ -609,7 +614,7 @@ a:hover {
 
 .dt-row[aria-selected="true"] {
   background: var(--selected);
-  box-shadow: inset 2px 0 0 var(--accent);
+  box-shadow: inset 2px 0 0 var(--border-strong);
 }
 
 .dt-row > [role="gridcell"] {
@@ -806,7 +811,7 @@ a:hover {
 .tabs [role="tab"][aria-selected="true"] {
   color: var(--text);
   font-weight: 600;
-  border-bottom-color: var(--accent);
+  border-bottom-color: var(--text);
 }
 
 .tabpanel {
@@ -1052,7 +1057,7 @@ dialog.dialog {
 }
 
 dialog.dialog::backdrop {
-  background: rgb(0 0 0 / 0.5);
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
 }
 
 .dialog-head {
