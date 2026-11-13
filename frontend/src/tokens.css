@@ -43,92 +43,98 @@
   --row-fs: var(--fs-13);
 }
 
+/* Wave G palette (DESIGN.md 3 + 14): warm graphite + phosphor lime. No blue anywhere.
+   The lime is for the logo, active nav mark, primary action, focus ring, chat button and links only.
+   Detector hues are spread across lightness as well as hue, so they stay apart under
+   deuteranopia, protanopia and tritanopia (tests in lib/charts.test.ts). */
 :root,
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #0a0d12;
-  --surface: #10151c;
-  --raised: #171e27;
-  --selected: #1c2a3d;
-  --border: #242c37;
-  --border-strong: #6f7883;
-  --text: #e3e6ea;
-  --text-muted: #a3abb5;
-  --text-faint: #8a939e;
-  --accent: #5b9dff;
-  --on-accent: #0b1220;
-  --sev-high: #f0624d;
-  --sev-medium: #e0a030;
-  --sev-low: #8f9aa6;
-  --det-wazuh: #2bb39a;
-  --det-suricata: #d18ab8;
-  --det-aminer: #d9c74a;
-  --det-sigma: #9aa3ad;
-  --grid: #1f2731;
-  --heat-1: #1b2c40;
-  --heat-2: #1f3d5f;
-  --heat-3: #244f7e;
-  --heat-4: #2a62a0;
-  --ref: #c9ced4;
+  --bg: #151311;
+  --surface: #1d1a17;
+  --raised: #26221e;
+  --selected: #302c1f;
+  --border: #3a352f;
+  --border-strong: #7d766b;
+  --text: #ece8df;
+  --text-muted: #a39d91;
+  --text-faint: #9a9488;
+  --accent: #c8f03c;
+  --on-accent: #151311;
+  --sev-high: #ff6b57;
+  --sev-medium: #e8a33a;
+  --sev-low: #a39a8c;
+  --verified: #3fbf8f;
+  --det-wazuh: #f08a4b;
+  --det-suricata: #f7b3d6;
+  --det-aminer: #2fa89f;
+  --det-sigma: #a39d91;
+  --grid: #2c2823;
+  --heat-1: #2a2a1c;
+  --heat-2: #34391d;
+  --heat-3: #3f4a1f;
+  --heat-4: #4b5b21;
+  --ref: #d6d0c4;
   --mark: #4a3d0c;
-  --float-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
-  /* wave F mission-control layer: non-text, decorative or state marks (DESIGN.md 13.1) */
-  --online: #3fca7a;
-  --glass: rgb(16 21 28 / 0.82);
-  --glass-edge: rgb(132 170 220 / 0.16);
-  --grid-line: rgb(91 157 255 / 0.05);
-  --scanline: rgb(255 255 255 / 0.018);
-  --glow-accent: rgb(91 157 255 / 0.38);
-  --glow-high: rgb(240 98 77 / 0.5);
-  --glow-medium: rgb(224 160 48 / 0.38);
-  --glow-low: rgb(143 154 166 / 0.25);
-  --glow-online: rgb(63 202 122 / 0.45);
-  --sheen: rgb(255 255 255 / 0.06);
-  --shimmer: rgb(255 255 255 / 0.06);
-  --lift-shadow: 0 8px 28px rgb(0 0 0 / 0.45);
+  --float-shadow: 0 1px 2px rgb(0 0 0 / 0.35);
+  /* non-text, decorative or state marks (DESIGN.md 13.1, 14) */
+  --online: #3fbf8f;
+  --glass: rgb(29 26 23 / 0.86);
+  --glass-edge: rgb(236 232 223 / 0.09);
+  --grain: rgb(236 232 223 / 0.022);
+  --fine-line: rgb(236 232 223 / 0.018);
+  --glow-accent: rgb(200 240 60 / 0.28);
+  --glow-high: rgb(255 107 87 / 0.4);
+  --glow-medium: rgb(232 163 58 / 0);
+  --glow-low: rgb(163 154 140 / 0);
+  --glow-online: rgb(63 191 143 / 0);
+  --sheen: rgb(236 232 223 / 0.05);
+  --shimmer: rgb(236 232 223 / 0.05);
+  --lift-shadow: 0 8px 24px rgb(0 0 0 / 0.45);
 }
 
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg: #f6f7f8;
-  --surface: #ffffff;
-  --raised: #eceef1;
-  --selected: #dde8f8;
-  --border: #d5d9de;
-  --border-strong: #77818c;
-  --text: #1b1f24;
-  --text-muted: #4a545f;
-  --text-faint: #5d6772;
-  --accent: #1f5fbf;
+  --bg: #f3f0e8;
+  --surface: #fbf9f4;
+  --raised: #ece8de;
+  --selected: #e3e8cc;
+  --border: #d9d3c6;
+  --border-strong: #7a7266;
+  --text: #1b1815;
+  --text-muted: #514b43;
+  --text-faint: #625b52;
+  --accent: #4f6b0e;
   --on-accent: #ffffff;
-  --sev-high: #b42318;
-  --sev-medium: #8a5600;
-  --sev-low: #56606b;
-  --det-wazuh: #086a58;
-  --det-suricata: #a3407a;
-  --det-aminer: #756600;
-  --det-sigma: #5c6670;
-  --grid: #e3e6ea;
-  --heat-1: #e3edf9;
-  --heat-2: #c3d8f2;
-  --heat-3: #9dbfe9;
-  --heat-4: #76a2dc;
-  --ref: #3a4149;
+  --sev-high: #b3261e;
+  --sev-medium: #8a5300;
+  --sev-low: #5e574e;
+  --verified: #1d6b4f;
+  --det-wazuh: #a3440a;
+  --det-suricata: #6b1d49;
+  --det-aminer: #08706a;
+  --det-sigma: #625b52;
+  --grid: #e4dfd3;
+  --heat-1: #ebead4;
+  --heat-2: #dde2b4;
+  --heat-3: #cbd58f;
+  --heat-4: #b8c76c;
+  --ref: #3d3832;
   --mark: #ffe58a;
-  --float-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
-  --online: #1a7f45;
-  --glass: rgb(255 255 255 / 0.86);
-  --glass-edge: rgb(31 95 191 / 0.16);
-  --grid-line: rgb(31 95 191 / 0.05);
-  --scanline: rgb(0 0 0 / 0.012);
-  --glow-accent: rgb(31 95 191 / 0.22);
-  --glow-high: rgb(180 35 24 / 0.28);
-  --glow-medium: rgb(138 86 0 / 0.22);
-  --glow-low: rgb(86 96 107 / 0.16);
-  --glow-online: rgb(26 127 69 / 0.3);
+  --float-shadow: 0 1px 2px rgb(40 30 20 / 0.2);
+  --online: #1d6b4f;
+  --glass: rgb(251 249 244 / 0.9);
+  --glass-edge: rgb(27 24 21 / 0.08);
+  --grain: rgb(27 24 21 / 0.028);
+  --fine-line: rgb(27 24 21 / 0.02);
+  --glow-accent: rgb(79 107 14 / 0.2);
+  --glow-high: rgb(179 38 30 / 0.24);
+  --glow-medium: rgb(138 83 0 / 0);
+  --glow-low: rgb(94 87 78 / 0);
+  --glow-online: rgb(29 107 79 / 0);
   --sheen: rgb(255 255 255 / 0.5);
-  --shimmer: rgb(0 0 0 / 0.05);
-  --lift-shadow: 0 8px 24px rgb(20 30 50 / 0.16);
+  --shimmer: rgb(27 24 21 / 0.05);
+  --lift-shadow: 0 8px 24px rgb(40 30 20 / 0.14);
 }
 
 @media (prefers-reduced-motion: reduce) {
