@@ -3,7 +3,17 @@
 Read this first every session; update it in every commit that changes project state.
 Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
 
-**Last update:** 2026-11-13, branch `phase3/wave-g-palette`.
+**Last update:** 2026-11-13, branch `phase3/pilot-gate`.
+
+## Pilot gate (2026-11-13): FAIL, held-out blocked
+- Dev pilot finished 12/12 runs (336 case runs). Gate review in `results/PILOT_GATE.md`.
+- Stop rule (> 20 % parse failures in any arm) tripped in 2 cells: russellmitchell aminer graph and
+  russellmitchell wazuh graph, 3/14 each (pooled: single 6.5 %, graph 10.1 %).
+- Proven defect, not fixed (task rule): `agent/graph.py` reuses the single agent's `REPAIR_MESSAGE`,
+  which tells note-ending agents to answer with `final`; 5 of 17 graph parse failures.
+- 8 of 11 single parse failures are replies cut at `max_tokens` 1024.
+- Next: your decision on fixes 1-4 in the gate report, implement test-first, re-run the dev pilot,
+  re-run the gate. No protocol freeze, no held-out ingest until then.
 
 ## Done
 - Palette (`phase3/wave-g-palette`, 2026-11-13, user's go; pilot untouched): blue replaced by "warm

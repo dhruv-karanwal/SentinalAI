@@ -2334,3 +2334,26 @@ errors, scrollWidth = clientWidth everywhere, focus ring 2 px lime (dark) / oliv
 Not checked: the generated PDF opened and viewed (constants changed, tests pass), hover states, a
 dropped-claim row on screen (none in the UI-dev data), the signed-out page in light theme (the theme
 step does not toggle there), Safari / Firefox, a real colour-blind viewer.
+
+## Pilot gate review, 2026-11-13 (`phase3/pilot-gate`)
+
+Task: gate review before the protocol freeze; no held-out runs, no study-code change unless a defect is
+proven, and then report instead of fixing. Read only: run files in `data/processed/runs/` (12 pilot
+runs, all `study_part` pilot, model `sentinel-qwen2.5-7b-32k`). Nothing under `backend/app`,
+`experiments/` or `data/` was changed; no held-out file was read.
+
+- Result: **FAIL**. Full report `results/PILOT_GATE.md`; scripts that produced every number in
+  `results/pilot_gate/` (read-only over the run directory, `python <script> data/processed/runs`).
+- Parse failures: single 11/168 (6.5 %), graph 17/168 (10.1 %); per cell max 3/14 = 21.4 % in
+  russellmitchell aminer graph and russellmitchell wazuh graph (stop rule > 20 % tripped at cell level).
+- Defect: `graph.py:246` uses `protocol.REPAIR_MESSAGE` (forms `call_tool` / `final`) for every node;
+  note agents then answer `final` and are rejected. 9 note-agent repairs, 5 ended that way.
+- Single-arm failures: 8 of 11 are replies cut at `max_tokens` 1024 (`finish_reason=length`).
+- russellmitchell fused graph: case 000 tool budget (first three agents used all 12 calls), 008 model
+  format + invalid claim kind, 010 token budget before report_generation (40,957 > 40,000).
+- Controls: noise-wazuh 0/7 everywhere, cite-none 0/7, cite-all at ceiling; graph oracle only 1/7 per
+  scenario (agent behaviour: 4 failures, 7 benign verdicts without citations). shuffled-* not in the pilot.
+- `study-stats --part pilot` ran end to end (~1 s); output labelled PILOT in
+  `results/pilot_gate/study_stats_PILOT.txt`; not interpreted.
+- Held-out runtime extrapolation: 34.6 s per case (both arms) -> ~19 h for phases i-iii (17-22 h).
+- Not run: pytest / mypy (no code changed).
