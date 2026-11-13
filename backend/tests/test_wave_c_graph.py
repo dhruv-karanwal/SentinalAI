@@ -232,3 +232,51 @@ def test_budgets_are_the_m5_budgets() -> None:
     assert "agent.max_tokens_per_case" in src and "agent.max_tool_calls" in src
     assert "agent.repair_retries" in src
     assert isinstance(SETTINGS.agent, AgentConfig)
+
+
+# -- pilot gate 2026-11-13: repair message per node, graph brief, output cap ---------------
+FINAL_BENIGN = json.dumps({"action": "final", "verdict": "benign", "findings": []})
+
+
+def test_repair_message_lists_the_forms_of_the_node(pool: AlertPool) -> None:  # noqa: F811
+    # pilot: the shared single-agent repair offered "final" to note agents, which then failed
+    client = FakeClient([route("anomaly_analysis"), "{bad", note("ok"),
+                         route("report_generation"), FINAL_BENIGN])
+    run = run_graph(client, kit_for(pool), alerts(pool), SETTINGS.agent, SETTINGS.model)
+    assert run.status == "ok", run.error
+    repair = client.calls[2][-1]["content"]
+    assert '"action": "note"' in repair and '"action": "call_tool"' in repair
+    assert '"action": "final"' not in repair and '"action": "route"' not in repair
+
+    client = FakeClient(["nope", route("report_generation"), FINAL_BENIGN])
+    assert run_graph(client, kit_for(pool), alerts(pool), SETTINGS.agent, SETTINGS.model).status == "ok"
+    repair = client.calls[1][-1]["content"]
+    assert '"action": "route"' in repair
+    assert '"action": "final"' not in repair and '"action": "call_tool"' not in repair
+
+    client = FakeClient([route("report_generation"), "{bad", FINAL_BENIGN])
+    assert run_graph(client, kit_for(pool), alerts(pool), SETTINGS.agent, SETTINGS.model).status == "ok"
+    repair = client.calls[2][-1]["content"]
+    assert '"action": "final"' in repair and '"action": "call_tool"' in repair
+    assert '"action": "note"' not in repair
+
+
+def test_only_report_generation_is_asked_for_a_final_answer(pool: AlertPool) -> None:  # noqa: F811
+    client = FakeClient([route("log_analysis"), note("ok"), route("report_generation"), FINAL_BENIGN])
+    run_graph(client, kit_for(pool), alerts(pool), SETTINGS.agent, SETTINGS.model)
+    supervisor, worker, _, report = (c[1]["content"] for c in client.calls)
+    assert "final JSON answer" not in supervisor and "final JSON answer" not in worker
+    assert "final JSON answer" in report
+    # the single agent's brief is unchanged
+    case = CaseToolkit(alerts(pool), window_start=WINDOW_START, window_seconds=100.0, id_salt="s")
+    assert case.brief().endswith("then give your final JSON answer.")
+
+
+def test_output_cap_in_both_final_answer_prompts() -> None:
+    # pilot: 8 of 11 single-arm parse failures were replies cut at max_tokens (100 cited ids)
+    from app.agent.graph import GRAPH_PROMPT_VERSION
+    from app.agent.protocol import MAX_CITED_ALERTS, MAX_CLAIMS, PROMPT_VERSION, SYSTEM_PROMPT
+    assert (PROMPT_VERSION, GRAPH_PROMPT_VERSION) == ("m5-v3", "wave-c-v2")
+    cap = f"at most {MAX_CITED_ALERTS} alert ids and at most {MAX_CLAIMS} claims"
+    assert cap in SYSTEM_PROMPT and cap in PROMPTS["report_generation"]
+    assert all(cap not in PROMPTS[a] for a in ("supervisor", *AGENTS[:-1]))

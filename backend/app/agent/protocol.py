@@ -27,7 +27,14 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from app.agent.tools import TIME_MASK, TOOL_NAMES
 from app.evaluation.metrics import QUOTE_MIN_CHARS
 
-PROMPT_VERSION = "m5-v2"  # m5-v2 (2026-11-12): tool-call example + forms in the repair
+PROMPT_VERSION = "m5-v3"  # m5-v2 (2026-11-12): tool-call example + forms in the repair;
+# m5-v3 (2026-11-13, pilot gate): output cap, 8 of 11 pilot parse failures were replies cut
+# at max_tokens while listing up to 100 cited ids
+MAX_CITED_ALERTS = 20
+MAX_CLAIMS = 10
+OUTPUT_CAP = (f"Keep the final answer short: at most {MAX_CITED_ALERTS} alert ids and at most "
+              f"{MAX_CLAIMS} claims in the whole answer, chosen as the strongest evidence; a "
+              "longer reply is cut off and fails.")
 
 SYSTEM_PROMPT = f"""You are a security analyst investigating one case: a time window of a \
 monitored network and the alerts that intrusion detectors raised in it. Decide whether the \
@@ -67,6 +74,7 @@ make claims about alert_id, offset or time fields.
 {QUOTE_MIN_CHARS} characters, and must not include {TIME_MASK}.
 - Times are offsets in seconds from the window start; absolute dates and times are masked as {TIME_MASK}.
 - You have a limited number of tool calls. When told the budget is used up, give your final answer.
+- {OUTPUT_CAP}
 """
 
 REPAIR_MESSAGE = ("Your last reply was not valid: {error}. Reply again with exactly one JSON object "

@@ -12,8 +12,11 @@ Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
 - Proven defect, not fixed (task rule): `agent/graph.py` reuses the single agent's `REPAIR_MESSAGE`,
   which tells note-ending agents to answer with `final`; 5 of 17 graph parse failures.
 - 8 of 11 single parse failures are replies cut at `max_tokens` 1024.
-- Next: your decision on fixes 1-4 in the gate report, implement test-first, re-run the dev pilot,
-  re-run the gate. No protocol freeze, no held-out ingest until then.
+- Fixes 1 and 2 done (user's go, test-first; pytest 523 passed, 4 skipped; mypy clean): per-node
+  graph repair message, graph brief without "final answer" for workers / supervisor, output cap
+  20 ids / 10 claims (m5-v3, wave-c-v2). Fixes 3 (json_object) and 4 (graph pacing) not applied.
+- Running: dev pilot re-run (`data/processed/downloads/run_pilot.ps1`, log `runs/pilot-console.log`),
+  then the gate review again. No protocol freeze, no held-out ingest until a PASS.
 
 ## Done
 - Palette (`phase3/wave-g-palette`, 2026-11-13, user's go; pilot untouched): blue replaced by "warm

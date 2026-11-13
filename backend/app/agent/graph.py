@@ -48,13 +48,15 @@ from app.agent.agent import CaseRun, conservative_tokens
 from app.agent.client import ChatClient, ModelRequestError
 from app.agent.config import AgentConfig, ModelConfig
 from app.agent.multi_tools import MultiAgentToolkit
-from app.agent.protocol import REPAIR_MESSAGE, FinalAnswer, ProtocolError, ToolCall
+from app.agent.protocol import OUTPUT_CAP, FinalAnswer, ProtocolError, ToolCall
 from app.agent.tools import TIME_MASK
 from app.agent.verifier import verify_answer
 from app.evaluation.metrics import QUOTE_MIN_CHARS, Claim
 from app.schemas.alert import Alert
 
-GRAPH_PROMPT_VERSION = "wave-c-v1"
+# wave-c-v2 (2026-11-13, pilot gate): repair message per node, brief asks only report_generation
+# for a final answer, output cap in the report form
+GRAPH_PROMPT_VERSION = "wave-c-v2"
 
 AGENTS = ("log_analysis", "correlation", "knowledge_retrieval", "anomaly_analysis",
           "investigation", "report_generation")
@@ -106,7 +108,8 @@ def _agent_prompt(name: str) -> str:
     {{"alert_id": "<alert_id>", "kind": "quote", "text": "<exact text copied from one log line>"}}]}}]}}
 field_value: a dotted path into the record from get_alert and its exact value; not alert_id, \
 offset or time fields. quote: copied exactly from one log line, at least {QUOTE_MIN_CHARS} \
-characters, without {TIME_MASK}. Unsupported claims are removed by a verifier.""")
+characters, without {TIME_MASK}. Unsupported claims are removed by a verifier.
+{OUTPUT_CAP}""")
     else:
         form = ('End your turn with a note: {"action": "note", "text": "<your findings>", '
                 '"alert_ids": ["<alert_id>", ...]}')
@@ -122,6 +125,23 @@ search_attack: text, optional k (1-5); recall_notes: none; search_notes: text.
 PROMPTS = {"supervisor": SUPERVISOR_PROMPT, **{a: _agent_prompt(a) for a in AGENTS}}
 PROMPTS_SHA256 = hashlib.sha256(json.dumps(PROMPTS, sort_keys=True).encode()).hexdigest()
 TURN_LIMIT_MESSAGE = "This turn's tool calls are used up. Reply now with your {form} object."
+REPLY_FORMS = {
+    "route": '{"action": "route", "agent": "<agent name>"}',
+    "call_tool": '{"action": "call_tool", "tool": "<tool name>", "arguments": {...}}',
+    "note": '{"action": "note", "text": "<your findings>", "alert_ids": ["<alert_id>", ...]}',
+    "final": '{"action": "final", "verdict": "attack" or "benign", "findings": [...]}',
+}
+
+
+def repair_message(error: object, actions: Sequence[str]) -> str:
+    """The repair names only the node's own forms (the pilot's shared single-agent message
+    offered `final` to note agents, which the parser then rejected)."""
+    forms = " or ".join(REPLY_FORMS[a] for a in actions)
+    which = "this form" if len(actions) == 1 else "one of these forms"
+    return (f"Your last reply was not valid: {error}. Reply again with exactly one JSON object "
+            f"in {which}, and nothing else: {forms}.")
+
+
 BUDGET_MESSAGE = ("The case's tool budget is used up ({calls} calls). Reply now with your {form} "
                   "object and no further tool calls.")
 
@@ -243,7 +263,7 @@ class _CaseContext:
                 self.run.request_log[-1]["parse"] = f"error: {exc}"
                 if self.run.repairs < self.agent.repair_retries:
                     self.run.repairs += 1
-                    messages.append({"role": "user", "content": REPAIR_MESSAGE.format(error=exc)})
+                    messages.append({"role": "user", "content": repair_message(exc, actions)})
                     continue
                 raise _Stop("failed", f"{node}: unparseable reply: {exc}", "unparseable") from None
             self.run.request_log[-1]["parse"] = str(getattr(reply, "action"))
@@ -265,7 +285,7 @@ class _CaseContext:
             return {"next": "report_generation"}
         self.supervisor_steps += 1
         messages = [{"role": "system", "content": SUPERVISOR_PROMPT},
-                    {"role": "user", "content": f"{self.kit.brief()}\n\n{self.notes_text()}\n\n"
+                    {"role": "user", "content": f"{self.kit.brief(final=False)}\n\n{self.notes_text()}\n\n"
                      f"Agents visited so far: {', '.join(self.run.trace_agents()) or 'none'}."}]
         self.run.transcript.append({"role": "node", "content": "supervisor"})
         try:
@@ -281,7 +301,7 @@ class _CaseContext:
         form = "final answer" if report else "note"
         end_action = "final" if report else "note"
         messages = [{"role": "system", "content": PROMPTS[name]},
-                    {"role": "user", "content": f"{self.kit.brief()}\n\n{self.notes_text()}"}]
+                    {"role": "user", "content": f"{self.kit.brief(final=report)}\n\n{self.notes_text()}"}]
         self.run.transcript.append({"role": "node", "content": name})
         turn_calls, told_turn = 0, False
         try:
