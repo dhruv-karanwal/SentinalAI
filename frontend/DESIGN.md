@@ -80,21 +80,21 @@ blue palette is gone; `palette.test.ts` fails on any blue hue in `tokens.css`.
 | `--bg` | `#151311` | `#f3f0e8` | page (warm charcoal / warm paper) |
 | `--surface` | `#1d1a17` | `#fbf9f4` | panes, tables |
 | `--raised` | `#26221e` | `#ece8de` | row hover, table header, inputs |
-| `--selected` | `#302c1f` | `#e3e8cc` | selected row (plus a 2 px accent bar at the row start) |
+| `--selected` | `#322d26` | `#e7e1d1` | selected row (plus a 2 px accent bar at the row start) |
 | `--border` | `#3a352f` | `#d9d3c6` | 1 px hairlines between regions (separators, not controls) |
 | `--border-strong` | `#7d766b` | `#7a7266` | control outlines (inputs, buttons, toggles) |
 | `--text` | `#ece8df` | `#1b1815` | primary text (bone / ink) |
 | `--text-muted` | `#a39d91` | `#514b43` | secondary text, column headers |
 | `--text-faint` | `#9a9488` | `#625b52` | units, placeholders, timestamps' relative part |
-| `--accent` | `#c8f03c` | `#4f6b0e` | logo, active nav mark, primary action, focus ring, chat button, links. Nothing else |
+| `--accent` | `#c8f03c` | `#5f6400` | logo, active nav mark, primary action, focus ring, chat button, links. Nothing else |
 | `--on-accent` | `#151311` | `#ffffff` | text on a lime / olive fill |
-| `--sev-high` | `#ff6b57` | `#b3261e` | severity High (signal red); also destructive / error / dropped |
-| `--sev-medium` | `#e8a33a` | `#8a5300` | severity Medium (amber) |
+| `--sev-high` | `#ff6b57` | `#9b1036` | severity High (signal red); also destructive / error / dropped |
+| `--sev-medium` | `#e8a33a` | `#8a5a00` | severity Medium (amber) |
 | `--sev-low` | `#a39a8c` | `#5e574e` | severity Low (warm slate) |
-| `--verified` | `#3fbf8f` | `#1d6b4f` | verifier kept / verified (teal-green, never the lime) |
+| `--verified` | `#46c46a` | `#0b6a4a` | verifier kept / verified (green, never the lime, apart from AMiner) |
 | `--det-wazuh` | `#f08a4b` | `#a3440a` | detector identity (copper, mid lightness) |
 | `--det-suricata` | `#f7b3d6` | `#6b1d49` | detector identity (rose; lightest in dark, darkest in light) |
-| `--det-aminer` | `#2fa89f` | `#08706a` | detector identity (sea green, darkest in dark) |
+| `--det-aminer` | `#2fa89f` | `#04687a` | detector identity (sea green in dark, cyan in light) |
 | `--det-sigma` | `#a39d91` | `#625b52` | detector identity (neutral, hollow mark) |
 | `--heat-1..4` | `#2a2a1c` .. `#4b5b21` | `#ebead4` .. `#b8c76c` | heat cells, olive ramp, counts printed in the cell |
 | `--mark` | `#4a3d0c` | `#ffe58a` | highlighted matched span in a log line (plus an underline in `--sev-medium`) |
@@ -107,8 +107,8 @@ are low contrast by design: they separate regions and carry no information.
 
 Colour-vision deficiency (measured, `lib/palette.test.ts`): the three detector hues are spread over
 lightness as well as hue, so after a Machado 2009 (severity 1) protanopia, deuteranopia or tritanopia
-simulation every pair stays >= 0.10 apart in OKLab in both themes (lead's measurement: minimum 0.109
-dark under protanopia, 0.114 light under deuteranopia). Colour is still never the only carrier:
+simulation every pair stays >= 0.10 apart in OKLab in both themes (final minimum: 0.109
+dark under protanopia, 0.105 light under deuteranopia). Colour is still never the only carrier:
 
 **Never colour alone.**
 - Severity = glyph + word. High: three stacked bars filled; Medium: two of three; Low: one of
@@ -596,9 +596,9 @@ Text on a lime fill is `--on-accent` (near-black in dark, white on the light-the
 ### 14.2 Semantic colours
 
 - Severity: High signal red, Medium amber, Low warm slate; glyph + word as before (section 3).
-- Verifier: kept / verified = `--verified` (teal-green, measured apart from the lime);
+- Verifier: kept / verified = `--verified` (green, measured apart from the lime and from AMiner);
   dropped / unsupported = the `--sev-high` red family with a strike or dashed rule.
-- Detectors: copper (Wazuh), rose (Suricata), sea green (AMiner), neutral hollow (Sigma). Spread over
+- Detectors: copper (Wazuh), rose / wine (Suricata), sea green / cyan (AMiner), neutral hollow (Sigma). Spread over
   lightness as well as hue so they survive protanopia, deuteranopia and tritanopia; dash patterns
   and names stay the non-colour cue. The PDF uses the light-theme values (`DETECTOR_PRINT` in
   `backend/app/outputs/reports.py`), because it prints on white.
@@ -616,3 +616,22 @@ High severity and the chat button, with a small radius; everything else uses bor
 dashboards with a green accent: rejected (that is the blue look this wave removes). Kept from it:
 a visible focus ring on every control and "colour never alone" for charts. The brief pinned the
 palette; values were then tuned by measurement (contrast and CVD scripts) before they were written.
+
+Retunes after measurement and review (2026-11-13, all measured by `palette.test.ts`):
+
+- First light values `--sev-high #b3261e` / `--sev-medium #8a5300` collapsed under deuteranopia (OKLab
+  0.014). High is now crimson `#9b1036` (0.077, contrast 6.6:1).
+- The visual review found verified teal and AMiner reading as one colour (dark `#3fbf8f` vs `#2fa89f`,
+  light `#0d6a62` vs `#08706a`). Verified is now green (`#46c46a` dark, `#0b6a4a` light) and light
+  AMiner cyan `#04687a` (hue 189, just under the blue guard's 190). In light the olive accent, verified
+  green and AMiner cyan must all reach 4.5:1 on paper, which squeezes them: the accent moved to a
+  yellower olive `#5f6400` (6.35:1 with white text) and verified vs accent / AMiner is >= 0.07 under
+  no simulation and deuteranopia (0.062 under protanopia: the tag word carries it there).
+- `--selected` lost its olive tint (read as extra lime): `#322d26` dark, `#e7e1d1` light; the 2 px
+  accent bar still marks the row.
+- Overview numbers and "look first" card titles are links but read as data: bone / ink text, lime
+  only on hover and focus (`motion.css`).
+
+Accepted, not changed: light Suricata (wine `#6b1d49`) sits near High crimson in hue, and light Wazuh
+copper near Medium amber. They never share a mark: severity carries a glyph + word, detectors a name +
+dash pattern, and moving them would break the measured colour-blind separation.

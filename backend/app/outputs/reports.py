@@ -111,7 +111,7 @@ def render_csv(body: dict[str, Any]) -> str:
 # Print colours for the PDF charts (the light-theme detector tokens of the console) and the dash
 # pattern that also tells the detectors apart without colour.
 DETECTOR_PRINT = {"wazuh": ("#a3440a", None), "suricata": ("#6b1d49", (4, 2)),
-                  "aminer": ("#08706a", (1, 2)), "sigma": ("#625b52", (6, 2, 1, 2))}
+                  "aminer": ("#04687a", (1, 2)), "sigma": ("#625b52", (6, 2, 1, 2))}
 
 
 def _chart_flowables(charts: dict[str, Any], width_pt: float) -> list[Any]:

@@ -6,6 +6,12 @@ Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
 **Last update:** 2026-11-13, branch `phase3/wave-g-palette`.
 
 ## Done
+- Palette (`phase3/wave-g-palette`, 2026-11-13, user's go; pilot untouched): blue replaced by "warm
+  graphite + phosphor lime" (tokens.css only; lime on logo, active nav, primary button, focus, chat
+  button, links), warm grain instead of the blue grid, glows only on High and the chat button, PDF
+  detector colours = light tokens. New `lib/palette.test.ts` (CVD OKLab distances, raw-colour and
+  blue-hue guards). Frontend 57 tests, tsc clean, build ok; backend 520 passed, 4 skipped, mypy clean.
+  Screenshots both themes in `docs/ui/wave-g/` (0 console errors, no horizontal scroll). DESIGN.md 14.
 - README rewritten for the whole project (status per wave, architecture, quick start, study design)
   with a screenshot gallery; Wave F screenshots copied into `docs/ui/wave-f/` (19 files). Launch
   config: `api` entry via `.claude/serve-api.ps1` (secrets from `.env.ui-dev`, UI-dev data copy).

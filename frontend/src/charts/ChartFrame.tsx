@@ -7,7 +7,7 @@ import { useSeen } from '../components/motion.tsx';
 
 import { Explain, Term } from '../components/Term.tsx';
 
-export type Tone = 'wazuh' | 'suricata' | 'aminer' | 'sigma' | 'high' | 'medium' | 'low' | 'accent' | 'verified' | 'heat-1' | 'heat-4' | 'ref' | 'muted';
+export type Tone = 'wazuh' | 'suricata' | 'aminer' | 'sigma' | 'high' | 'medium' | 'low' | 'verified' | 'heat-1' | 'heat-4' | 'ref' | 'muted';
 
 export const TONE_VAR: Record<Tone, string> = {
   wazuh: 'var(--det-wazuh)',
@@ -17,7 +17,6 @@ export const TONE_VAR: Record<Tone, string> = {
   high: 'var(--sev-high)',
   medium: 'var(--sev-medium)',
   low: 'var(--sev-low)',
-  accent: 'var(--accent)',
   verified: 'var(--verified)',
   'heat-1': 'var(--heat-1)',
   'heat-4': 'var(--heat-4)',
