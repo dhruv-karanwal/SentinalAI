@@ -35,8 +35,8 @@ class CopilotToolkit(CaseToolkit):
         super().__init__(alerts, **kwargs)
         self._question = mask_times(question.strip())
 
-    def brief(self) -> str:
-        return (super().brief() + f"\nAnalyst question: {self._question}\nAnswer it in the findings "
+    def brief(self, final: bool = True) -> str:
+        return (super().brief(final) + f"\nAnalyst question: {self._question}\nAnswer it in the findings "
                 "of your final JSON (summary text), citing the alert ids that support each finding.")
 
 

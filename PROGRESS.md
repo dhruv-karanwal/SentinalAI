@@ -3,7 +3,24 @@
 Read this first every session; update it in every commit that changes project state.
 Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
 
-**Last update:** 2026-11-13, branch `phase3/wave-g-palette`.
+**Last update:** 2026-11-13, branch `phase3/pilot-gate`.
+
+## Pilot gate (2026-11-13): FAIL, held-out blocked
+- Dev pilot finished 12/12 runs (336 case runs). Gate review in `results/PILOT_GATE.md`.
+- Stop rule (> 20 % parse failures in any arm) tripped in 2 cells: russellmitchell aminer graph and
+  russellmitchell wazuh graph, 3/14 each (pooled: single 6.5 %, graph 10.1 %).
+- Proven defect, not fixed (task rule): `agent/graph.py` reuses the single agent's `REPAIR_MESSAGE`,
+  which tells note-ending agents to answer with `final`; 5 of 17 graph parse failures.
+- 8 of 11 single parse failures are replies cut at `max_tokens` 1024.
+- Fixes 1 and 2 done (user's go, test-first; pytest 523 passed, 4 skipped; mypy clean): per-node
+  graph repair message, graph brief without "final answer" for workers / supervisor, output cap
+  20 ids / 10 claims (m5-v3, wave-c-v2). Fixes 3 (json_object) and 4 (graph pacing) not applied.
+- Re-pilot done (12/12, exit 0): still **FAIL in one cell**, russellmitchell wazuh single 3/14 = 21.4 %,
+  all three a claim `kind` set to a field name. Pooled single 6.0 %, graph 4.8 % (was 10.1 %); the
+  repair defect is gone (0 rejected `final` retries). Held-out extrapolation ~18.5 h.
+- Waiting for the user: fix 3 (`kind` prompt line, m5-v4, re-pilot ~1.6 h) or accept the cell as a
+  documented deviation. Stats/export mix v1 and v2 pilot runs: separate them before the paper export.
+  No protocol freeze, no held-out ingest until then.
 
 ## Done
 - Palette (`phase3/wave-g-palette`, 2026-11-13, user's go; pilot untouched): blue replaced by "warm

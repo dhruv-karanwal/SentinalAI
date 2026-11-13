@@ -1,0 +1,11 @@
+DECLARED COMPARISONS (pilot, not paper results); paired bootstrap, Holm over the family
+  H1 arm: graph vs single (fused, after verifier), coverage: n 14 diff -0.42857142857142855 CI [-0.6428571428571429, -0.21428571428571427] p 0.00019998000199980003 p_holm 0.001999800019998
+  H2 verifier: single before vs after, unsupported claims: n 16 diff -0.296875 CI [-0.38541666666666663, -0.203125] p 0.00019998000199980003 p_holm 0.001999800019998
+  H3 verifier: graph before vs after, unsupported claims: n 1 diff -0.5 CI [-0.5, -0.5] p 0.00019998000199980003 p_holm 0.001999800019998
+  H4 source: wazuh vs fused (graph+verifier), coverage: n 14 diff -0.14285714285714285 CI [-0.42857142857142855, 0.14285714285714285] p 0.4253574642535746 p_holm 1.0
+  H5 source: aminer vs fused (graph+verifier), coverage: n 14 diff 0.07142857142857142 CI [-0.21428571428571427, 0.42857142857142855] p 0.8321167883211679 p_holm 1.0
+  H6 source: suricata vs fused (graph+verifier), coverage: n 14 diff 0.2857142857142857 CI [0.0, 0.5714285714285714] p 0.11098890110988902 p_holm 0.5549445055494451
+  H7 source: fused vs oracle (graph+verifier), coverage: n 14 diff 0.21428571428571427 CI [0.0, 0.42857142857142855] p 0.12998700129987 p_holm 0.5549445055494451
+  H8 noise control: noise-wazuh vs wazuh (graph+verifier), coverage: n 14 diff 0.5 CI [0.21428571428571427, 0.7857142857142857] p 0.00019998000199980003 p_holm 0.001999800019998
+  H9 arm: graph vs single (fused, after verifier), citation precision: n 10 diff 0.0 CI [0.0, 0.0] p 1.0 p_holm 1.0
+  H10 arm: graph vs single (fused), verdict accuracy: n 28 diff -0.25 CI [-0.42857142857142855, -0.07142857142857142] p 0.012398760123987601 p_holm 0.07439256074392561

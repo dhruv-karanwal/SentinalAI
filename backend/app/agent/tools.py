@@ -188,13 +188,14 @@ class CaseToolkit:
         }
 
     # -- the agent's view of the case ------------------------------------------
-    def brief(self) -> str:
+    def brief(self, final: bool = True) -> str:
+        # final=False: graph agents that end with a note or a route (pilot gate 2026-11-13)
         counts = Counter(v["detector"] for v in self._views)
         detectors = ", ".join(f"{d}: {n}" for d, n in sorted(counts.items())) or "none"
         return (f"Case window length: {self._window_seconds:.0f} seconds. Alerts available: "
                 f"{len(self._views)} ({detectors}). Times are offsets in seconds from the window "
                 f"start; absolute dates and times are masked as {TIME_MASK}. Use the tools to "
-                "investigate, then give your final JSON answer.")
+                + ("investigate, then give your final JSON answer." if final else "investigate."))
 
     def call(self, name: str, arguments: Mapping[str, Any]) -> str:
         tool = self._tools.get(name)

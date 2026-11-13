@@ -88,8 +88,8 @@ class MultiAgentToolkit:
         self.memory = memory
         self.attack = attack
 
-    def brief(self) -> str:
-        return self.case.brief()
+    def brief(self, final: bool = True) -> str:
+        return self.case.brief(final)
 
     def call(self, name: str, arguments: Mapping[str, Any], allowed: Sequence[str]) -> str:
         if name not in allowed:
