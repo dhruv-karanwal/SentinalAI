@@ -8,7 +8,11 @@ names = set()
 print("| scenario | variant | single | single+verifier | graph | graph+verifier | cite-all | cite-none | top-k det-order@k10 | cit. prec. event (graph+v) |")
 print("|---|---|---|---|---|---|---|---|---|---|")
 for d in sorted(glob.glob(os.path.join(RUNS, "matched-*"))):
+    if not os.path.exists(os.path.join(d, "manifest.json")):
+        continue
     m = json.load(open(os.path.join(d, "manifest.json")))
+    if len(sys.argv) > 2 and m["prompt_versions"]["graph"] != sys.argv[2]:  # e.g. wave-c-v2
+        continue
     if m.get("study_part") != "pilot" or "fake" in m["model"]["model_ids"].values():
         continue
     s = json.load(open(os.path.join(d, "scores.json")))

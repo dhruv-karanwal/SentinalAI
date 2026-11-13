@@ -2357,3 +2357,18 @@ runs, all `study_part` pilot, model `sentinel-qwen2.5-7b-32k`). Nothing under `b
   `results/pilot_gate/study_stats_PILOT.txt`; not interpreted.
 - Held-out runtime extrapolation: 34.6 s per case (both arms) -> ~19 h for phases i-iii (17-22 h).
 - Not run: pytest / mypy (no code changed).
+
+### Re-pilot after fixes 1-2 (m5-v3 / wave-c-v2), 2026-11-13
+
+- 12/12 runs, exit 0; wall 5,627 s of arm time (single 9.0 s/case, graph 24.5 s/case).
+- Parse failures: single 10/168 (6.0 %), graph 8/168 (4.8 %); budget hits: graph 2 tool, 2 token.
+- Stop rule: one cell over, russellmitchell wazuh single 3/14 (claim `kind` = field name, cases 002, 004, 010).
+- Graph repairs: 0 retries answered `final` and were rejected (was 5); 25 note-agent retries ok,
+  13 report retries ok.
+- Controls hold: noise 0/7, cite-none 0/7. Graph oracle 3/7 (rm) and 5/7 (shaw), was 1/7.
+- Stats on a v2-only view (`results/pilot_gate/v2_view.py`): H1 -0.43 (p_holm 0.002), H8 0.50
+  (0.002), H3 n 1.
+- The stats CLI and the paper export read all pilot runs, so v1 and v2 runs mix. This must be
+  resolved before the paper export.
+- Verdict FAIL (narrow). Fix 3 is proposed (`kind` prompt line), or a documented deviation; the
+  user decides. Detail: `results/PILOT_GATE.md`, first section.

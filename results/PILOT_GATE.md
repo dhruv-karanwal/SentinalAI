@@ -1,10 +1,68 @@
-# Pilot gate review (2026-11-13)
+# Pilot gate review (2026-11-13; re-pilot section first)
 
 **PILOT material: dev scenarios russellmitchell and shaw only. Not paper results.**
 Model `sentinel-qwen2.5-7b-32k` (Ollama 0.40.15, temperature 0), single prompt m5-v2, graph prompts
 wave-c-v1, retrieval hybrid, truncation spread, `select reachable`. 12 runs x 14 cases x 2 arms =
 336 case runs, all finished (`data/processed/runs/pilot-progress.jsonl`: 12/12 `done`).
 No held-out file was read or ingested; no study code was changed.
+
+## Re-pilot after fixes 1-2 (m5-v3 / wave-c-v2, 2026-11-13): **FAIL, narrowly**
+
+Same model, data, cases, budgets and truncation; only the prompts changed (per-node graph repair
+message, graph brief without "final answer" for workers and supervisor, output cap 20 ids /
+10 claims). 12/12 runs, 336 case runs, exit 0. Run directories are the 12 `matched-*` whose manifest
+has graph prompt `wave-c-v2`; tables from `results/pilot_gate/*.py data/processed/runs wave-c-v2`.
+
+**Stop rule still trips in one cell:** russellmitchell `wazuh` **single** 3/14 = 21.4 %. All three
+are the same schema error, a claim whose `kind` is a field name instead of `field_value` / `quote`
+(`findings.0.claims.0.kind: Input should be 'field_value' or 'quote'`, cases 002, 004, 010; the one
+repair in 004 repeated it). Every other cell is <= 14.3 %.
+
+| arm | parse failed | rate | tool budget | token budget | repairs | s per case |
+|---|---:|---:|---:|---:|---:|---:|
+| single (m5-v2 -> m5-v3) | 11 -> 10 / 168 | 6.5 % -> **6.0 %** | 0 -> 0 | 1 -> 0 | 33 | 9.0 |
+| graph (wave-c-v1 -> v2) | 17 -> 8 / 168 | 10.1 % -> **4.8 %** | 2 -> 2 | 4 -> 2 | 40 | 24.5 |
+
+What the fixes did:
+- **Defect gone.** Graph repairs: 25 note-agent retries ok, 1 other error, 13 report retries ok,
+  **0** retries that answered `final` and were rejected (was 5 of 9 note-agent repairs).
+- **Truncation down:** single replies cut at `max_tokens` 8 -> 3; graph 0 -> 1 (a `correlation`
+  note, which has no cap).
+- **Remaining failures (18 parse + 4 budget):** single: 5 claim `kind` = field name, 3 cut at
+  max_tokens, 1 malformed JSON, 1 non-string alert id; graph: 6 malformed JSON (all in
+  `report_generation`), 1 cut at max_tokens, 1 non-string alert id; budgets: 2 tool, 2 token.
+
+Controls (event_label coverage on reachable phases, after the verifier):
+- noise-wazuh 0/7 on both scenarios in both arms, and cite-none 0/7 everywhere.
+- cite-all is at the ceiling. Baselines are present, including the @k-matched rows.
+- Graph oracle rose from 1/7 to 3/7 (rm) and 5/7 (shaw); single oracle is 5/7 (rm) and 4/7 (shaw).
+- Graph fused is 4/7 (rm) and 1/7 (shaw); single fused is 5/7 and 6/7.
+- rm wazuh single 0/7 against cite-all 4/7: the three failed cases carry no citations.
+
+Statistics (PILOT, re-pilot runs only; `results/pilot_gate/study_stats_PILOT_v2.txt`):
+- H1, graph vs single on fused coverage: -0.43, CI [-0.64, -0.21], p_holm 0.002.
+- H2, single verifier: -0.30, p_holm 0.002, n 16.
+- H8, noise vs wazuh: 0.50, p_holm 0.002.
+- H3 (graph verifier) has n 1: the graph now produces almost no unsupported claims to remove.
+- H10, verdict accuracy: -0.25, p_holm 0.074.
+- **Tooling hazard:** `study-stats --part pilot` and `export-paper-assets` read every pilot
+  `scores.json`, so the old (v1) and new (v2) runs mix under the same case keys. The v2 numbers
+  above came from a view holding only the v2 `scores.json`. Before the paper export, move or
+  label the v1 runs, or add a prompt-version filter. Analysis code is not frozen, so this is not
+  a protocol change.
+
+Runtime: 33.5 s per case for both arms (was 34.6 s), so the held-out extrapolation is about
+**18.5 h** (phase i ~4.7 h, ii ~9.4 h, iii ~4.7 h).
+
+**Suggested fix 3 (not applied; needs your go):** one prompt line in the single prompt and the
+report form: "`kind` is always \"field_value\" or \"quote\"; put the field name in `field`." It is
+the same kind of fix as the earlier `action` example. It changes m5-v3 -> m5-v4, so the dev pilot
+re-runs (~1.6 h). Alternative: accept a 21.4 % cell (one case over the line, pooled 6.0 %) as a
+documented deviation from the stop rule. That is your call, not mine.
+
+---
+
+# Original gate review (m5-v2 / wave-c-v1)
 
 ## Verdict: **FAIL**
 

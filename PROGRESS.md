@@ -15,8 +15,12 @@ Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
 - Fixes 1 and 2 done (user's go, test-first; pytest 523 passed, 4 skipped; mypy clean): per-node
   graph repair message, graph brief without "final answer" for workers / supervisor, output cap
   20 ids / 10 claims (m5-v3, wave-c-v2). Fixes 3 (json_object) and 4 (graph pacing) not applied.
-- Running: dev pilot re-run (`data/processed/downloads/run_pilot.ps1`, log `runs/pilot-console.log`),
-  then the gate review again. No protocol freeze, no held-out ingest until a PASS.
+- Re-pilot done (12/12, exit 0): still **FAIL in one cell**, russellmitchell wazuh single 3/14 = 21.4 %,
+  all three a claim `kind` set to a field name. Pooled single 6.0 %, graph 4.8 % (was 10.1 %); the
+  repair defect is gone (0 rejected `final` retries). Held-out extrapolation ~18.5 h.
+- Waiting for the user: fix 3 (`kind` prompt line, m5-v4, re-pilot ~1.6 h) or accept the cell as a
+  documented deviation. Stats/export mix v1 and v2 pilot runs: separate them before the paper export.
+  No protocol freeze, no held-out ingest until then.
 
 ## Done
 - Palette (`phase3/wave-g-palette`, 2026-11-13, user's go; pilot untouched): blue replaced by "warm

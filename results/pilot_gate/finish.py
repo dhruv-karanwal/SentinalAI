@@ -7,7 +7,11 @@ RUNS = sys.argv[1]
 c = Counter()
 shown = 0
 for d in sorted(glob.glob(os.path.join(RUNS, "matched-*"))):
+    if not os.path.exists(os.path.join(d, "manifest.json")):
+        continue
     m = json.load(open(os.path.join(d, "manifest.json")))
+    if len(sys.argv) > 2 and m["prompt_versions"]["graph"] != sys.argv[2]:  # e.g. wave-c-v2
+        continue
     if m.get("study_part") != "pilot" or "fake" in m["model"]["model_ids"].values():
         continue
     for t in sorted(glob.glob(os.path.join(d, "cases", "*.*.json"))):
