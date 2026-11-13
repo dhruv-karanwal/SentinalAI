@@ -3,9 +3,12 @@
 Read this first every session; update it in every commit that changes project state.
 Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
 
-**Last update:** 2026-11-13, branch `phase3/wave-f-motion-ui`.
+**Last update:** 2026-11-13, branch `phase3/wave-g-palette`.
 
 ## Done
+- README rewritten for the whole project (status per wave, architecture, quick start, study design)
+  with a screenshot gallery; Wave F screenshots copied into `docs/ui/wave-f/` (19 files). Launch
+  config: `api` entry via `.claude/serve-api.ps1` (secrets from `.env.ui-dev`, UI-dev data copy).
 - Motion console (`phase3/wave-f-motion-ui`, 2026-11-13, user's go; pilot untouched): mission-control
   layer + motion system (DESIGN.md 13), About as a scroll story, Overview counters / chart draw-in /
   glowing look-first cards, floating help chat with `GET /copilot/status` (probe, no generation).
