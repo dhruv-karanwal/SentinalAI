@@ -297,6 +297,17 @@ body {
   font-size: var(--fs-13);
 }
 
+/* numbers and card titles that are links read as data: bone text, lime only on hover / focus (DESIGN.md 14.1) */
+.statusrow a,
+.look-first.cards a {
+  color: var(--text);
+  text-decoration-color: var(--border-strong);
+}
+.statusrow a:hover,
+.look-first.cards a:hover {
+  color: var(--accent);
+}
+
 /* ---- floating help chat (FAB + panel; bottom sheet on narrow screens) ---------------------- */
 
 .footer {

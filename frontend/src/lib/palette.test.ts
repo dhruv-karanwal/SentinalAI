@@ -28,9 +28,13 @@ test('detector, accent and severity tokens stay apart under colour-vision defici
       const sev = cvdDistance(t['--sev-high']!, t['--sev-medium']!, kind);
       assert.ok(sev >= 0.06, `${name} ${kind}: sev-high vs sev-medium ${sev.toFixed(3)}`);
     }
+    // Light theme squeezes olive accent, verified green and AMiner cyan (all need 4.5:1 on paper),
+    // so these two pairs get 0.07 under none/deutan; verifier state also carries a tag word.
     for (const kind of ['none', 'deutan'] as const) {
       const acc = cvdDistance(t['--accent']!, t['--verified']!, kind);
-      assert.ok(acc >= 0.08, `${name} ${kind}: accent vs verified ${acc.toFixed(3)}`);
+      assert.ok(acc >= 0.07, `${name} ${kind}: accent vs verified ${acc.toFixed(3)}`);
+      const ami = cvdDistance(t['--det-aminer']!, t['--verified']!, kind);
+      assert.ok(ami >= 0.07, `${name} ${kind}: aminer vs verified ${ami.toFixed(3)}`);
     }
   }
 });

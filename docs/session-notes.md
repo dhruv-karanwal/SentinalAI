@@ -2298,3 +2298,39 @@ The other session's dev pair (5173 / 8000) was left running; this work used its 
 Not checked: a real screen recording (frames only), Safari / Firefox, a CVD simulation of the new
 glow tokens, the chat with a screen reader, frame time on a throttled CPU, the tour together with
 the open chat panel on a 1024 px screen.
+
+## Wave G palette, 2026-11-13 (`phase3/wave-g-palette`)
+
+User's go: replace the blue palette with "warm graphite + phosphor lime"; frontend and docs only
+(plus the PDF colour constants, which mirror the light tokens). Pilot, study, agent, experiments and
+data untouched.
+
+How it ran: tokens first (one commit), then three parallel agents on disjoint files (charts + PDF,
+screens + CSS, tests), then two read-only reviewers (screenshot loop, grep). `ui-ux-pro-max` colour
+search returned slate-navy dashboards: rejected; kept "visible focus ring" and "colour never alone".
+
+Measured (final tokens, `lib/palette.test.ts` + `charts.test.ts`):
+- WCAG: every text / accent / severity / verified / detector token >= 4.5:1 on bg, surface, raised and
+  selected in both themes; lowest 4.53 (dark `--text-faint` on `--selected`). `--on-accent` 14.1 dark,
+  6.35 light.
+- CVD (Machado 2009 severity 1, OKLab distance): detector pairs min 0.109 dark (protanopia), 0.105 light
+  (deuteranopia); sev-high vs sev-medium min 0.062 dark / 0.077 light (deuteranopia); accent vs
+  verified >= 0.078 and AMiner vs verified >= 0.076 under none/deuteranopia; under tritanopia AMiner vs
+  verified is 0.059 dark / 0.021 light and under protanopia accent vs verified 0.062 light: not asserted,
+  verifier state carries a tag word.
+- Guards: no raw colour outside tokens.css; no hue 190-290 deg (s >= 0.25) inside it.
+
+Fixed after measurement / review: light High/Medium collapsed under deuteranopia (0.014); verified teal
+matched AMiner in both themes; `--selected` had an olive tint that read as extra lime; Overview counts
+and card titles were lime links (now bone / ink, lime on hover / focus); the unused `accent` chart tone
+was removed so lime cannot return as a data colour; ATT&CK lanes and mini bars moved off the accent.
+
+Checks: frontend 57 tests pass, tsc clean, build ok; backend 520 passed, 4 skipped, mypy clean (89
+files). Screenshot loop (1366x768, both themes; Login, About, Overview, Incidents + graph + lanes,
+Alerts, Approvals, Reports + graph, Executive, Study, chat open / closed, focus walk): 0 console
+errors, scrollWidth = clientWidth everywhere, focus ring 2 px lime (dark) / olive (light). Copies in
+`docs/ui/wave-g/`.
+
+Not checked: the generated PDF opened and viewed (constants changed, tests pass), hover states, a
+dropped-claim row on screen (none in the UI-dev data), the signed-out page in light theme (the theme
+step does not toggle there), Safari / Firefox, a real colour-blind viewer.

@@ -34,7 +34,7 @@ src/api.ts              typed client, in-memory token, PERMISSIONS mirror of bac
 src/hooks.ts            AppContext, hash routing (#/screen?id=..&ev=..), useLoad, nav events
 src/lib/                pure logic with tests: format, virtual (windowing), bins (strip), highlight,
                         scale (scales, ticks, bins), graph (force layout + graph.fixture.json + placeLabels),
-                        contrast, study, explain (glossary search, whatHappened, incident labels, folded runs),
+                        contrast (WCAG + CVD simulation + OKLab), study, explain (glossary search, whatHappened, incident labels, folded runs),
                         motion (easing, counters, stepper), chat (reducer, focus trap, error notes, storage)
 src/content/            glossary.ts (the ONE glossary: Term tooltips, About, chat fallback) and about.ts
                         (pipeline stages, study question, screen guide, limits, tour stops, suggested questions)
@@ -62,12 +62,14 @@ scripts/shots.mjs       DevTools-protocol screenshot runner (no dependency)
 - **Untrusted text.** Alert fields, log lines, rule names and model output are rendered as text
   nodes only. Never `dangerouslySetInnerHTML`, never Markdown or HTML rendering, never turn log
   text into links. Highlighting goes through `splitHighlight` and `<mark>`.
-- **Tokens only.** No hex value outside `tokens.css`. A new colour needs a contrast
+- **Tokens only.** No hex value outside `tokens.css` (enforced by `lib/palette.test.ts`, which also rejects blue hues and
+  checks detector / severity / accent separation under simulated colour-blindness). A new colour needs a contrast
   measurement (4.5:1 text, 3:1 control) on bg, surface, raised and selected, in both themes,
   recorded in DESIGN.md.
 - **Never colour alone:** severity = glyph + word, detector = mark + name, verifier status = tag
   + text. Severity and detector identity are the only saturated colours; the accent is for
-  focus, links and the primary action.
+  focus, links and the primary action (palette, DESIGN.md 14: the lime goes only on the logo, active nav mark,
+  primary button, focus ring, chat button and links; never a data colour in a chart).
 - **Tables:** every list goes through `DataTable` (fixed row height from the density setting,
   windowed). Column tracks must fit the pane at 1366 px: fixed px tracks plus `minmax(0, 1fr)`;
   a `minmax(96px, ...)` track overflows the row. Check `scrollWidth > clientWidth` on `.dt-row`.
