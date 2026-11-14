@@ -8,7 +8,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { api, can, type Overview, type StudyResults } from '../api.ts';
-import { Count, Reveal, tiltHandlers, useSeen } from '../components/motion.tsx';
+import { Reveal, useSeen } from '../components/motion.tsx';
 import { Term } from '../components/Term.tsx';
 import { Button, ErrorNotice, SkeletonLines } from '../components/ui.tsx';
 import { GLOSSARY } from '../content/glossary.ts';
@@ -147,7 +147,7 @@ export function AboutScreen({ onTour }: { onTour: () => void }) {
               <ul className="tilt-grid">
                 {screens.map((g, i) => (
                   <Reveal as="li" key={g.path} i={i}>
-                    <a href={`#${g.path}`} className="tilt" {...tiltHandlers()}>
+                    <a href={`#${g.path}`}>
                       <span className="tilt-name">
                         {g.name} <Icon name="chevronRight" />
                       </span>
@@ -239,7 +239,7 @@ function Hero({ overview, loading, onTour, scenario }: { overview: Overview | nu
 function Kpi({ k, v }: { k: string; v: number | undefined }) {
   return (
     <div className="kpi">
-      <div className="kpi-v">{v === undefined ? <span className="faint">-</span> : <Count value={v} />}</div>
+      <div className="kpi-v">{v === undefined ? <span className="faint">-</span> : fmtInt(v)}</div>
       <div className="kpi-k">{k}</div>
     </div>
   );
@@ -343,7 +343,7 @@ function VerifierDemo() {
       </p>
       <div className="vdemo">
         <div>
-          <div className="k faint" style={{ fontSize: 'var(--fs-11)', marginBottom: 4 }}>
+          <div className="k faint" style={{ fontSize: 'var(--fs-micro)', marginBottom: 4 }}>
             Evidence: cited log line
           </div>
           <div className="vline" data-scanning={phase === 1 || phase === 3 ? '' : undefined}>
@@ -362,7 +362,7 @@ function VerifierDemo() {
             return (
               <div key={c.quote} className="vcard" data-v={done ? (r.kept ? 'kept' : 'dropped') : undefined} aria-live="polite">
                 <div className="vclaim">{c.text}</div>
-                <div className="mono faint" style={{ fontSize: 'var(--fs-12)' }}>
+                <div className="mono faint" style={{ fontSize: 'var(--fs-small)' }}>
                   quote: "{c.quote}"
                 </div>
                 {done && <span className="vtag">{r.reason}</span>}

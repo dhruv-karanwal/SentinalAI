@@ -407,7 +407,7 @@ function Trail({ approval: a }: { approval: Approval }) {
           </table>
         )
       ) : (
-        <p className="faint" style={{ fontSize: 'var(--fs-12)' }}>
+        <p className="faint" style={{ fontSize: 'var(--fs-small)' }}>
           The full audit log is visible to managers and admins.
         </p>
       )}

@@ -113,14 +113,14 @@ test('chat storage survives a throwing or empty store and drops junk', () => {
 });
 
 test('long answers wrap: the chat text rule breaks anywhere and keeps newlines', () => {
-  const css = readFileSync(new URL('../motion.css', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../shell.css', import.meta.url), 'utf8');
   const rule = css.slice(css.indexOf('.fab-text'), css.indexOf('}', css.indexOf('.fab-text')));
   assert.match(rule, /overflow-wrap:\s*anywhere/);
   assert.match(rule, /white-space:\s*pre-wrap/);
 });
 
-test('motion.css has a reduced-motion fallback that stops animations', () => {
-  const css = readFileSync(new URL('../motion.css', import.meta.url), 'utf8');
+test('system.css has a reduced-motion fallback that stops animations', () => {
+  const css = readFileSync(new URL('../system.css', import.meta.url), 'utf8');
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*animation: none/);
   assert.doesNotMatch(css, /#[0-9a-fA-F]{3,8}\b/); // tokens only
 });

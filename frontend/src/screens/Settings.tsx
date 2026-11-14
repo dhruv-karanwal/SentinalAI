@@ -28,7 +28,7 @@ function Choice<T extends string>({ name, legend, value, options, onChange, hint
           </label>
         ))}
       </div>
-      <p className="faint" style={{ margin: 'var(--sp-4) 0 0', fontSize: 'var(--fs-12)' }}>
+      <p className="faint" style={{ margin: 'var(--sp-4) 0 0', fontSize: 'var(--fs-small)' }}>
         {hint}
       </p>
     </fieldset>
@@ -82,7 +82,7 @@ export function SettingsScreen({ theme, density, timeFormat, scenarios, onTheme,
                 </option>
               ))}
             </select>
-            <p className="faint" style={{ margin: 'var(--sp-4) 0 0', fontSize: 'var(--fs-12)' }}>
+            <p className="faint" style={{ margin: 'var(--sp-4) 0 0', fontSize: 'var(--fs-small)' }}>
               Used after sign-in when no data source was chosen in this browser yet.
             </p>
           </div>

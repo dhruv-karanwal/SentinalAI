@@ -42,7 +42,7 @@ export function SignIn({ onSignedIn, expired }: { onSignedIn: (session: Session)
   return (
     <main className="login">
       <section className="login-form" aria-labelledby="login-title">
-        <div className="brand" style={{ fontSize: 'var(--fs-16)' }}>
+        <div className="brand" style={{ fontSize: 'var(--fs-heading)' }}>
           <BrandMark size={40} />
         </div>
         <div>

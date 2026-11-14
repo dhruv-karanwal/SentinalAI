@@ -334,7 +334,7 @@ function ReportPreview({ report }: { report: Report }) {
           {b.techniques.length > 0 ? `Mapped ATT&CK techniques: ${b.techniques.map((t) => `${t.technique_id} (${fmtInt(t.alerts)})`).join(', ')}.` : 'No alert is mapped to ATT&CK.'}{' '}
           {b.recommendations.length > 0 ? `${b.recommendations.length} playbook suggestion${b.recommendations.length === 1 ? '' : 's'}; nothing runs without an approved request.` : ''}
         </p>
-        <p className="faint" style={{ margin: '4px 0 0', fontSize: 'var(--fs-12)' }}>
+        <p className="faint" style={{ margin: '4px 0 0', fontSize: 'var(--fs-small)' }}>
           Report {report.report_id}, created {report.created_utc}. Platform output on replayed demo data; no labels.
         </p>
       </div>

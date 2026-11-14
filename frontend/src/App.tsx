@@ -312,7 +312,7 @@ export function App() {
   );
 
   const ctx = useMemo<AppState | null>(
-    () => (session ? { session, scenario, theme, density, timeFormat, rowHeight: density === 'compact' ? 24 : 32, toast } : null),
+    () => (session ? { session, scenario, theme, density, timeFormat, rowHeight: density === 'compact' ? 28 : 36, toast } : null),
     [session, scenario, theme, density, timeFormat, toast],
   );
 
@@ -488,7 +488,7 @@ export function App() {
               </div>
             ))}
           </dl>
-          <p className="faint" style={{ fontSize: 'var(--fs-12)' }}>
+          <p className="faint" style={{ fontSize: 'var(--fs-small)' }}>
             All data is a replay of the AIT-ADS dev scenarios. The console shows platform outputs (alerts, incidents, reports, approvals); it shows no labels.
           </p>
         </Dialog>

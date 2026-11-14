@@ -110,7 +110,7 @@ export function StudyScreen() {
           </EmptyState>
         ) : (
           <>
-            <p className="faint" style={{ margin: 0, fontSize: 'var(--fs-12)' }}>
+            <p className="faint" style={{ margin: 0, fontSize: 'var(--fs-small)' }}>
               {fmtInt(data.runs.length)} run{data.runs.length === 1 ? '' : 's'} ({parts.map((x) => `${fmtInt(data.runs.filter((r) => partOf(r) === x).length)} ${x}`).join(', ')}) · truncation {t} · {data.excluded_fake_runs} FakeClient run{data.excluded_fake_runs === 1 ? '' : 's'} excluded · {data.incomplete_runs} incomplete
             </p>
             <CoverageChart runs={main} noiseFor={noiseFor} metric={cov} title="Coverage: event_label, alert-reachable phases" question="Does an arm cover more attack phases than citing by detector order, and how close does it get to citing everything?" />

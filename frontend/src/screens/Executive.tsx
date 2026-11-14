@@ -164,7 +164,7 @@ function ExecutiveBody({ data, scenario, role, high, observed }: { data: import(
             nothing happened.
           </p>
         </ChartFrame>
-        <p className="faint" style={{ fontSize: 'var(--fs-12)', display: 'flex', gap: 'var(--sp-4)', alignItems: 'center' }}>
+        <p className="faint" style={{ fontSize: 'var(--fs-small)', display: 'flex', gap: 'var(--sp-4)', alignItems: 'center' }}>
           <Icon name="warning" />
           <span>Platform outputs on replayed demo data. No labels and no study results are shown here.</span>
         </p>

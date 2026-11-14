@@ -144,7 +144,7 @@ export function AlertsScreen({ scenario, route, searchRef }: { scenario: string;
                   );
                 })}
               </ul>
-              {f.distinct > f.shown && <div className="faint" style={{ fontSize: 'var(--fs-11)', padding: '2px 4px' }}>top {f.shown} of {fmtInt(f.distinct)}</div>}
+              {f.distinct > f.shown && <div className="faint" style={{ fontSize: 'var(--fs-micro)', padding: '2px 4px' }}>top {f.shown} of {fmtInt(f.distinct)}</div>}
             </section>
           );
         })}

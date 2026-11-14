@@ -98,7 +98,7 @@ export function EntityScreen({ scenario, kind, value }: { scenario: string; kind
         </div>
         <section className="chart" style={{ padding: 0 }}>
           <div className="pane-head">
-            <h2 style={{ fontSize: 'var(--fs-14)' }}>Alerts of {value}</h2>
+            <h2 style={{ fontSize: 'var(--fs-title)' }}>Alerts of {value}</h2>
           </div>
           <div style={{ height: 360, display: 'flex', flexDirection: 'column' }}>
             <AlertQueryTable scenario={scenario} filter={kind === 'host' ? { host: value } : { ip: value }} label={`Alerts of ${value}`} onOpen={(a) => (window.location.hash = buildHash('/alerts', { id: a.alert_id }))} />
