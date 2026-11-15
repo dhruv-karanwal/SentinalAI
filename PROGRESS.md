@@ -3,7 +3,7 @@
 Read this first every session; update it in every commit that changes project state.
 Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
 
-**Last update:** 2026-11-15, branch `phase3/demo-ready` (wave H PR #20 and stats filter PR #21 merged).
+**Last update:** 2026-11-15, branch `claude/amazing-edison-ns3q8m` (fix 3, m5-v4; demo PR #22 merged).
 
 ## Demo (2026-11-16)
 - Follow `DEMO.md`. Cold start walked end to end on 2026-11-15: 7 steps ok, 0 console errors, chat
@@ -26,6 +26,11 @@ Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
 - Waiting for the user: fix 3 (`kind` prompt line, m5-v4, re-pilot ~1.6 h) or accept the cell as a
   documented deviation. Stats/export now pick one prompt revision (`--prompt-version`, default latest; warns on a mix), 2026-11-15.
   No protocol freeze, no held-out ingest until then.
+- **Fix 3 applied 2026-11-15** (user's go): single prompt m5-v4 adds one line under the final-answer
+  form: `kind is always "field_value" or "quote"; put the field name in field.` Graph prompts stay
+  wave-c-v2 (hash pinned by a test). pytest 525 passed, 12 skipped (cloud container: no real data);
+  mypy clean (90 files). **Next:** dev re-pilot on m5-v4 on the Windows machine (resume command in
+  `docs/session-notes.md`, "Prompt fix 3"), then re-gate with `--prompt-version m5-v4`. No freeze.
 
 ## Done
 - Premium console (`phase3/wave-h-premium`, 2026-11-14/15, user's go; pilot untouched): restraint
