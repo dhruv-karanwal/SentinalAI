@@ -3,7 +3,7 @@
 Read this first every session; update it in every commit that changes project state.
 Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
 
-**Last update:** 2026-11-15, branch `phase3/wave-h-premium`.
+**Last update:** 2026-11-15, branch `phase3/stats-prompt-filter` (wave H merged: PR #20).
 
 ## Pilot gate (2026-11-13): FAIL, held-out blocked
 - Dev pilot finished 12/12 runs (336 case runs). Gate review in `results/PILOT_GATE.md`.
@@ -19,7 +19,7 @@ Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
   all three a claim `kind` set to a field name. Pooled single 6.0 %, graph 4.8 % (was 10.1 %); the
   repair defect is gone (0 rejected `final` retries). Held-out extrapolation ~18.5 h.
 - Waiting for the user: fix 3 (`kind` prompt line, m5-v4, re-pilot ~1.6 h) or accept the cell as a
-  documented deviation. Stats/export mix v1 and v2 pilot runs: separate them before the paper export.
+  documented deviation. Stats/export now pick one prompt revision (`--prompt-version`, default latest; warns on a mix), 2026-11-15.
   No protocol freeze, no held-out ingest until then.
 
 ## Done

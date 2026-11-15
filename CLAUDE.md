@@ -131,6 +131,8 @@ S=../data/samples/synthetic_ait_ads
 ../.venv/Scripts/python.exe -m app.main run-final --allow-held-out --dry-run
 ../.venv/Scripts/python.exe -m app.main run-final --allow-held-out --confirm --phases i
 ../.venv/Scripts/python.exe -m app.main export-paper-assets     # results/ from run files
+# both take --prompt-version (default: latest revision present; 'all' mixes, with a warning)
+../.venv/Scripts/python.exe -m app.main study-stats --part pilot --prompt-version m5-v3
 # passwords and secrets only from the environment, never as arguments
 ../.venv/Scripts/python.exe -m app.main create-user --username alice --role analyst   # needs SENTINEL_NEW_USER_PASSWORD
 ../.venv/Scripts/python.exe -m app.main serve      # API on 127.0.0.1:8000; needs SENTINEL_JWT_SECRET
@@ -242,6 +244,8 @@ backend/app/
   study/freeze.py         FROZEN_CODE, compute_freeze / verify_freeze, authorize_held_out -> HeldOutPermit
   study/final_runs.py     load_final_plan, plan_runs, run_final (per-scenario checkpoints), case_rows
   study/paper_assets.py   summarize, export_paper_assets (CSV, LaTeX, SVG, provenance, README)
+  study/revisions.py      run_revision (manifest prompt_versions -> "<single>+<graph>"), choose_revision,
+                          select_rows: analysis-only prompt-revision filter for stats and export
   agent/copilot.py        CopilotToolkit (CaseToolkit + analyst question in the brief), ask() -> verified answer
   outputs/playbooks.py    PLAYBOOK rows (technique prefix -> actions), STATE_CHANGING, recommend()
   outputs/reports.py      build_report (label-free, deterministic, MAX_ROWS 500), render_csv, render_pdf
@@ -616,6 +620,12 @@ experiments/config/study.json  frozen split; variant seed, shuffled/noise refere
   `repeat` is in the matched config hash only when set, so pilot run ids did not change.
 - Matched `scores.json` carries `per_case` (every score row per case) and `study_part`;
   `export-paper-assets` reads only `pilot` and `held-out` parts, never typed-in numbers.
+- Re-pilots write new run directories with the same case keys. `study-stats` and
+  `export-paper-assets` therefore analyse one prompt revision (`study/revisions.py`, from each run's
+  `manifest.json` `prompt_versions`): `--prompt-version` takes `<single>+<graph>` or one part
+  (`m5-v3`); default the latest present (numeric `-vN` order); `all` keeps every run. Any mix
+  prints a WARNING to stderr; provenance.json records `prompt_revision` and the revisions present.
+  Selection only: `case_rows`, scores and run files are untouched.
 - Study code iterates `AIT_ADS_DETECTORS`, never `Detector`: `Detector.SIGMA`
   exists for the platform, and a study variant `sigma` appears only if
   `variants.extra_detectors` lists it (it does not). `test_frozen_sections_are_unchanged`

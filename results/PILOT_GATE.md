@@ -49,7 +49,9 @@ Statistics (PILOT, re-pilot runs only; `results/pilot_gate/study_stats_PILOT_v2.
   `scores.json`, so the old (v1) and new (v2) runs mix under the same case keys. The v2 numbers
   above came from a view holding only the v2 `scores.json`. Before the paper export, move or
   label the v1 runs, or add a prompt-version filter. Analysis code is not frozen, so this is not
-  a protocol change.
+  a protocol change. **Resolved 2026-11-15:** both commands now take `--prompt-version` (default
+  the latest revision, m5-v3+wave-c-v2) and warn when revisions are mixed; the default reproduces
+  the v2 numbers above (H1 -0.43, p_holm 0.002; H8 0.50).
 
 Runtime: 33.5 s per case for both arms (was 34.6 s), so the held-out extrapolation is about
 **18.5 h** (phase i ~4.7 h, ii ~9.4 h, iii ~4.7 h).

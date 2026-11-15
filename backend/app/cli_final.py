@@ -66,6 +66,9 @@ def add_parsers(sub: Any, study_config: Path, positive_int: Any) -> None:
                        help="held-out run directory (default runs/final)")
         p.add_argument("--pilot-runs-dir", type=Path, default=DEFAULT_PROCESSED / "runs")
         p.add_argument("--freeze", type=Path, default=DEFAULT_FREEZE)
+        p.add_argument("--prompt-version", default=None,
+                       help="prompt revision to analyse: <single>+<graph> or one part (e.g. m5-v3); "
+                            "default the latest present; 'all' mixes revisions (warned)")
         if name == "export-paper-assets":
             p.add_argument("--results-dir", type=Path, default=REPO / "results")
         else:
@@ -203,6 +206,7 @@ def _final(args: argparse.Namespace) -> int:
 
 def _stats(args: argparse.Namespace) -> int:
     from app.study.final_runs import case_rows
+    from app.study.revisions import select_rows
     from app.study.stats import compare_family, load_statistics_config
 
     cfg = load_statistics_config(args.statistics_config)
@@ -211,11 +215,19 @@ def _stats(args: argparse.Namespace) -> int:
     rows = [r for r in case_rows(runs, [args.part])
             if r["truncation"] == raw.get("primary_truncation", "spread")
             and r["repeat"] == raw.get("primary_repeat", 1)]
+    try:
+        rows, choice = select_rows(rows, runs, getattr(args, "prompt_version", None))
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    if choice.warning:
+        print(f"WARNING: {choice.warning}", file=sys.stderr)
     if not rows:
         print(f"no finished {args.part} runs in {runs}")
         return 1
     label = "pilot, not paper results" if args.part == "pilot" else "held-out"
-    print(f"DECLARED COMPARISONS ({label}); paired bootstrap, Holm over the family")
+    print(f"DECLARED COMPARISONS ({label}); prompt revision {choice.chosen or 'all'}; "
+          "paired bootstrap, Holm over the family")
     for r in compare_family(rows, cfg):
         print(f"  {r['name']}: n {r['n']} diff {r['difference']} CI [{r['ci_low']}, {r['ci_high']}] "
               f"p {r['p_value']} p_holm {r['p_holm']}")
@@ -239,8 +251,14 @@ def _export(args: argparse.Namespace) -> int:
                 dest = view / scores.parent.name
                 dest.mkdir(exist_ok=True)
                 shutil.copyfile(scores, dest / "scores.json")
-        written = export_paper_assets(view, args.results_dir, statistics_config=args.statistics_config,
-                                      freeze_path=args.freeze)
+                if (scores.parent / "manifest.json").exists():  # carries the prompt revision
+                    shutil.copyfile(scores.parent / "manifest.json", dest / "manifest.json")
+        try:
+            written = export_paper_assets(view, args.results_dir, statistics_config=args.statistics_config,
+                                          freeze_path=args.freeze, prompt_version=args.prompt_version)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
     for w in written:
         print(f"wrote {w}")
     return 0
