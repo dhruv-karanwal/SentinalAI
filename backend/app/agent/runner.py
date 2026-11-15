@@ -37,7 +37,7 @@ import dataclasses
 import hashlib
 import json
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -149,11 +149,11 @@ def _window_seconds(case: Case) -> float:
 
 
 def _toolkit(prep: PreparedRun, index: int, alerts: Sequence[Alert], settings: AgentSettings,
-             salt: str) -> CaseToolkit:
+             salt: str, attack: Callable[[dict[str, Any]], str] | None = None) -> CaseToolkit:
     case = prep.cases[index]
     return CaseToolkit(alerts, window_start=case.window_start, window_seconds=_window_seconds(case),
                        id_salt=f"{salt}:{index}", page_size=settings.agent.list_page_size,
-                       max_output_chars=settings.agent.max_tool_output_chars)
+                       max_output_chars=settings.agent.max_tool_output_chars, attack=attack)
 
 
 def estimate_run(prep: PreparedRun, settings: AgentSettings) -> dict[str, Any]:

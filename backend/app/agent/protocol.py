@@ -27,19 +27,21 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from app.agent.tools import TIME_MASK, TOOL_NAMES
 from app.evaluation.metrics import QUOTE_MIN_CHARS
 
-PROMPT_VERSION = "m5-v4"  # m5-v2 (2026-11-12): tool-call example + forms in the repair;
+PROMPT_VERSION = "m5-v5"  # m5-v2 (2026-11-12): tool-call example + forms in the repair;
 # m5-v3 (2026-11-13, pilot gate): output cap, 8 of 11 pilot parse failures were replies cut
 # at max_tokens while listing up to 100 cited ids
 # m5-v4 (2026-11-15, re-pilot gate): kind line under the final-answer form, 3/14 rm wazuh
 # single cases set a claim "kind" to a field name
 KIND_RULE = 'kind is always "field_value" or "quote"; put the field name in field.'
+# m5-v5 (2026-11-15, C1 option a): the single agent also lists search_attack, the graph's ATT&CK
+# tool, so both arms have the same knowledge access; nothing else in the text changes
 MAX_CITED_ALERTS = 20
 MAX_CLAIMS = 10
 OUTPUT_CAP = (f"Keep the final answer short: at most {MAX_CITED_ALERTS} alert ids and at most "
               f"{MAX_CLAIMS} claims in the whole answer, chosen as the strongest evidence; a "
               "longer reply is cut off and fails.")
 
-SYSTEM_PROMPT = f"""You are a security analyst investigating one case: a time window of a \
+SYSTEM_PROMPT_M5_V4 = f"""You are a security analyst investigating one case: a time window of a \
 monitored network and the alerts that intrusion detectors raised in it. Decide whether the \
 window contains attacker activity, and support every finding with alert evidence.
 
@@ -80,6 +82,17 @@ make claims about alert_id, offset or time fields.
 - You have a limited number of tool calls. When told the budget is used up, give your final answer.
 - {OUTPUT_CAP}
 """
+
+SEARCH_ATTACK_LINE = ("- search_attack: arguments text (required), k (optional, 1-5). Returns MITRE ATT&CK "
+                      "techniques from the local knowledge base (id, name, tactics, excerpt); it knows "
+                      "nothing about this case.\n")
+SYSTEM_PROMPT_M5_V5 = (SYSTEM_PROMPT_M5_V4
+                       .replace(f"Tools ({', '.join(TOOL_NAMES)}):",
+                                f"Tools ({', '.join((*TOOL_NAMES, 'search_attack'))}):", 1)
+                       .replace("the raw log lines the alert carries.\n",
+                                "the raw log lines the alert carries.\n" + SEARCH_ATTACK_LINE, 1))
+SYSTEM_PROMPT = SYSTEM_PROMPT_M5_V5
+SINGLE_PROMPTS = {"m5-v4": SYSTEM_PROMPT_M5_V4, "m5-v5": SYSTEM_PROMPT_M5_V5}  # earlier: git history
 
 REPAIR_MESSAGE = ("Your last reply was not valid: {error}. Reply again with exactly one JSON object "
                   "in one of the two forms, and nothing else: "

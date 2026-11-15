@@ -27,7 +27,7 @@ DEFAULT_PROCESSED = REPO / "data" / "processed"
 DEFAULT_PLATFORM = REPO / "data" / "platform"
 DEFAULT_LABELS = REPO / "data" / "raw" / "ait_ads" / "labels.csv"
 DEFAULT_STIX = REPO / "data" / "raw" / "mitre" / "enterprise-attack.json"
-COMMANDS = ("rag-index", "rag-eval", "pilot-estimate", "run-matched", "run-pilot")
+COMMANDS = ("rag-index", "rag-eval", "pilot-estimate", "run-matched", "run-pilot", "pilot-preflight")
 
 
 def _offline() -> None:
@@ -49,6 +49,18 @@ def add_parsers(sub: Any, study_config: Path, positive_int: Any) -> None:
     ev.add_argument("--modes", nargs="+", default=["dense", "lexical", "hybrid"],
                     choices=("dense", "lexical", "hybrid"), help="retrieval modes to evaluate")
     ev.add_argument("--alpha", type=float, default=0.5, help="hybrid dense weight (default 0.5)")
+
+    pf = sub.add_parser("pilot-preflight", help="checks before a matched pilot: prompt versions, dev-only "
+                                                "plan, inputs, ATT&CK index, model listed; --smoke "
+                                                "sends one schema request")
+    pf.add_argument("--scenarios", nargs="+", default=None, help="default: pilot.scenarios")
+    pf.add_argument("--processed-dir", type=Path, default=DEFAULT_PROCESSED)
+    pf.add_argument("--labels", type=Path, default=DEFAULT_LABELS)
+    pf.add_argument("--data-dir", type=Path, default=DEFAULT_PLATFORM)
+    pf.add_argument("--study-config", type=Path, default=study_config)
+    pf.add_argument("--retrieval-mode", choices=("dense", "lexical", "hybrid"), default=None)
+    pf.add_argument("--no-retrieval", action="store_true")
+    pf.add_argument("--smoke", action="store_true", help="send ONE request and parse the reply")
 
     for name, help_text in (("pilot-estimate", "Wave C: token / call bound of a matched pilot on "
                              "dev scenarios; calls no model"),
@@ -72,7 +84,7 @@ def add_parsers(sub: Any, study_config: Path, positive_int: Any) -> None:
                            help="stable run directory per config hash; skip completed runs and cases"
                                 + (" (always on)" if name == "run-pilot" else ""))
             p.add_argument("--retrieval-mode", choices=("dense", "lexical", "hybrid"), default=None,
-                           help="search_attack mode of the graph arm (default: pilot.retrieval)")
+                           help="search_attack mode of both arms (default: pilot.retrieval)")
             p.add_argument("--dry-run", action="store_true")
             p.add_argument("--confirm", action="store_true")
             p.add_argument("--fake-single", type=Path, default=None,
@@ -80,7 +92,7 @@ def add_parsers(sub: Any, study_config: Path, positive_int: Any) -> None:
             p.add_argument("--fake-graph", type=Path, default=None,
                            help="JSON list of scripted replies for the graph (FakeClient)")
             p.add_argument("--no-retrieval", action="store_true",
-                           help="run the graph without the ATT&CK vector index")
+                           help="run both arms without the ATT&CK vector index")
             p.add_argument("--output-dir", type=Path, default=DEFAULT_PROCESSED / "runs")
             p.add_argument("--data-dir", type=Path, default=DEFAULT_PLATFORM)
         p.add_argument("--limit", type=positive_int, default=None)
@@ -94,7 +106,8 @@ def add_parsers(sub: Any, study_config: Path, positive_int: Any) -> None:
 def dispatch(args: argparse.Namespace) -> int:
     _offline()
     handler = {"rag-index": _rag_index, "rag-eval": _rag_eval, "pilot-estimate": _pilot_estimate,
-               "run-matched": _run_matched, "run-pilot": _run_pilot}[args.command]
+               "run-matched": _run_matched, "run-pilot": _run_pilot,
+               "pilot-preflight": _pilot_preflight}[args.command]
     return handler(args)
 
 
@@ -384,3 +397,49 @@ def _run_pilot(args: argparse.Namespace) -> int:
         print(f"[{n}/{len(preps)}] {s} {v} {t}: done in {wall} s ({report['run_dir']})")
     print(f"progress log: {progress}")
     return 0
+
+
+def _list_models(base_url: str) -> list[str]:
+    import urllib.request
+
+    with urllib.request.urlopen(base_url.rstrip("/") + "/models", timeout=5) as r:
+        body = json.loads(r.read().decode("utf-8"))
+    return [str(m.get("id")) for m in body.get("data", []) if isinstance(m, dict)]
+
+
+def _pilot_preflight(args: argparse.Namespace) -> int:
+    from app.agent.config import load_agent_settings
+    from app.study.config import load_study_config
+    from app.study.preflight import Check, preflight, schema_smoke
+
+    config = load_study_config(args.study_config)
+    settings = load_agent_settings(args.study_config)
+    scenarios = args.scenarios or list(config.pilot_scenarios)
+    mode = None if args.no_retrieval else (args.retrieval_mode or config.pilot_retrieval)
+    retriever: Any = None
+    retrieval_error: str | None = None
+    if mode not in (None, "none"):
+        try:
+            retriever = _graph_retriever(args, str(mode))
+        except Exception as exc:  # missing model cache / bundle: report it as a failed check
+            retrieval_error = f"{type(exc).__name__}: {exc}"
+    base = settings.model.base_url
+    checks = preflight(scenarios=scenarios, dev=list(config.split.dev),
+                       processed_dir=args.processed_dir, labels=args.labels, retriever=retriever,
+                       model_id=settings.model.model if base else None,
+                       list_models=lambda: _list_models(base or ""))
+    if retrieval_error:
+        checks = [c if c.name != "ATT&CK retrieval" else Check(c.name, False, retrieval_error)
+                  for c in checks]
+    if args.smoke:
+        if all(c.ok for c in checks):
+            checks.append(schema_smoke(_client(None, settings), max_tokens=settings.model.max_tokens,
+                                       temperature=settings.model.temperature))
+        else:
+            checks.append(Check("schema smoke", False, "not sent: fix the failures above first"))
+    print("PILOT PREFLIGHT (dev scenarios only)")
+    for c in checks:
+        print(f"  [{'ok' if c.ok else 'FAIL'}] {c.name}: {c.detail}")
+    failed = [c for c in checks if not c.ok]
+    print("result: " + ("ready" if not failed else f"{len(failed)} check(s) failed; do not start the pilot"))
+    return 0 if not failed else 1

@@ -232,7 +232,8 @@ The agent under study is a single tool-using LLM agent
 (`backend/app/agent/`). It is held fixed while the alert source varies.
 
 - **What it sees.** Per case, four tools over the case's alerts only:
-  `list_alerts`, `get_alert`, `search_alerts`, `get_raw_log`. The tool
+  `list_alerts`, `get_alert`, `search_alerts`, `get_raw_log` (prompts m5-v1 to m5-v4; from m5-v5
+  also `search_attack`, see "Investigation arms and tool access" below). The tool
   layer is built from the alert records and the window start; it never
   receives ground truth, labels, phase names, the case kind or the
   variant name. Alert ids are opaque per run and case (real Wazuh ids
@@ -271,6 +272,69 @@ stay untouched until the final runs (M12). The pilot reports both
 truncation rules side by side (`pilot.truncation`: `spread`, `earliest`),
 because `spread` dropped the only event-labelled alerts of one dev case
 (shaw, fused `cracking`).
+
+## Investigation arms and tool access (C1, decided 2026-11-15)
+
+**Research question.** Does the quality of an AI security investigation depend on the detector
+feed, the investigation architecture and evidence verification?
+
+**Design.** Within-case, matched-budget comparison. Every case is investigated by both arms on
+the same alerts; each arm is scored before and after the same deterministic verifier.
+
+| | single (`m5-v5`) | graph (`wave-c-v2`) |
+|---|---|---|
+| model, temperature, endpoint | same (one model id for both arms) | same |
+| budgets per case | `agent` in study.json: tool calls, tokens, one repair | same numbers, over the whole graph |
+| case evidence | `list_alerts`, `get_alert`, `search_alerts`, `get_raw_log` | same four tools (restricted per agent) |
+| ATT&CK knowledge | `search_attack` (same `AttackSearchTool`, same retriever and mode) | `search_attack` (knowledge_retrieval, investigation agents) |
+| shared notes | **none** | `recall_notes`, `search_notes`, notes written by every agent |
+| control flow | one agent loop | supervisor + 6 role agents + report_generation |
+| prompts | one system prompt | supervisor prompt + 6 agent prompts |
+| verifier | same `verify_answer` | same |
+
+Recorded per run in `manifest.json` (`tool_access`, `prompt_versions`, `retrieval_mode`).
+
+**What changed (C1).** Up to m5-v4 the single agent had no ATT&CK search, so any arm difference
+mixed architecture with knowledge access. m5-v5 gives the single agent the same tool (prompt:
+one more line in the tool list, nothing else; the m5-v4 text is kept byte for byte as
+`SYSTEM_PROMPT_M5_V4`, sha256 pinned in `tests/test_prompt_m5_v5.py`). The graph prompts are
+unchanged (wave-c-v2). `--no-retrieval` now turns ATT&CK search off for **both** arms.
+
+**What the comparison can and cannot establish.** The arms now differ in three linked ways:
+control flow (one loop vs supervisor + roles), prompts (one vs seven), and shared notes. These are
+what "architecture" means in this study; they are not separated from each other. A difference
+between arms is therefore an effect of the *multi-agent design as built*, not of supervisor routing
+alone, of role prompts alone or of note memory alone. Knowledge access, evidence access, model,
+budgets and verifier are held constant. The study cannot say which component of the design causes
+a difference; a component ablation (e.g. graph without notes) is future work and not in the frozen
+family.
+
+**Variables.**
+- Independent: alert source (`wazuh`, `suricata`, `aminer`, `fused`, `oracle`, control
+  `noise-wazuh`); investigation arm (single, graph); verifier (before / after).
+- Dependent (per case, deterministic): event-label coverage on reachable phases (headline),
+  citation precision, unsupported-claim rate, verdict correctness; reported with parse failures,
+  budget hits, tool calls, tokens and wall time.
+- Controlled: cases and windows, truncation (spread primary, earliest as sensitivity), model,
+  temperature 0, budgets, retrieval mode (hybrid), verifier, seeds.
+- **Shuffled controls** (`shuffled-<det>`) exist as M3 variant manifests but are **not** in the
+  pilot or the final plan (`final_study.json` lists the six variants above); `noise-wazuh` is the
+  random control of the study. Adding them would be a protocol change.
+
+**Parse failures and stop rule.** A reply that is still unparseable after one repair is a failed
+case (no verdict, no citations) and is scored as such, never dropped. Gate: the pilot fails if any
+scenario x variant x arm cell has more than 20 % parse failures (`results/PILOT_GATE.md`). The
+threshold is not changed after seeing results.
+
+**Prompt versioning.** `PROMPT_VERSION` (single) and `GRAPH_PROMPT_VERSION` are part of every run's
+config hash and manifest; a new prompt is a new version and starts new run directories. Analysis
+selects one revision (`--prompt-version`, default the latest). History: m5-v2 (tool-call example),
+m5-v3 (output cap), m5-v4 (claim `kind` line), m5-v5 (ATT&CK search for the single arm); graph
+wave-c-v1 -> wave-c-v2 (per-node repair). Failed pilots are kept (`results/PILOT_GATE.md`).
+
+**Sequence.** `pilot-preflight` (cheap checks, `--smoke` one request) -> dev re-pilot -> gate ->
+`protocol-freeze` -> held-out phases i-iii -> `study-stats --part held-out` (paired bootstrap,
+Holm over the family in `experiments/config/statistics.json`) -> `export-paper-assets`.
 
 ## Labels and features
 

@@ -10,6 +10,12 @@ Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
   answered by the local model in 1.7 s, report PDF 29 KB. Study shows pilot rows of the latest prompt
   revision, labelled "not final results".
 
+## C1 resolved, m5-v5 (2026-11-15, user's option a)
+- Single agent now has `search_attack` (same tool and retriever as the graph); prompt m5-v5, m5-v4 text
+  preserved. Shared notes stay graph-only (documented in `docs/research-methodology.md`).
+- New `pilot-preflight` (+ `--smoke`). Fixed a test that wrote into `data/platform/`; guard fixture added.
+- pytest 535 passed, 12 skipped; mypy clean (91 files). **Next (Windows):** preflight, m5-v5 dev re-pilot, gate.
+
 ## Product readiness audit (2026-11-15, Milestone 1)
 - `docs/PRODUCT_READINESS_AUDIT.md` (status per feature, issues C1-C8, roadmap) and
   `docs/IMPLEMENTATION_LOG.md`. No code changed. Cloud container: pytest 525 passed, 12 skipped;
