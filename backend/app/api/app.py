@@ -379,6 +379,7 @@ def create_app(services: Services, *, metrics: Any | None = None) -> FastAPI:
         if inc is None:
             raise HTTPException(404, "no such incident")
         findings = None
+        inv: Optional[dict[str, Any]] = None
         if body.investigation_id is not None:
             from app.evaluation.metrics import Claim
 
@@ -395,7 +396,7 @@ def create_app(services: Services, *, metrics: Any | None = None) -> FastAPI:
                         "claims": [Claim(record_id=o["record_id"], field=o["field"], value=o["value"],
                                          kind=o["kind"]) for o in res["observed"]]}
         report = build_report(inc, _incident_alerts(inc), findings=findings)
-        if body.investigation_id is not None and "findings" in report:
+        if inv is not None and "findings" in report:
             res = inv["result"]
             report["findings"]["source"] = {
                 "investigation_id": body.investigation_id, "workflow": inv["workflow"],
