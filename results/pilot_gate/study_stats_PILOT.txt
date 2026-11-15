@@ -1,0 +1,13 @@
+PILOT - dev scenarios (russellmitchell, shaw) only. NOT paper results. Output of: python -m app.main study-stats --part pilot (2026-11-13).
+
+DECLARED COMPARISONS (pilot, not paper results); paired bootstrap, Holm over the family
+  H1 arm: graph vs single (fused, after verifier), coverage: n 14 diff -0.42857142857142855 CI [-0.7142857142857143, -0.07142857142857142] p 0.0245975402459754 p_holm 0.12298770122987701
+  H2 verifier: single before vs after, unsupported claims: n 10 diff -0.2 CI [-0.3, -0.1] p 0.00019998000199980003 p_holm 0.001999800019998
+  H3 verifier: graph before vs after, unsupported claims: n 2 diff -0.41666666666666663 CI [-0.41666666666666663, -0.41666666666666663] p 0.00019998000199980003 p_holm 0.001999800019998
+  H4 source: wazuh vs fused (graph+verifier), coverage: n 14 diff -0.07142857142857142 CI [-0.2857142857142857, 0.14285714285714285] p 0.7769223077692231 p_holm 0.7769223077692231
+  H5 source: aminer vs fused (graph+verifier), coverage: n 14 diff 0.2857142857142857 CI [0.07142857142857142, 0.5] p 0.015798420157984203 p_holm 0.09479052094790522
+  H6 source: suricata vs fused (graph+verifier), coverage: n 14 diff 0.21428571428571427 CI [-0.07142857142857142, 0.5] p 0.21937806219378062 p_holm 0.7143285671432856
+  H7 source: fused vs oracle (graph+verifier), coverage: n 14 diff -0.14285714285714285 CI [-0.35714285714285715, 0.0] p 0.22717728227177283 p_holm 0.7143285671432856
+  H8 noise control: noise-wazuh vs wazuh (graph+verifier), coverage: n 14 diff 0.35714285714285715 CI [0.14285714285714285, 0.6428571428571429] p 0.0029997000299970002 p_holm 0.020997900209979003
+  H9 arm: graph vs single (fused, after verifier), citation precision: n 7 diff -0.174812030075188 CI [-0.21428571428571427, -0.13533834586466167] p 0.00019998000199980003 p_holm 0.001999800019998
+  H10 arm: graph vs single (fused), verdict accuracy: n 28 diff -0.17857142857142858 CI [-0.42857142857142855, 0.07142857142857142] p 0.1785821417858214 p_holm 0.7143285671432856

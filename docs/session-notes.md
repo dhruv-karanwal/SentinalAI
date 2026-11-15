@@ -2335,6 +2335,44 @@ Not checked: the generated PDF opened and viewed (constants changed, tests pass)
 dropped-claim row on screen (none in the UI-dev data), the signed-out page in light theme (the theme
 step does not toggle there), Safari / Firefox, a real colour-blind viewer.
 
+## Pilot gate review, 2026-11-13 (`phase3/pilot-gate`)
+
+Task: gate review before the protocol freeze; no held-out runs, no study-code change unless a defect is
+proven, and then report instead of fixing. Read only: run files in `data/processed/runs/` (12 pilot
+runs, all `study_part` pilot, model `sentinel-qwen2.5-7b-32k`). Nothing under `backend/app`,
+`experiments/` or `data/` was changed; no held-out file was read.
+
+- Result: **FAIL**. Full report `results/PILOT_GATE.md`; scripts that produced every number in
+  `results/pilot_gate/` (read-only over the run directory, `python <script> data/processed/runs`).
+- Parse failures: single 11/168 (6.5 %), graph 17/168 (10.1 %); per cell max 3/14 = 21.4 % in
+  russellmitchell aminer graph and russellmitchell wazuh graph (stop rule > 20 % tripped at cell level).
+- Defect: `graph.py:246` uses `protocol.REPAIR_MESSAGE` (forms `call_tool` / `final`) for every node;
+  note agents then answer `final` and are rejected. 9 note-agent repairs, 5 ended that way.
+- Single-arm failures: 8 of 11 are replies cut at `max_tokens` 1024 (`finish_reason=length`).
+- russellmitchell fused graph: case 000 tool budget (first three agents used all 12 calls), 008 model
+  format + invalid claim kind, 010 token budget before report_generation (40,957 > 40,000).
+- Controls: noise-wazuh 0/7 everywhere, cite-none 0/7, cite-all at ceiling; graph oracle only 1/7 per
+  scenario (agent behaviour: 4 failures, 7 benign verdicts without citations). shuffled-* not in the pilot.
+- `study-stats --part pilot` ran end to end (~1 s); output labelled PILOT in
+  `results/pilot_gate/study_stats_PILOT.txt`; not interpreted.
+- Held-out runtime extrapolation: 34.6 s per case (both arms) -> ~19 h for phases i-iii (17-22 h).
+- Not run: pytest / mypy (no code changed).
+
+### Re-pilot after fixes 1-2 (m5-v3 / wave-c-v2), 2026-11-13
+
+- 12/12 runs, exit 0; wall 5,627 s of arm time (single 9.0 s/case, graph 24.5 s/case).
+- Parse failures: single 10/168 (6.0 %), graph 8/168 (4.8 %); budget hits: graph 2 tool, 2 token.
+- Stop rule: one cell over, russellmitchell wazuh single 3/14 (claim `kind` = field name, cases 002, 004, 010).
+- Graph repairs: 0 retries answered `final` and were rejected (was 5); 25 note-agent retries ok,
+  13 report retries ok.
+- Controls hold: noise 0/7, cite-none 0/7. Graph oracle 3/7 (rm) and 5/7 (shaw), was 1/7.
+- Stats on a v2-only view (`results/pilot_gate/v2_view.py`): H1 -0.43 (p_holm 0.002), H8 0.50
+  (0.002), H3 n 1.
+- The stats CLI and the paper export read all pilot runs, so v1 and v2 runs mix. This must be
+  resolved before the paper export.
+- Verdict FAIL (narrow). Fix 3 is proposed (`kind` prompt line), or a documented deviation; the
+  user decides. Detail: `results/PILOT_GATE.md`, first section.
+
 ## Wave H premium console, 2026-11-14 / 15 (`phase3/wave-h-premium`)
 
 User's go; pilot, study code, experiments and data untouched (frontend only, plus docs).
