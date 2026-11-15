@@ -3,7 +3,12 @@
 Read this first every session; update it in every commit that changes project state.
 Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
 
-**Last update:** 2026-11-15, branch `phase3/stats-prompt-filter` (wave H merged: PR #20).
+**Last update:** 2026-11-15, branch `phase3/demo-ready` (wave H PR #20 and stats filter PR #21 merged).
+
+## Demo (2026-11-16)
+- Follow `DEMO.md`. Cold start walked end to end on 2026-11-15: 7 steps ok, 0 console errors, chat
+  answered by the local model in 1.7 s, report PDF 29 KB. Study shows pilot rows of the latest prompt
+  revision, labelled "not final results".
 
 ## Pilot gate (2026-11-13): FAIL, held-out blocked
 - Dev pilot finished 12/12 runs (336 case runs). Gate review in `results/PILOT_GATE.md`.

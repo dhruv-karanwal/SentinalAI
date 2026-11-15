@@ -8,13 +8,13 @@ import { useMemo, useState } from 'react';
 import { api, type ScoreRow, type StudyRun } from '../api.ts';
 import { DotPairs, HBars } from '../charts/Bars.tsx';
 import { ChartFrame, type LegendItem } from '../charts/ChartFrame.tsx';
-import { Disclosure, ErrorState, Page, PageHeader, Tabs } from '../components/ui.tsx';
+import { Button, Disclosure, ErrorState, Page, PageHeader, Tabs } from '../components/ui.tsx';
 import { useLoad, useScreenContext } from '../hooks.ts';
 import { Term } from '../components/Term.tsx';
 import { Icon } from '../icons.tsx';
 import { fmtDuration, fmtInt } from '../lib/format.ts';
 import { fmtPct, heatStep } from '../lib/scale.ts';
-import { coverageOf, noiseRunFor, precisionOf, refsFor } from '../lib/study.ts';
+import { coverageOf, latestRevision, noiseRunFor, precisionOf, refsFor } from '../lib/study.ts';
 import { DashSkeleton } from './Overview.tsx';
 
 const ARMS = ['single', 'single+verifier', 'graph', 'graph+verifier'];
@@ -30,6 +30,7 @@ const PART_TEXT: Record<string, string> = {
 };
 /** scores.json says which part of the study a run belongs to; older files without it are dev pilot material. */
 const partOfRun = (r: StudyRun): string => r.study_part ?? (r.split === 'held-out' ? 'held-out' : 'pilot');
+const revOf = (r: StudyRun): string => r.prompt_revision ?? 'unknown';
 
 const cov = (r: ScoreRow | undefined): number | null => coverageOf(r);
 const prec = (r: ScoreRow | undefined): number | null => precisionOf(r);
@@ -43,7 +44,14 @@ export function StudyScreen() {
   const counts = useMemo(() => Object.fromEntries(PART_ORDER.map((p) => [p, allRuns.filter((r) => partOfRun(r) === p).length])) as Record<Part, number>, [allRuns]);
   const [partPick, setPartPick] = useState<Part | null>(null);
   const part: Part = partPick ?? PART_ORDER.find((p) => counts[p] > 0) ?? 'pilot';
-  const runs = useMemo(() => allRuns.filter((r) => (r.truncation ?? 'unknown') === t && partOfRun(r) === part), [allRuns, t, part]);
+  const partRuns = useMemo(() => allRuns.filter((r) => (r.truncation ?? 'unknown') === t && partOfRun(r) === part), [allRuns, t, part]);
+  // a re-pilot writes new runs with the same cases: show one prompt revision at a time, the latest by
+  // default (the same choice study-stats makes), never two revisions pooled in one chart
+  const revisions = useMemo(() => [...new Set(partRuns.map(revOf))].sort(), [partRuns]);
+  const [revPick, setRevPick] = useState<string | null>(null);
+  const rev = revPick && revisions.includes(revPick) ? revPick : latestRevision(revisions);
+  const runs = useMemo(() => partRuns.filter((r) => revOf(r) === rev), [partRuns, rev]);
+  const hidden = partRuns.length - runs.length;
   const main = runs.filter((r) => !(r.variant ?? '').startsWith('noise-'));
   const noiseFor = (r: StudyRun) => noiseRunFor(r, runs);
   const parts = [...new Set(allRuns.map(partOfRun))];
@@ -65,9 +73,9 @@ export function StudyScreen() {
           truncations.length > 1 ? (
             <span className="segmented" role="group" aria-label="Truncation rule">
               {truncations.map((x) => (
-                <button key={x} type="button" className="btn" aria-pressed={x === t} onClick={() => setTrunc(x)}>
+                <Button key={x} aria-pressed={x === t} onClick={() => setTrunc(x)}>
                   {x}
-                </button>
+                </Button>
               ))}
             </span>
           ) : undefined
@@ -113,10 +121,26 @@ export function StudyScreen() {
       ) : (
         <section className="sec" aria-label="Runs by study part">
           <Tabs tabs={PART_ORDER.map((p) => ({ id: p, label: PART_NAME[p], count: fmtInt(counts[p]) }))} value={part} onChange={setPartPick} label="Study part" idBase="st" inset />
-          <div className="tab-panel tab-enter" key={`${part}:${t}`} role="tabpanel" id={`st-panel-${part}`} aria-labelledby={`st-tab-${part}`}>
+          <div className="tab-panel tab-enter" key={`${part}:${t}:${rev}`} role="tabpanel" id={`st-panel-${part}`} aria-labelledby={`st-tab-${part}`}>
+            {part !== 'held-out' && runs.length > 0 && (
+              <p className="study-pilot-flag" role="note">
+                <strong>{part === 'pilot' ? 'Pilot' : 'Ad hoc'} runs on the dev scenarios: not final results.</strong> They test the pipeline and the protocol; the paper numbers come only from the held-out runs.
+              </p>
+            )}
             <p className="study-meta">
-              {PART_TEXT[part]} {fmtInt(runs.length)} run{runs.length === 1 ? '' : 's'} · truncation {t} · {data.excluded_fake_runs} FakeClient run{data.excluded_fake_runs === 1 ? '' : 's'} excluded · {data.incomplete_runs} incomplete
+              {PART_TEXT[part]} {fmtInt(runs.length)} run{runs.length === 1 ? '' : 's'} · prompt revision <span className="mono">{rev ?? '-'}</span>
+              {hidden > 0 && ` (${fmtInt(hidden)} run${hidden === 1 ? '' : 's'} of another revision hidden)`} · truncation {t} · {data.excluded_fake_runs} FakeClient run{data.excluded_fake_runs === 1 ? '' : 's'} excluded · {data.incomplete_runs} incomplete
             </p>
+            {revisions.length > 1 && (
+              <span className="segmented" role="group" aria-label="Prompt revision">
+                {revisions.map((x) => (
+                  <Button key={x} aria-pressed={x === rev} onClick={() => setRevPick(x)}>
+                    <span className="mono">{x}</span>
+                    {x === latestRevision(revisions) ? ' (latest)' : ''}
+                  </Button>
+                ))}
+              </span>
+            )}
             {runs.length === 0 ? (
               <div className="card study-empty">
                 <h2>No {PART_NAME[part].toLowerCase()} runs{truncations.length > 1 ? ` with truncation ${t}` : ''} yet</h2>

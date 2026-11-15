@@ -31,6 +31,7 @@ from pydantic import BaseModel, Field
 from app.api.auth import Role, hash_password
 from app.intel.attack import DEFAULT_STIX, AttackKB
 from app.outputs import analytics as an
+from app.study.revisions import run_revision
 
 NEW_PASSWORD_ENV = "SENTINEL_NEW_USER_PASSWORD"
 RUNS_DIR_ENV = "SENTINEL_RUNS_DIR"
@@ -80,7 +81,8 @@ def study_results(runs_dir: Path) -> dict[str, Any]:
                          "model_ids": model.get("model_ids"), "retrieval_mode": manifest.get("retrieval_mode"),
                          "cases": len(manifest.get("cases") or []), "matched_k": scores.get("matched_k"),
                          "arms": scores["arms"], "baselines": scores.get("baselines", {}),
-                         "note": scores.get("note"), "study_part": scores.get("study_part")})
+                         "note": scores.get("note"), "study_part": scores.get("study_part"),
+                         "prompt_revision": run_revision(d)})
     return {"runs": runs, "excluded_fake_runs": excluded_fake, "incomplete_runs": incomplete,
             "label": "dev scenarios, pilot numbers, not paper results"}
 

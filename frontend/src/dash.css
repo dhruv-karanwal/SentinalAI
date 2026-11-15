@@ -762,6 +762,21 @@ button.hbar:disabled {
   font-size: var(--fs-small);
   color: var(--text-faint);
 }
+.study-pilot-flag {
+  margin: 0 0 var(--sp-8);
+  padding-left: var(--sp-12);
+  border-left: var(--sp-2) solid var(--sev-medium);
+  font-size: var(--fs-small);
+  line-height: var(--lh-small);
+  color: var(--text-muted);
+}
+.study-pilot-flag strong {
+  color: var(--text);
+  font-weight: var(--fw-medium);
+}
+.tab-panel > .segmented {
+  margin: var(--sp-8) 0 var(--sp-12);
+}
 
 /* ---- print (executive view, report summary) -------------------------------------------------- */
 

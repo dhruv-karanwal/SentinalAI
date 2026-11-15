@@ -116,6 +116,8 @@ scripts/shots.mjs       DevTools-protocol screenshot runner (no dependency)
   output tokens, 429 when busy). Never test it against the real model while a pilot runs; screenshots
   of the online state use a fetch mock labelled MOCK FOR SCREENSHOT.
 - The chat's open state, size and last 40 messages are in `sessionStorage` (`sentinel.chat`).
+- Study shows one prompt revision per study part (`prompt_revision` from `/study/results`, latest by
+  `lib/study.ts` `latestRevision`, same order as the backend `study-stats`); never pool revisions in a chart.
 - Demo mode (`sentinel.demo`, on unless set to 0), the Overview detail tab (`sentinel.overview.tab`) and
   the collapsed rail (`sentinel.rail`) are also in `localStorage`.
 
