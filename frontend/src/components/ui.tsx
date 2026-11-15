@@ -223,7 +223,7 @@ export function ModelOffline() {
 
 export function SkeletonLines({ lines = 4 }: { lines?: number }) {
   return (
-    <div className="state" aria-busy="true" aria-label="Loading">
+    <div className="state" role="status" aria-busy="true" aria-label="Loading">
       {Array.from({ length: lines }, (_, i) => (
         <div key={i} className="skeleton-bar" style={{ width: `${[60, 85, 40, 70][i % 4]}%`, minWidth: 120 }} />
       ))}
@@ -246,14 +246,10 @@ export function Dialog({ title, onClose, children, footer }: { title: string; on
       className="dialog"
       aria-label={title}
       onClose={onClose}
-      onCancel={(e) => {
-        e.preventDefault();
-        onClose();
-      }}
     >
       <div className="dialog-head">
         <h2>{title}</h2>
-        <button type="button" className="copy-btn" onClick={onClose} aria-label="Close">
+        <button type="button" className="btn ghost icon-only" onClick={() => ref.current?.close()} aria-label="Close">
           <Icon name="close" />
         </button>
       </div>

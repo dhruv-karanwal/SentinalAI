@@ -37,10 +37,11 @@ export function epochSeconds(ts: string): number {
 /** Duration with units: "0 s", "42 s", "3 min 42 s", "1 h 02 min", "2 d 04 h". */
 export function fmtDuration(seconds: number): string {
   const s = Math.max(0, Math.round(seconds));
-  if (s < 60) return `${s} s`;
-  if (s < 3600) return `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, '0')} s`;
-  if (s < 86400) return `${Math.floor(s / 3600)} h ${String(Math.floor((s % 3600) / 60)).padStart(2, '0')} min`;
-  return `${Math.floor(s / 86400)} d ${String(Math.floor((s % 86400) / 3600)).padStart(2, '0')} h`;
+  // no-break spaces: a number and its unit stay on one line
+  if (s < 60) return `${s}\u00a0s`;
+  if (s < 3600) return `${Math.floor(s / 60)}\u00a0min ${String(s % 60).padStart(2, '0')}\u00a0s`;
+  if (s < 86400) return `${Math.floor(s / 3600)}\u00a0h ${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}\u00a0min`;
+  return `${Math.floor(s / 86400)}\u00a0d ${String(Math.floor((s % 86400) / 3600)).padStart(2, '0')}\u00a0h`;
 }
 
 /** Relative time for hover text: "12 s ago", "5 min ago", "3 h ago", "17 d ago", "4 y ago", "in 2 h". */

@@ -2395,3 +2395,36 @@ before React rendered the menu, so every `signin` step after the first failed; i
 
 Not checked: Users as admin, keyboard tab walk and the command palette by key, reduced motion, the
 help chat online state, Safari / Firefox, the 11,208-alert incident frame time (DESIGN.md 6 asks for it).
+
+### Wave H finish and review, 2026-11-15
+
+Two read-only reviewers ran on the full screenshot set (admin, 12 screens, dark + light at 1366 and
+390, interaction states) and on the source. Fixed (concrete defects on the demo path or cheap and safe):
+- Audit: rows overflowed at 390 px (fixed tracks 152 + 104 + 152 px); action column now flexible. Its
+  chart said "alerts per 3 h" for audit entries: `TimeBars` takes a `unit` (Audit passes `entries`).
+- Overview / Executive KPI context lines were cut with an ellipsis ("AMiner 4,..."): now wrap.
+- Durations broke between number and unit ("3,600 / s", "3 min 42 / s"): no-break spaces in
+  `fmtDuration` / `fmtStep` and the span-cap text; three test expectations updated.
+- Reports: summary printed raw `+00:00` / microsecond timestamps (now `isoUtc`); the narrow list shows
+  the last 8 characters of the incident id (full id in the title) instead of "inc-..." on every row.
+- Last x-axis date on time charts was clipped ("2022-01-2"): a tick near the right edge is end-aligned.
+- Sign in said "Six stages" while About says five: sign-in text no longer counts.
+- Accessibility: `Dialog` closes through the native dialog (focus returns to the opener; close button
+  is a `.btn ghost icon-only`); help chat keeps focus in the panel after Clear / chips / Send; the tour
+  returns focus to `#main` and has a text "Stop n of 6"; Findings input is `readOnly` while busy (was
+  `disabled`, which dropped focus); Executive bars `role="img"`; skeleton `role="status"`; Incidents
+  filter tags have "Remove the ... filter" names.
+- Checked, not a defect: sign-in light theme (the screenshot `theme` step presses `t`, which sign-in does
+  not handle; with `sentinel.theme=light` saved the page is light).
+
+Not fixed (recorded): phone-width layouts of Users (hand-made table, not `DataTable`), Alerts (table
+below facets and chart) and Approvals (segmented filter); Ask shows no question box until an incident
+id is typed; Audit "changes" vs "sign-ins" greys are close in light theme; incident tabs sit below the
+fold at 768 px height; live-region findings (chart tooltip, toasts, palette status, DataTable footer)
+need a real screen reader to confirm; incident-start markers are mouse-only; Overview legend dots vs
+chart triangles.
+
+Checks: frontend 78 tests, tsc clean, build ok; backend pytest + mypy clean. Screenshots: 62 files in
+`docs/ui/wave-h/` (0 console errors, no horizontal scroll and no overflowing table row at 1366 or
+390 px; chat online "Local model online: sentinel-qwen2.5-7b-32k" and offline "glossary answers only",
+the offline state made with a page-side fetch mock of `/copilot/*`).

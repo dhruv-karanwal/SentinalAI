@@ -610,7 +610,7 @@ export function App() {
             </div>
           </ScreenBoundary>
         </main>
-        {tour !== null && <TourPanel step={tour} onStep={setTour} onClose={() => setTour(null)} />}
+        {tour !== null && <TourPanel step={tour} onStep={setTour} onClose={() => (setTour(null), document.getElementById("main")?.focus())} />}
         <HelpChat path={route.path} screenName={current?.label ?? 'Unknown page'} incidentId={route.path === '/incidents' ? (route.params.id ?? null) : null} />
         <div className="toasts">
           {toasts.map((t) => (

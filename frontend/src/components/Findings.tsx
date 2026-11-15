@@ -207,7 +207,7 @@ export function AskForm({ incidentId, store }: { incidentId: string; store: AskS
           maxLength={2000}
           onChange={(e) => setQuestion(e.target.value)}
           aria-describedby={error ? `ask-err-${incidentId}` : undefined}
-          disabled={busy}
+          readOnly={busy}
         />
         {error && (
           <span className="field-error" id={`ask-err-${incidentId}`} role="alert">

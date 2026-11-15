@@ -46,15 +46,16 @@ export function AuditScreen({ route, searchRef }: Props) {
       {
         id: 'action',
         header: 'Action',
-        width: '152px',
+        width: 'minmax(0, 1fr)',
         sortKey: (e) => e.action,
+        title: (e) => e.action,
         render: (e) => (
           <span className="mono" style={e.action === 'denied' || e.action.endsWith('failed') || e.action.endsWith('refused') ? { fontWeight: 600 } : undefined}>
             {e.action}
           </span>
         ),
       },
-      { id: 'target', header: 'Target', width: 'minmax(0, 1fr)', sortKey: (e) => e.target, title: (e) => e.target ?? '', render: (e) => <span className="mono">{e.target ?? '-'}</span> },
+      { id: 'target', header: 'Target', width: 'minmax(0, 1.5fr)', sortKey: (e) => e.target, title: (e) => e.target ?? '', render: (e) => <span className="mono">{e.target ?? '-'}</span> },
     ],
     [],
   );
@@ -110,6 +111,7 @@ export function AuditScreen({ route, searchRef }: Props) {
             note={`${fmtInt(rows.length)} entries in bins of ${fmtDuration(activity.step)} (the newest 1,000 entries are loaded).`}
           >
             <TimeBars
+              unit="entries"
               series={Object.fromEntries(['write', 'sign-in', 'refused'].filter((k) => activity.series[k]).map((k) => [k, activity.series[k]!]))}
               start={activity.start}
               binSeconds={activity.step}

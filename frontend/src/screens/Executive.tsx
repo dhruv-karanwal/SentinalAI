@@ -214,6 +214,7 @@ function DayBars({ days }: { days: Array<{ day: string; High: number; Medium: nu
                   <g
                     key={d.day}
                     tabIndex={0}
+                    role="img"
                     aria-label={lines.join(', ')}
                     onPointerEnter={(e) => tip.show(e.currentTarget, lines)}
                     onPointerLeave={() => tip.hide()}

@@ -21,11 +21,11 @@ test('isoUtc prints UTC with seconds and keeps invalid input', () => {
 });
 
 test('fmtDuration always carries units', () => {
-  assert.equal(fmtDuration(0), '0 s');
-  assert.equal(fmtDuration(42), '42 s');
-  assert.equal(fmtDuration(222), '3 min 42 s');
-  assert.equal(fmtDuration(3720), '1 h 02 min');
-  assert.equal(fmtDuration(187200), '2 d 04 h');
+  assert.equal(fmtDuration(0), '0\u00a0s');
+  assert.equal(fmtDuration(42), '42\u00a0s');
+  assert.equal(fmtDuration(222), '3\u00a0min 42\u00a0s');
+  assert.equal(fmtDuration(3720), '1\u00a0h 02\u00a0min');
+  assert.equal(fmtDuration(187200), '2\u00a0d 04\u00a0h');
 });
 
 test('relTime past and future', () => {
@@ -154,5 +154,5 @@ test('fmtStep prints bin widths as short units', () => {
   assert.equal(fmtStep(3600), '1 h');
   assert.equal(fmtStep(10800), '3 h');
   assert.equal(fmtStep(86400 * 2), '2 d');
-  assert.equal(fmtStep(90), '1 min 30 s');
+  assert.equal(fmtStep(90), '1 min 30 s');
 });

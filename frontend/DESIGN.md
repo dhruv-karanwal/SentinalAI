@@ -199,6 +199,9 @@ Screens (each answers one question, stated in its header):
 | Audit | Who did what? | filters, activity chart, table |
 | Users, Settings | | forms in sections |
 
+Exempt from `PageHeader`: About (its hero is the header, section 7), the error page (a single
+message and a way back) and Sign in (no shell).
+
 Kept from earlier waves, restyled only: glossary and `<Term>`, the deterministic "What happened"
 sentence, folded alert repeats, distinct incident labels, data vs created dates, the six-stop tour,
 Professor demo mode, notifications, keyboard shortcuts (`j` / `k` / Enter / Esc / `/` / `?` / `g x` /

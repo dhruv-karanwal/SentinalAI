@@ -14,7 +14,7 @@ import { SplitPane } from '../components/SplitPane.tsx';
 import { Button, DefGrid, describeError, DetectorTag, detectorName, EmptyState, ErrorNotice, ErrorState, Id, PageHeader, SeverityCell, SkeletonLines, Tabs, Time, TruncatedText } from '../components/ui.tsx';
 import { Icon } from '../icons.tsx';
 import { useApp, useLoad, type Route } from '../hooks.ts';
-import { epochSeconds, fmtDuration, fmtInt } from '../lib/format.ts';
+import { epochSeconds, fmtDuration, fmtInt, isoUtc } from '../lib/format.ts';
 import { fitColumns, useNarrow } from '../components/narrow.ts';
 
 interface Props {
@@ -39,7 +39,7 @@ export function ReportsScreen({ route }: Props) {
       { id: 'created', header: 'Created (UTC, console)', width: '152px', sortKey: (r) => r.created_utc, render: (r) => <Time ts={r.created_utc} /> },
       { id: 'sev', header: 'Severity', width: '82px', render: (r) => <SeverityCell value={r.body.incident.severity} /> },
       { id: 'alerts', header: 'Alerts', width: '56px', align: 'right', sortKey: (r) => r.body.incident.alerts, render: (r) => fmtInt(r.body.incident.alerts) },
-      { id: 'incident', header: 'Incident', width: 'minmax(0, 1fr)', sortKey: (r) => r.incident_id, title: (r) => r.incident_id, render: (r) => <span className="mono">{r.incident_id}</span> },
+      { id: 'incident', header: 'Incident', width: 'minmax(0, 1fr)', sortKey: (r) => r.incident_id, title: (r) => r.incident_id, render: (r) => <span className="mono">…{r.incident_id.slice(-8)}</span> },
     ],
     [],
   );
@@ -351,13 +351,13 @@ function ReportPreview({ report }: { report: Report }) {
         <h3 className="block-title">Executive summary</h3>
         <p className="rp-summary">
           <SeverityCell value={b.incident.severity} /> incident <span className="mono">{b.incident.incident_id}</span> in {b.incident.scenario}: {fmtInt(b.incident.alerts)} alerts over{' '}
-          {fmtDuration(span)} ({b.incident.first_ts} to {b.incident.last_ts}, UTC), from {Object.keys(b.incident.detectors).length} detector
+          {fmtDuration(span)} ({isoUtc(b.incident.first_ts)} to {isoUtc(b.incident.last_ts)}, UTC), from {Object.keys(b.incident.detectors).length} detector
           {Object.keys(b.incident.detectors).length === 1 ? '' : 's'}, involving {fmtInt(b.incident.entities.length)} hosts and addresses.{' '}
           {b.techniques.length > 0 ? `Mapped ATT&CK techniques: ${b.techniques.map((t) => `${t.technique_id} (${fmtInt(t.alerts)})`).join(', ')}.` : 'No alert is mapped to ATT&CK.'}{' '}
           {b.recommendations.length > 0 ? `${b.recommendations.length} playbook suggestion${b.recommendations.length === 1 ? '' : 's'}; nothing runs without an approved request.` : ''}
         </p>
         <p className="quiet-note">
-          Report {report.report_id}, created {report.created_utc}. Platform output on replayed demo data; no labels.
+          Report {report.report_id}, created {isoUtc(report.created_utc)}. Platform output on replayed demo data; no labels.
         </p>
       </div>
       {!c ? (

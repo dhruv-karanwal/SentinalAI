@@ -318,9 +318,7 @@ a.kpi:hover {
   font-size: var(--fs-small);
   line-height: var(--lh-small);
   color: var(--text-faint);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 /* ---- definition grid: key facts as label over value --------------------------------------- */

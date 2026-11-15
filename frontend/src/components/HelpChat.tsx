@@ -104,6 +104,7 @@ export function HelpChat({ path, screenName, incidentId }: { path: string; scree
   };
 
   const ask = async (raw: string) => {
+    input.current?.focus(); // the chip or Send button that started this disables itself
     const question = raw.trim().slice(0, 500);
     if (!question || busy) return;
     setText('');
@@ -219,7 +220,7 @@ export function HelpChat({ path, screenName, incidentId }: { path: string; scree
               </span>
             </div>
             <span className="spacer" />
-            <button type="button" className="btn ghost icon-only" onClick={() => dispatch({ type: 'clear' })} aria-label="Clear the conversation" title="Clear" disabled={state.msgs.length === 0}>
+            <button type="button" className="btn ghost icon-only" onClick={() => (dispatch({ type: 'clear' }), input.current?.focus())} aria-label="Clear the conversation" title="Clear" disabled={state.msgs.length === 0}>
               <Icon name="trash" />
             </button>
             <button type="button" className="btn ghost icon-only" onClick={() => dispatch({ type: 'wide' })} aria-label={state.wide ? 'Make the panel smaller' : 'Make the panel larger'} aria-pressed={state.wide} title="Resize">

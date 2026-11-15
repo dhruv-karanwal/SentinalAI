@@ -434,19 +434,19 @@ function IncidentDetail({
               Group by rule
             </Button>
             {activeRule && (
-              <button type="button" className="filter-tag" onClick={() => setRule(null)} title="Remove the rule filter">
+              <button type="button" className="filter-tag" onClick={() => setRule(null)} title="Remove the rule filter" aria-label={`Remove the rule filter ${activeRule.rule_id ?? ""}`}>
                 <span className="k">rule</span> <span className="mono">{activeRule.rule_id ?? '-'}</span>
                 <Icon name="close" />
               </button>
             )}
             {range && (
-              <button type="button" className="filter-tag" onClick={() => setRange(null)} title="Remove the time range filter">
+              <button type="button" className="filter-tag" onClick={() => setRange(null)} title="Remove the time range filter" aria-label="Remove the time range filter">
                 <span className="k">time range</span>
                 <Icon name="close" />
               </button>
             )}
             {node && (
-              <button type="button" className="filter-tag" onClick={() => setNode(null)} title="Remove the entity filter">
+              <button type="button" className="filter-tag" onClick={() => setNode(null)} title="Remove the entity filter" aria-label={`Remove the entity filter ${node.label}`}>
                 <span className="mono">{node.label}</span>
                 <Icon name="close" />
               </button>
@@ -874,7 +874,7 @@ function IncidentHeader({
   const inputs = s?.inputs;
   const triage = [
     `gap ${d.gap_seconds ?? '?'} s`,
-    d.max_span_seconds ? `span cap ${fmtInt(d.max_span_seconds)} s` : null,
+    d.max_span_seconds ? `span cap ${fmtInt(d.max_span_seconds)}\u00a0s` : null,
     d.segment && d.segment[1] > 1 ? `segment ${d.segment[0]} of ${d.segment[1]}` : null,
   ].filter(Boolean);
 

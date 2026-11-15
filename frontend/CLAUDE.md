@@ -135,6 +135,11 @@ scripts/shots.mjs       DevTools-protocol screenshot runner (no dependency)
   debounce; if a screen breaks after a scripted edit, reload once before debugging.
 - The facet sidebar styles every `button` as a full-width grid row; a `<Term>` "?" inside a facet or
   legend needs the reset in `base.css` (`.facet .term-q`).
+- `TimeBars` labels its y axis "<unit> per <bin>"; `unit` defaults to `alerts`, so a chart of anything
+  else (Audit: `entries`) must pass it. Durations from `fmtDuration` / `fmtStep` use no-break spaces
+  (` `) between number and unit; tests compare with that character.
+- `Dialog` closes through the native `<dialog>` (`ref.current.close()`, Esc), so the browser returns
+  focus to the opener; never unmount an open dialog directly.
 - Sign out sits in the user menu (`.user-btn`): `shots.mjs` opens the menu and waits a render before
   clicking it.
 - Below 700 px (`useNarrow`) list and detail stack and tables drop secondary columns; on Alerts the

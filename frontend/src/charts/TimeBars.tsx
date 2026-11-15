@@ -33,11 +33,13 @@ interface Props {
   /** colours and names for series that are not detectors (audit actions) */
   tones?: Record<string, Tone>;
   names?: Record<string, string>;
+  /** what one bar counts, for the y-axis label */
+  unit?: string;
 }
 
 const M = { left: 52, right: 10, top: 8, bottom: 34 };
 
-export function TimeBars({ series, start, binSeconds, log = false, height = 180, markers = [], selection = null, onSelect, onMarker, label, tones, names }: Props) {
+export function TimeBars({ series, start, binSeconds, log = false, height = 180, markers = [], selection = null, onSelect, onMarker, label, tones, names, unit = 'alerts' }: Props) {
   const [ref, size] = useElementSize<HTMLDivElement>();
   const tip = useTip();
   const [cursor, setCursor] = useState<number | null>(null);
@@ -153,7 +155,7 @@ export function TimeBars({ series, start, binSeconds, log = false, height = 180,
           </g>
         ))}
         <text x={12} y={M.top + plotH / 2} transform={`rotate(-90 12 ${M.top + plotH / 2})`} textAnchor="middle" className="axis-text">
-          {`alerts per ${fmtStep(binSeconds)}${log ? ' (log)' : ''}`}
+          {`${unit} per ${fmtStep(binSeconds)}${log ? ' (log)' : ''}`}
         </text>
         {totals.map((_, i) => {
           let acc = 0;
@@ -188,7 +190,8 @@ export function TimeBars({ series, start, binSeconds, log = false, height = 180,
         {xTicks.map((t) => (
           <g key={`x${t.t}`}>
             <line x1={x(t.t)} x2={x(t.t)} y1={M.top + plotH} y2={M.top + plotH + 4} stroke="var(--border-strong)" />
-            <text x={x(t.t)} y={height - 6} textAnchor="middle" className="axis-text">
+            {/* a tick near the right edge is right-aligned so its label is not clipped */}
+            <text x={x(t.t)} y={height - 6} textAnchor={x(t.t) > M.left + plotW - 40 ? 'end' : 'middle'} className="axis-text">
               {t.label}
             </text>
           </g>

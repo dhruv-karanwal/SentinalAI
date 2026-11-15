@@ -28,7 +28,10 @@ Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
   every screen, grouped rail, Ctrl+K command palette, About as a product page, phone layouts, style
   guard test. Frontend 78 tests, tsc clean, build ok; 12 screens x (dark, light, 390 px): 0 console
   errors, no horizontal scroll. Screenshots `docs/ui/wave-h/`. DESIGN.md rewritten.
-  Open: admin-only Users screen, keyboard walk, frame time on the 11,208-alert incident, PR to main.
+  2026-11-15 finish: two read-only reviews (visual, a11y), concrete defects fixed (Audit phone rows and
+  chart unit, KPI truncation, unit wrapping, report timestamps, dialog / chat / tour focus); list of
+  what was not fixed in `docs/session-notes.md`. Open: phone layouts of Users / Alerts / Approvals,
+  screen-reader check, frame time on the 11,208-alert incident.
 - Palette (`phase3/wave-g-palette`, 2026-11-13, user's go; pilot untouched): blue replaced by "warm
   graphite + phosphor lime" (tokens.css only; lime on logo, active nav, primary button, focus, chat
   button, links), warm grain instead of the blue grid, glows only on High and the chat button, PDF

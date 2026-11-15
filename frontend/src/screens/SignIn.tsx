@@ -126,7 +126,7 @@ export function SignIn({ onSignedIn, expired }: { onSignedIn: (session: Session)
       </section>
       <section className="login-art" aria-labelledby="pipe-title">
         <h2 id="pipe-title">From a replayed alert to a reviewed response</h2>
-        <p className="login-art-lede">Six stages, each one a part of the code. Findings cite the alerts they come from, and a second person approves every response action.</p>
+        <p className="login-art-lede">From replay to review, each step a part of the code. Findings cite the alerts they come from, and a second person approves every response action.</p>
         <Pipeline />
       </section>
     </main>
