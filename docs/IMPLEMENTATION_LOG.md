@@ -80,3 +80,11 @@ One entry per milestone of the product-finalization plan. Details and command ou
   ATT&CK bundle and bge-small (Windows).
 - Security: `auth.LoginLimiter` at `/auth/login`; `tests/test_security.py` (3); security notes list
   the tested controls. pytest 565 passed / 12 skipped; mypy clean (95 files).
+
+## 2026-11-15 — Milestone 10: end-to-end workflow
+
+- `tests/test_e2e_workflow.py` (2): the whole chain on the synthetic sample through the CLI and the API
+  (ingest-alerts, platform replay, sigma, ml-train, ml-score, POST /incidents/build, graph investigation,
+  report with the investigation, approval four eyes, execute once, audit), with id consistency checks;
+  and a failed investigation refused as report input. The model is a scripted FakeClient (plumbing).
+- `POST /reports` `investigation_id`; console "Write report with this investigation".

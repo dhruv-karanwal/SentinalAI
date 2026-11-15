@@ -639,7 +639,8 @@ export const api = {
 
   reports: (incident_id: string | null, signal?: AbortSignal) =>
     request<{ reports: Report[] }>('GET', `/reports${qs({ incident_id })}`, undefined, signal),
-  createReport: (incident_id: string) => request<{ report_id: string }>('POST', '/reports', { incident_id }),
+  createReport: (incident_id: string, investigation_id?: string) =>
+    request<{ report_id: string }>('POST', '/reports', { incident_id, investigation_id }),
 
   approvals: (signal?: AbortSignal) => request<{ approvals: Approval[] }>('GET', '/approvals', undefined, signal),
   requestApproval: (incident_id: string, action: { action_type: string; target?: string; note?: string }) =>

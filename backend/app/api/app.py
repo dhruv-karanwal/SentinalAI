@@ -150,6 +150,7 @@ class BuildBody(BaseModel):
 
 class ReportBody(BaseModel):
     incident_id: str = Field(min_length=1, max_length=200)
+    investigation_id: Optional[str] = Field(default=None, min_length=1, max_length=64)
 
 
 class ApprovalBody(BaseModel):
@@ -377,7 +378,31 @@ def create_app(services: Services, *, metrics: Any | None = None) -> FastAPI:
         inc = repo.get_incident(body.incident_id)
         if inc is None:
             raise HTTPException(404, "no such incident")
-        report = build_report(inc, _incident_alerts(inc))
+        findings = None
+        if body.investigation_id is not None:
+            from app.evaluation.metrics import Claim
+
+            inv = repo.get_investigation(body.investigation_id)
+            if inv is None:
+                raise HTTPException(404, "no such investigation")
+            if inv["incident_id"] != body.incident_id:
+                raise HTTPException(422, "the investigation belongs to another incident")
+            if inv["status"] != "completed" or not inv["result"]:
+                raise HTTPException(409, f"the investigation is {inv['status']}, not completed; "
+                                         "a failed run never feeds a report")
+            res = inv["result"]
+            findings = {"cited": res["conclusion"]["cited_alert_ids"],
+                        "claims": [Claim(record_id=o["record_id"], field=o["field"], value=o["value"],
+                                         kind=o["kind"]) for o in res["observed"]]}
+        report = build_report(inc, _incident_alerts(inc), findings=findings)
+        if body.investigation_id is not None and "findings" in report:
+            res = inv["result"]
+            report["findings"]["source"] = {
+                "investigation_id": body.investigation_id, "workflow": inv["workflow"],
+                "prompt_version": res["prompt_version"], "model_id": inv["model_id"],
+                "verdict": res["conclusion"]["verdict"],
+                "hypotheses": [h["summary"] for h in res["hypotheses"]],
+                "note": "agent output after the evidence verifier; hypotheses are unverified model text"}
         from app.outputs.analytics import fact_from_row, report_charts
 
         report["charts"] = report_charts(inc, sorted((fact_from_row(r) for r in repo.get_alerts(inc["alert_ids"])),
@@ -387,7 +412,8 @@ def create_app(services: Services, *, metrics: Any | None = None) -> FastAPI:
         services.objects.put(f"{key}.pdf", render_pdf(report), "application/pdf")
         services.objects.put(f"{key}.csv", render_csv(report).encode("utf-8"), "text/csv")
         repo.db.execute("UPDATE reports SET object_key = ? WHERE report_id = ?", (key, rid))
-        repo.audit(p.username, p.role.value, "report.create", rid, {"incident_id": body.incident_id})
+        repo.audit(p.username, p.role.value, "report.create", rid,
+                   {"incident_id": body.incident_id, "investigation_id": body.investigation_id})
         return {"report_id": rid, "incident_id": body.incident_id, "object_key": key,
                 "formats": ["json", "pdf", "csv"]}
 

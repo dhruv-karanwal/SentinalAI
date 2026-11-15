@@ -176,6 +176,25 @@ function InvestigationView({ id, onFinished, onOpenEvidence }: { id: string; onF
   }
   const res = inv.result;
   return (
+    <InvestigationBody inv={inv} res={res} now={now} error={error} onOpenEvidence={onOpenEvidence} />
+  );
+}
+
+function InvestigationBody({ inv, res, now, error, onOpenEvidence }: { inv: Inv; res: InvestigationResult | null; now: number; error: ApiError | null; onOpenEvidence: (alertId: string, needles: string[]) => void }) {
+  const { session, toast } = useApp();
+  const [writing, setWriting] = useState(false);
+  const writeReport = async () => {
+    setWriting(true);
+    try {
+      const r = await api.createReport(inv.incident_id, inv.investigation_id);
+      toast(`Report ${r.report_id} written with this investigation (open it in Reports).`);
+    } catch (err) {
+      toast(err instanceof ApiError ? describeError(err) : String(err), 'error');
+    } finally {
+      setWriting(false);
+    }
+  };
+  return (
     <div className="inv-view" aria-live="polite">
       <div className="block">
         <div className="block-title">
@@ -183,6 +202,13 @@ function InvestigationView({ id, onFinished, onOpenEvidence }: { id: string; onF
           <span className="meta">{inv.investigation_id}</span>
         </div>
         <p>{statusLine(inv, now)}</p>
+        {inv.status === 'completed' && can(session.role, 'report.create') && (
+          <div>
+            <Button icon="reports" disabled={writing} onClick={() => void writeReport()}>
+              {writing ? 'Writing report...' : 'Write report with this investigation'}
+            </Button>
+          </div>
+        )}
         {error && <ErrorNotice what="the latest status" error={error} />}
         <DefGrid
           items={[

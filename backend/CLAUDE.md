@@ -41,6 +41,9 @@
   leftover `running` rows become `interrupted` at API start), migration `0004_investigations.sql`.
   `services_from_env` builds a hybrid ATT&CK retriever only over an existing `SENTINEL_RAG_DIR/vectors.db`
   (`retriever_status` in `GET /copilot/status`). Tests: `tests/test_investigation.py` (FakeClient, inline executor).
+- `POST /reports` with `investigation_id` (2026-11-15): the investigation must belong to the incident (422) and be
+  `completed` (409 otherwise); its kept citations and observed claims are re-verified into `findings`, with
+  `findings.source` (id, workflow, prompt version, model, verdict, hypotheses marked unverified).
 - Wave D: `app/outputs/` (reports, playbooks, approvals, feedback_report, jira) and `agent/copilot.py`
   (in `TOOL_PATH_MODULES`). Routes: `POST /reports`, `GET /reports/{id}/download?format=json|pdf|csv`,
   `POST /approvals`, `GET /approvals`, `POST /approvals/{id}/decision`, `POST /approvals/{id}/execute`,
