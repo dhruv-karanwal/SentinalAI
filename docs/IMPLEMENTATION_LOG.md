@@ -71,3 +71,12 @@ One entry per milestone of the product-finalization plan. Details and command ou
   skipped; mypy clean; frontend 87/87.
 - Real-data check pending: re-run `triage` on russellmitchell / shaw (Windows) and read the strength
   distribution.
+
+## 2026-11-15 — Milestones 6-7: RAG evaluation detail, security controls
+
+- RAG: `rag/retriever.evaluate` adds per-query `outcome`, `outcomes` counts, MRR and latency (p50,
+  max); `rag-eval` prints them. RAG vs no-RAG is a config switch on both arms (`--no-retrieval`),
+  documented as exploratory in the methodology. No retrieval parameter changed. Real numbers need the
+  ATT&CK bundle and bge-small (Windows).
+- Security: `auth.LoginLimiter` at `/auth/login`; `tests/test_security.py` (3); security notes list
+  the tested controls. pytest 565 passed / 12 skipped; mypy clean (95 files).

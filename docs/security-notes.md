@@ -25,6 +25,12 @@ The code is the source of truth: `backend/app/api/auth.py` (roles, permissions, 
 - **TLS**: the API speaks plain HTTP on localhost. Anything beyond one machine needs a reverse proxy with TLS.
 - **Token revocation, refresh tokens, MFA, SSO**: none. A stolen token works until it expires (60 minutes).
 - **Brute-force protection**: there is no login rate limiting or account lockout. Failed logins are audited, not blocked.
+- **Tested controls (2026-11-15, `tests/test_security.py`, `tests/test_investigation.py`):** failed-login
+  limit per username (5 in 300 s -> 429, audited `login.limited`); SQL-injection strings in query
+  parameters, path ids and login bodies are plain data; log text reaches the model only as a JSON-escaped
+  tool result, the system prompt never changes, unknown tools (e.g. `approve_action`) are errors, agents
+  have read-only tools only, approvals are untouched by an investigation, and a claim the record does
+  not support is dropped by the verifier.
 - **Prompt injection through log lines**: alert evidence (raw log lines an attacker can influence) reaches the model as data. The tools are read-only and the verifier drops unsupported claims, but a crafted log line could still steer a verdict or a summary. This is a known open risk, not a solved one.
 - **Encryption at rest**: SQLite files, object storage and the PostgreSQL volume are unencrypted. Disk encryption is the host's job.
 - **Audit log integrity**: the log is a normal table; an admin with database access can change it. There is no hash chain and no external sink.

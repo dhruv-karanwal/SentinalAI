@@ -164,9 +164,11 @@ def _rag_eval(args: argparse.Namespace) -> int:
         cells = "  ".join(f"recall@{k} {res[f'recall@{k}']:.4f} ({res['hits'][f'@{k}']}/{res['queries']})"
                           for k in (1, 3, 5))
         extra = f" alpha {res['alpha']}" if res["alpha"] is not None else ""
-        print(f"  {mode:8s}{extra:10s} {cells}")
+        print(f"  {mode:8s}{extra:10s} {cells}  MRR {res['mrr']:.4f}  latency p50 "
+              f"{res['latency_ms']['p50']} ms max {res['latency_ms']['max']} ms")
+        print(f"  {'':18s} outcomes {res['outcomes']}")
     for i, q in enumerate(first["per_query"]):
-        ranks = "  ".join(f"{m} {results[m]['per_query'][i]['rank']}" for m in results)
+        ranks = "  ".join(f"{m} {results[m]['per_query'][i]['outcome']}" for m in results)
         print(f"  {q['id']} expected {q['expected']} ranks: {ranks}")
     args.output.parent.mkdir(parents=True, exist_ok=True)
     out = results if len(results) > 1 else first

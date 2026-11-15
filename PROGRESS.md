@@ -10,6 +10,10 @@ Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
   answered by the local model in 1.7 s, report PDF 29 KB. Study shows pilot rows of the latest prompt
   revision, labelled "not final results".
 
+## RAG evaluation + security controls (2026-11-15)
+- `rag-eval`: per-query outcomes, MRR, latency. Failed-login limit (429). Security tests for SQL and log
+  injection. pytest 565 passed, 12 skipped.
+
 ## C6 correlation reasons (2026-11-15)
 - Every newly built incident carries `detail.correlation` (why grouped, shared indicators, gaps, strength
   label); shown in the incident header. Rebuild incidents (`triage`) to add it to stored ones.

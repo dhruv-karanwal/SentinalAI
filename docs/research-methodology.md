@@ -332,6 +332,15 @@ selects one revision (`--prompt-version`, default the latest). History: m5-v2 (t
 m5-v3 (output cap), m5-v4 (claim `kind` line), m5-v5 (ATT&CK search for the single arm); graph
 wave-c-v1 -> wave-c-v2 (per-node repair). Failed pilots are kept (`results/PILOT_GATE.md`).
 
+**RAG versus no RAG (exploratory, not in the frozen family).** Because `search_attack` now reaches
+both arms through one switch, the effect of ATT&CK retrieval is measured by running the same dev cases
+twice with everything else equal: `run-matched ... --retrieval-mode hybrid` and `run-matched ...
+--no-retrieval` (the config hash differs only in `retrieval`, so they land in separate run directories,
+`study_part` "adhoc"). It is reported as exploratory dev material and never mixed into the pilot or
+held-out family. Retrieval quality itself is measured on the frozen relevance set (`rag-eval`:
+recall@1/3/5, MRR, per-query outcome `hit@k` / `related_only` / `miss` / `expected_not_in_kb`,
+latency). Historical baseline, measured 2026-11-10 (hybrid): recall@1/3/5 0.48 / 0.68 / 0.68.
+
 **Sequence.** `pilot-preflight` (cheap checks, `--smoke` one request) -> dev re-pilot -> gate ->
 `protocol-freeze` -> held-out phases i-iii -> `study-stats --part held-out` (paired bootstrap,
 Holm over the family in `experiments/config/statistics.json`) -> `export-paper-assets`.
