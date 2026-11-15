@@ -2428,3 +2428,20 @@ Checks: frontend 78 tests, tsc clean, build ok; backend pytest + mypy clean. Scr
 `docs/ui/wave-h/` (0 console errors, no horizontal scroll and no overflowing table row at 1366 or
 390 px; chat online "Local model online: sentinel-qwen2.5-7b-32k" and offline "glossary answers only",
 the offline state made with a page-side fetch mock of `/copilot/*`).
+
+## Stats prompt-version filter, 2026-11-15 (`phase3/stats-prompt-filter`)
+
+The pilot gate flagged that `study-stats --part pilot` and `export-paper-assets` read every pilot
+`scores.json`, so the 12 v1 runs (m5-v2 + wave-c-v1) and the 12 re-pilot runs (m5-v3 + wave-c-v2)
+pooled under the same case keys. New `app/study/revisions.py` (tests first, `tests/test_revisions.py`,
+9 tests): a run's revision is `<single>+<graph>` from `manifest.json` `prompt_versions` (`unknown`
+without one); `--prompt-version` on both commands takes the full label or one part; the default is the
+latest by numeric `-vN`; `all` keeps the old pooled behaviour. Any mix prints a WARNING to stderr; the
+export copies `manifest.json` next to `scores.json` into its temporary view and records
+`prompt_revision` + `prompt_revisions_present` in provenance.json and the README. No change to
+`case_rows`, scoring, run or agent code.
+
+Real pilot runs (read-only): the default warns "m5-v2+wave-c-v1 (12 runs), m5-v3+wave-c-v2 (12 runs);
+using the latest" and reproduces the hand-made v2 view of the gate review (H1 -0.43, p_holm 0.002;
+H8 0.50, p_holm 0.002). `--prompt-version m5-v2` gives the v1 numbers (H1 -0.43, p_holm 0.123).
+pytest 532 passed, 4 skipped; mypy clean (90 files).

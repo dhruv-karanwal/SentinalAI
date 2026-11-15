@@ -28,12 +28,14 @@ from __future__ import annotations
 
 import csv
 import json
-from collections.abc import Mapping, Sequence
+import sys
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from app.study.final_runs import case_rows
+from app.study.revisions import select_rows
 from app.study.stats import compare_family, load_statistics_config, paired_bootstrap
 
 REPO = Path(__file__).resolve().parents[3]
@@ -183,7 +185,10 @@ def _svg(summary: Sequence[Mapping[str, Any]], title: str, truncation: str, repe
 
 def export_paper_assets(runs_dir: str | Path, results_dir: str | Path, *,
                         statistics_config: str | Path = DEFAULT_STATISTICS,
-                        freeze_path: str | Path | None = None) -> list[str]:
+                        freeze_path: str | Path | None = None,
+                        prompt_version: str | None = None,
+                        on_warning: Callable[[str], None] | None = None) -> list[str]:
+    warn = on_warning or (lambda msg: print(f"WARNING: {msg}", file=sys.stderr))
     stats = load_statistics_config(statistics_config)
     raw = json.loads(Path(statistics_config).read_text(encoding="utf-8"))
     primary_t = str(raw.get("primary_truncation", "spread"))
@@ -195,6 +200,10 @@ def export_paper_assets(runs_dir: str | Path, results_dir: str | Path, *,
     for part, folder in PARTS.items():
         rows = case_rows(runs_dir, [part]) if Path(runs_dir).exists() else []
         label = LABELS[part]
+        # one prompt revision per part (default: the latest); see app/study/revisions.py
+        rows, choice = select_rows(rows, runs_dir, prompt_version)
+        if choice.warning:
+            warn(f"{label}: {choice.warning}")
         if not rows:
             readme_parts.append(f"## {label}\n\nno finished runs of this part were found in "
                                 f"`{Path(runs_dir).as_posix()}` when the exporter ran.\n")
@@ -228,12 +237,15 @@ def export_paper_assets(runs_dir: str | Path, results_dir: str | Path, *,
             "label": label, "generated_utc": datetime.now(timezone.utc).isoformat(),
             "runs_dir": Path(runs_dir).as_posix(), "run_ids": runs, "case_rows": len(rows),
             "statistics_config": Path(statistics_config).name, "freeze_sha256": freeze,
-            "primary": {"truncation": primary_t, "repeat": primary_r}}, indent=2) + "\n",
+            "primary": {"truncation": primary_t, "repeat": primary_r},
+            "prompt_revision": choice.chosen or "all",
+            "prompt_revisions_present": choice.present}, indent=2) + "\n",
             encoding="utf-8")
         written += [str(d / n) for n in ("per_case.csv", "summary.csv", "summary.tex", "comparisons.csv",
                                           "comparisons.tex", "coverage.svg", "provenance.json")]
         readme_parts.append(
-            f"## {label}\n\nFolder `{folder}/`: {len(runs)} runs, {len(rows)} case rows, "
+            f"## {label}\n\nFolder `{folder}/`: prompt revision {choice.chosen or 'all'}, "
+            f"{len(runs)} runs, {len(rows)} case rows, "
             f"{len({r['scenario'] for r in rows})} scenarios, truncations "
             f"{', '.join(sorted({r['truncation'] for r in rows}))}, repeats "
             f"{', '.join(str(x) for x in sorted({r['repeat'] for r in rows}))}.\n")
