@@ -10,6 +10,14 @@ Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
   answered by the local model in 1.7 s, report PDF 29 KB. Study shows pilot rows of the latest prompt
   revision, labelled "not final results".
 
+## Product readiness audit (2026-11-15, Milestone 1)
+- `docs/PRODUCT_READINESS_AUDIT.md` (status per feature, issues C1-C8, roadmap) and
+  `docs/IMPLEMENTATION_LOG.md`. No code changed. Cloud container: pytest 525 passed, 12 skipped;
+  mypy clean; frontend 80/80, typecheck + build ok; synthetic API walk as expected.
+- **Decision needed before the re-pilot (C1):** the single agent has no `search_attack` / note
+  tools, the graph has them, so single vs graph confounds architecture with RAG access.
+- Recommended first build milestone: product investigation route + workspace + synthetic e2e test.
+
 ## Pilot gate (2026-11-13): FAIL, held-out blocked
 - Dev pilot finished 12/12 runs (336 case runs). Gate review in `results/PILOT_GATE.md`.
 - Stop rule (> 20 % parse failures in any arm) tripped in 2 cells: russellmitchell aminer graph and
