@@ -40,6 +40,7 @@ PERMISSIONS: dict[str, frozenset[Role]] = {
     "approval.decide": frozenset({Role.MANAGER, Role.ADMIN}),
     "action.execute": frozenset({Role.MANAGER, Role.ADMIN}),
     "copilot.ask": frozenset({Role.ANALYST, Role.MANAGER, Role.ADMIN}),
+    "investigation.run": frozenset({Role.ANALYST, Role.MANAGER, Role.ADMIN}),
     "audit.read": frozenset({Role.MANAGER, Role.ADMIN}),
     "user.manage": frozenset({Role.ADMIN}),
 }
@@ -47,6 +48,38 @@ PERMISSIONS: dict[str, frozenset[Role]] = {
 
 class AuthError(Exception):
     pass
+
+
+class LoginLimiter:
+    """Failed-login limit per username (Milestone 7, 2026-11-15), in memory, one API process.
+
+    After ``max_failures`` failed logins within ``window_seconds`` the username is refused (429)
+    until the oldest failure leaves the window, even with the right password; a success clears it.
+    Per username, not per client address: the API sits behind a local proxy, so addresses say little.
+    """
+
+    def __init__(self, max_failures: int = 5, window_seconds: float = 300.0,
+                 clock: Any = None) -> None:
+        import time as _time
+
+        self.max_failures, self.window = max_failures, window_seconds
+        self.clock = clock or _time.monotonic
+        self._failures: dict[str, list[float]] = {}
+
+    def _recent(self, username: str) -> list[float]:
+        now = self.clock()
+        kept = [t for t in self._failures.get(username, []) if now - t < self.window]
+        self._failures[username] = kept
+        return kept
+
+    def blocked(self, username: str) -> bool:
+        return len(self._recent(username)) >= self.max_failures
+
+    def failed(self, username: str) -> None:
+        self._recent(username).append(self.clock())
+
+    def succeeded(self, username: str) -> None:
+        self._failures.pop(username, None)
 
 
 def jwt_secret() -> str:

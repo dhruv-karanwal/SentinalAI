@@ -1043,3 +1043,60 @@ button.cite:hover {
   display: flex;
   flex-direction: column;
 }
+
+/* ---- investigation workspace (C2) --------------------------------------------------------- */
+.inv-start {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-8) var(--sp-12);
+}
+.inv-runs {
+  display: grid;
+  gap: var(--sp-4);
+}
+.inv-run {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-4) var(--sp-8);
+  width: 100%;
+  padding: var(--sp-4) var(--sp-8);
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.inv-run[aria-pressed="true"] {
+  background: var(--selected);
+  border-color: var(--border-strong);
+}
+.inv-list,
+.inv-events {
+  display: grid;
+  gap: var(--sp-8);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.inv-steps {
+  display: grid;
+  gap: var(--sp-4);
+  padding-left: var(--sp-16);
+  list-style: decimal;
+}
+.inv-text {
+  margin: var(--sp-4) 0 0;
+  padding: var(--sp-8);
+  max-height: 240px;
+  overflow: auto;
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-s);
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.block-line {
+  display: block;
+}

@@ -87,7 +87,8 @@ class ToolError(Exception):
 
 class CaseToolkit:
     def __init__(self, alerts: Sequence[Alert], *, window_start: datetime, window_seconds: float,
-                 id_salt: str, page_size: int = 25, max_output_chars: int = 6_000):
+                 id_salt: str, page_size: int = 25, max_output_chars: int = 6_000,
+                 attack: Callable[[dict[str, Any]], str] | None = None):
         self._start = window_start.astimezone(timezone.utc)
         self._window_seconds = window_seconds
         self._page_size = page_size
@@ -102,7 +103,10 @@ class CaseToolkit:
         self._flat = {v["alert_id"]: flatten_record(v) for v in self._views}
         self._tools: dict[str, Callable[[Mapping[str, Any]], Any]] = {
             "list_alerts": self._list_alerts, "get_alert": self._get_alert,
-            "search_alerts": self._search_alerts, "get_raw_log": self._get_raw_log}
+            "search_alerts": self._search_alerts, "get_raw_log": self._get_raw_log,
+            "search_attack": self._search_attack}
+        # search_attack (C1, m5-v5): the graph's AttackSearchTool; ATT&CK KB content only
+        self._attack = attack
 
     # -- ids ---------------------------------------------------------------
     @staticmethod
@@ -201,7 +205,7 @@ class CaseToolkit:
         tool = self._tools.get(name)
         try:
             if tool is None:
-                raise ToolError(f"unknown tool {name!r}; available: {', '.join(TOOL_NAMES)}")
+                raise ToolError(f"unknown tool {name!r}; available: {', '.join(self.tool_names)}")
             if not isinstance(arguments, Mapping):
                 raise ToolError("arguments must be a JSON object")
             result = tool(arguments)
@@ -211,6 +215,16 @@ class CaseToolkit:
         if len(text) > self._max_chars:
             text = text[: self._max_chars] + f"\n[output truncated at {self._max_chars} characters]"
         return text
+
+    @property
+    def tool_names(self) -> tuple[str, ...]:
+        """Tools this toolkit answers: the four case tools plus search_attack (single agent, m5-v5)."""
+        return (*TOOL_NAMES, "search_attack")
+
+    def _search_attack(self, arguments: Mapping[str, Any]) -> Any:
+        if self._attack is None:
+            return {"techniques": [], "note": "ATT&CK retrieval is not available"}
+        return json.loads(self._attack(dict(arguments)))
 
     # -- tools -------------------------------------------------------------------
     @staticmethod

@@ -151,6 +151,7 @@ def test_run_pilot_cli_resumes_and_logs_progress(processed: Path, samples_dir: P
     common = ["--variants", "fused", "wazuh", "--truncations", "spread", "--limit", "1",
               "--processed-dir", str(processed), "--labels", str(labels), "--study-config", str(cfg),
               "--output-dir", str(tmp_path / "runs"), "--no-retrieval",
+              "--data-dir", str(tmp_path / "platform"),  # never the repo's data/platform
               "--fake-single", str(single), "--fake-graph", str(graph)]
     assert main(["run-pilot", "--dry-run", *common]) == 0
     out = capsys.readouterr().out

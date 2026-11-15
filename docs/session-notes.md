@@ -2501,3 +2501,15 @@ pytest 532 passed, 4 skipped; mypy clean (90 files).
 
   New run directories are expected (the config hash includes the prompt). Then re-gate on the m5-v4 runs
   only: `results/pilot_gate/*.py data/processed/runs m5-v4` and `study-stats --part pilot --prompt-version m5-v4`.
+
+## Product finalization, 2026-11-15 (`claude/amazing-edison-ns3q8m`)
+
+Milestones executed in the cloud container (code + synthetic sample only; no real data, model or Docker):
+audit (M1), C1 option a / m5-v5 + `pilot-preflight` (M2), investigations in the product (M3), Sigma
+coverage + ML comparison + operational ML scores (M4), correlation reasons (M5), RAG evaluation detail
+(M6), login limit + security tests (M7), end-to-end test + report from an investigation (M10).
+Final checks: pytest 567 passed, 12 skipped; mypy clean (95 files); frontend 87/87, typecheck, build ok;
+headless browser walk against the real API with a scripted stub model (scratchpad only, not committed),
+0 console errors. Details per milestone: `docs/IMPLEMENTATION_LOG.md`; status: `docs/PRODUCT_READINESS_REPORT.md`;
+Windows steps for everything pending: `docs/windows-guide.md`; report draft: `docs/final-report-draft.md`.
+Not done (blocked here): m5-v5 pilot and gate, real-data numbers, infra validation, freeze, held-out.

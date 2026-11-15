@@ -235,6 +235,81 @@ def incident_id(scenario: str, alert_ids: Iterable[str]) -> str:
     return "inc-" + hashlib.sha256(body.encode()).hexdigest()[:24]
 
 
+CONFIDENCE_NOTE = ("rule-based strength from the shared entities and gaps, not a calibrated probability; "
+                   "grouping uses exact host / source-IP matches only")
+
+
+def correlation(members: list[Alert], config: TriageConfig, segment: tuple[int, int] = (1, 1)
+                ) -> dict[str, Any]:
+    """Why these alerts are one incident (C6, 2026-11-15): the links grouping used, described.
+
+    A link joins two consecutive alerts (time order) that carry the same entity within that entity
+    kind's gap, exactly as :func:`group_alerts` does; this re-derives the links inside the segment.
+    Strength (a label, not a probability): ``strong`` when one source IP is on every alert;
+    ``weak`` when the alerts are tied only by a host and come from two or more source IPs (possibly
+    unrelated activity against one host); ``moderate`` otherwise; ``single alert`` for one.
+    """
+    n = len(members)
+    ents = [set(entities(a)) for a in members]
+    sources = sorted({e.split(":", 1)[1] for es in ents for e in es if e.startswith("ip:")})
+    carriers: dict[str, list[int]] = {}
+    for i, es in enumerate(ents):
+        for e in es:
+            carriers.setdefault(e, []).append(i)
+    links: list[tuple[str, float, bool]] = []
+    for e, idx in carriers.items():
+        kind = e.split(":", 1)[0]
+        limit = config.entity_gap_seconds.get(kind, config.gap_seconds)
+        for prev, cur in zip(idx, idx[1:]):
+            gap = (members[cur].timestamp - members[prev].timestamp).total_seconds()
+            if gap <= limit:
+                links.append((kind, gap, members[prev].detector != members[cur].detector))
+    linked_by = dict(sorted(Counter(k for k, _, _ in links).items()))
+    shared = sorted(({"entity": e, "alerts": len(idx)} for e, idx in carriers.items() if len(idx) >= 2),
+                    key=lambda r: str(r["entity"]))
+    on_all = [e for e, idx in carriers.items() if len(idx) == n]
+    max_gap = max((g for _, g, _ in links), default=None)
+    gap_text = f"; consecutive linked alerts are at most {max_gap:.0f} s apart (limit {config.gap_seconds} s)" \
+        if max_gap is not None else ""
+    if n == 1:
+        strength = "single alert"
+        reason = ("No host or source IP on this alert, so it is not correlated with others."
+                  if not ents[0] else "One alert: nothing to correlate.")
+    elif any(e.startswith("ip:") for e in on_all):
+        strength = "strong"
+        ip = next(e for e in sorted(on_all) if e.startswith("ip:")).split(":", 1)[1]
+        host = next((e.split(":", 1)[1] for e in sorted(on_all) if e.startswith("host:")), None)
+        reason = (f"All {n} alerts share source IP {ip}" + (f" and host {host}" if host else "")
+                  + gap_text + ".")
+    else:
+        host_e = max((e for e in carriers if e.startswith("host:")), key=lambda e: (len(carriers[e]), e),
+                     default=None)
+        host = host_e.split(":", 1)[1] if host_e else None
+        if "ip" not in linked_by and len(sources) >= 2:
+            strength = "weak"
+            apart = f", at most {max_gap:.0f} s apart" if max_gap is not None else ""
+            reason = (f"Linked only through host {host} ({len(links)} link{'s' if len(links) != 1 else ''}{apart}); "
+                      f"the alerts come from {len(sources)} different source IPs, so they may be unrelated "
+                      "activity against the same host.")
+        elif "ip" not in linked_by and not sources:
+            strength = "moderate"
+            reason = (f"Linked through host {host}{gap_text}; no source IP recorded, so a single attacker "
+                      "cannot be confirmed.")
+        else:
+            strength = "moderate"
+            reason = (f"Linked through {', '.join(f'{v} {k} link' + ('s' if v != 1 else '') for k, v in linked_by.items())}"
+                      f"{gap_text}; no single source IP is on every alert.")
+    if segment[1] > 1:
+        reason += (f" This is segment {segment[0]} of {segment[1]} of one longer chain "
+                   f"(span cap {config.max_span_seconds} s).")
+    return {"strength": strength, "reason": reason, "links": len(links), "linked_by": linked_by,
+            "shared_indicators": shared, "source_ips": sources,
+            "max_link_gap_seconds": max_gap, "gap_limit_seconds": config.gap_seconds,
+            "cross_detector_links": sum(1 for _, _, x in links if x),
+            "method": "union-find over exact host / source-IP matches within the gap",
+            "confidence_note": CONFIDENCE_NOTE}
+
+
 def build_incidents(alerts: Iterable[Alert], scenario: str, config: TriageConfig,
                     iocs: IocStore | None = None) -> list[dict[str, Any]]:
     kept: list[Alert] = []
@@ -263,6 +338,7 @@ def build_incidents(alerts: Iterable[Alert], scenario: str, config: TriageConfig
                 "max_span_seconds": config.max_span_seconds,
                 "entity_gap_seconds": dict(config.entity_gap_seconds),
                 "chain_id": chain, "segment": [k, n],
+                "correlation": correlation(members, config, (k, n)),
                 "detectors": dict(sorted(Counter(a.detector.value for a in members).items())),
                 "entities": sorted({e for a in members for e in entities(a)}),
                 "excluded_by_selection": excluded,

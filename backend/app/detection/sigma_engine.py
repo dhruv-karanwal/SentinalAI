@@ -355,6 +355,7 @@ class CompiledRule:
     log_type: str
     program: str | None  # service rules on syslog: the program tag they need
     matcher: Matcher
+    fields: tuple[str, ...] = ()  # fields the rule's conditions read (empty: keyword rule)
 
     def applies_to(self, event: LogEvent) -> bool:
         if event.log_type != self.log_type:
@@ -418,7 +419,8 @@ def compile_rule(rule: SigmaRule, path: str) -> CompiledRule:
         title=rule.title, level=str(rule.level) if rule.level else None,
         status=str(rule.status) if rule.status else None,
         tags=tuple(f"{t.namespace}.{t.name}" for t in rule.tags),
-        path=path, log_type=log_type, program=program, matcher=matcher)
+        path=path, log_type=log_type, program=program, matcher=matcher,
+        fields=tuple(sorted(fields_used)))
 
 
 def load_rules(repo_root: str | Path, subdirs: Iterable[str] = RULE_SUBDIRS) -> RuleSet:

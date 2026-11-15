@@ -1,6 +1,8 @@
 // Typed client for the SentinelAI API (backend/app/api/app.py), reached through the /api proxy.
 // The token lives in memory only (DESIGN.md section 7): a reload asks for sign-in again.
 
+import type { InvestigationStep } from './lib/investigation.ts';
+
 export type Role = 'analyst' | 'manager' | 'admin' | 'executive';
 
 export interface Session {
@@ -17,6 +19,7 @@ const PERMISSIONS: Record<string, readonly Role[]> = {
   'approval.decide': ['manager', 'admin'],
   'action.execute': ['manager', 'admin'],
   'copilot.ask': ['analyst', 'manager', 'admin'],
+  'investigation.run': ['analyst', 'manager', 'admin'],
   'audit.read': ['manager', 'admin'],
   'user.manage': ['admin'],
 };
@@ -107,6 +110,20 @@ export interface IncidentDetail {
   segment?: [number, number];
   severity_row?: string;
   timeline?: TimelineEntry[];
+  /** C6 (2026-11-15); absent on incidents built before it: rebuild to see it */
+  correlation?: {
+    strength: 'strong' | 'moderate' | 'weak' | 'single alert';
+    reason: string;
+    links: number;
+    linked_by: Record<string, number>;
+    shared_indicators: { entity: string; alerts: number }[];
+    source_ips: string[];
+    max_link_gap_seconds: number | null;
+    gap_limit_seconds: number;
+    cross_detector_links: number;
+    method: string;
+    confidence_note: string;
+  };
 }
 
 export interface Incident {
@@ -241,6 +258,58 @@ export interface DroppedClaim {
   kind: string;
   field: string;
   reason: string;
+}
+
+export interface InvestigationRow {
+  investigation_id: string;
+  incident_id: string;
+  workflow: 'single' | 'graph';
+  status: 'running' | 'completed' | 'failed' | 'interrupted';
+  requested_by: string;
+  model_id: string | null;
+  started_utc: string;
+  completed_utc: string | null;
+  error: string | null;
+}
+
+export interface InvestigationResult {
+  workflow: 'single' | 'graph';
+  status: string;
+  parse_status: string | null;
+  prompt_version: string;
+  error: string | null;
+  conclusion: { verdict: string | null; verified: boolean; cited_alert_ids: string[]; note: string };
+  observed: { record_id: string; kind: string; field: string; value: string }[];
+  detections: { alert_id: string; detector: string; rule_id: string | null; rule_name: string | null;
+    severity: number | null; techniques: string[] }[];
+  knowledge: { technique_id: string; name: string | null; tactics: string[]; excerpt: string | null;
+    retrieved_by: string[] }[];
+  hypotheses: { summary: string; status: string }[];
+  verification: { citations_kept: number; citations_dropped: number; claims_checked: number;
+    claims_kept: number; claims_dropped: number; dropped_citations: string[]; dropped_claims: DroppedClaim[] };
+  recommendations: { action_type: string; title: string; playbook: string | null; techniques: string[];
+    requires_approval: boolean }[];
+  steps: InvestigationStep[];
+  trace: string[];
+  notes: { n: number; agent: string; text: string; alert_ids: string[] }[];
+  id_map: Record<string, string>;
+  usage: { requests: number; tool_calls: number; repairs: number; input_tokens: number;
+    output_tokens: number; wall_seconds: number };
+  retrieval: boolean;
+  note: string;
+}
+
+export interface IncidentMl {
+  incident_id: string;
+  influences_severity: boolean;
+  note: string;
+  models: { model_version: string; model: string; kind: string; alerts: number; scored: number; flagged: number;
+    max_score: number; in_sample: boolean;
+    top: { alert_id: string; score: number; flag: boolean; explanation: Record<string, unknown> }[] }[];
+}
+
+export interface Investigation extends InvestigationRow {
+  result: InvestigationResult | null;
 }
 
 export interface CopilotAnswer {
@@ -570,7 +639,8 @@ export const api = {
 
   reports: (incident_id: string | null, signal?: AbortSignal) =>
     request<{ reports: Report[] }>('GET', `/reports${qs({ incident_id })}`, undefined, signal),
-  createReport: (incident_id: string) => request<{ report_id: string }>('POST', '/reports', { incident_id }),
+  createReport: (incident_id: string, investigation_id?: string) =>
+    request<{ report_id: string }>('POST', '/reports', { incident_id, investigation_id }),
 
   approvals: (signal?: AbortSignal) => request<{ approvals: Approval[] }>('GET', '/approvals', undefined, signal),
   requestApproval: (incident_id: string, action: { action_type: string; target?: string; note?: string }) =>
@@ -583,9 +653,19 @@ export const api = {
     request<ExplainAnswer>('POST', '/copilot/ask', { mode: 'explain', ...body, incident_id: body.incident_id || undefined }),
   /** cheap model reachability probe (lists models, never generates) */
   copilotStatus: (signal?: AbortSignal) =>
-    request<{ state: 'online' | 'offline' | 'busy'; model: string | null; reason?: string }>('GET', '/copilot/status', undefined, signal),
+    request<{ state: 'online' | 'offline' | 'busy'; model: string | null; reason?: string; retrieval?: string }>('GET', '/copilot/status', undefined, signal),
   alertRuns: (scenario: string, f: AlertFilter, limit: number, offset: number, signal?: AbortSignal) =>
     request<{ runs: AlertRun[]; total_runs: number; total_alerts: number; offset: number }>('GET', `/alerts/runs${qs({ scenario, ...f, limit, offset })}`, undefined, signal),
+  startInvestigation: (incident_id: string, workflow: 'single' | 'graph') =>
+    request<{ investigation_id: string; status: string; workflow: string }>(
+      'POST', `/incidents/${encodeURIComponent(incident_id)}/investigations`, { workflow }),
+  incidentMl: (incident_id: string, signal?: AbortSignal) =>
+    request<IncidentMl>('GET', `/incidents/${encodeURIComponent(incident_id)}/ml`, undefined, signal),
+  investigations: (incident_id: string, signal?: AbortSignal) =>
+    request<{ investigations: InvestigationRow[] }>(
+      'GET', `/incidents/${encodeURIComponent(incident_id)}/investigations`, undefined, signal),
+  investigation: (id: string, signal?: AbortSignal) =>
+    request<Investigation>('GET', `/investigations/${encodeURIComponent(id)}`, undefined, signal),
   ask: (incident_id: string, question: string) => request<CopilotAnswer>('POST', '/copilot/ask', { incident_id, question }),
   audit: (signal?: AbortSignal) => request<{ entries: AuditEntry[] }>('GET', '/audit?limit=1000', undefined, signal),
   overview: (scenario: string, signal?: AbortSignal) => request<Overview>('GET', `/overview${qs({ scenario })}`, undefined, signal),

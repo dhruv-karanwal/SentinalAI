@@ -176,3 +176,28 @@ as fallback); `app/study/baselines.py` holds the deterministic citers that
 `dev_case_report` scores on every variant (`baselines` section of
 `<scenario>.case_ceilings.json`); `app.study.baselines` imports
 `app.study.cases` for types only.
+
+# Phase 3 — Product integration (2026-11-15)
+
+End-to-end chain, all through the API and the stores (proved by `tests/test_e2e_workflow.py`):
+
+```
+AIT-ADS files -> ingest-alerts -> replay collector -> stream -> consumer -> core store  (labels: truth area only)
+   -> detection: Wazuh / Suricata / AMiner (recorded), Sigma over evidence lines (coverage funnel),
+                 ML bundle scores (ml_scores; never changes severity)
+   -> triage + correlation: union-find over host / source IP within the gap; detail.correlation says why
+   -> investigation (POST /incidents/{id}/investigations): single agent (m5-v5) or LangGraph graph
+      (wave-c-v2); tools read-only; ATT&CK search for both; steps + verifier result persisted
+   -> evidence verifier (deterministic) -> report (JSON / CSV / PDF; may carry a completed investigation)
+   -> approval (four eyes) -> simulated execution once -> audit log
+```
+
+- Investigations: `agent/investigation.py` builds a layered result (observed facts = verified claims,
+  detections of kept alerts, ATT&CK knowledge retrieved, hypotheses = unverified model text,
+  conclusion after the verifier, playbook recommendations from verified evidence only). One running per
+  incident; one model job at a time (shared with the help chat); worker thread; restart marks leftovers
+  interrupted. Migration 0004.
+- ML in the platform: `detection/ml_model.py` (versioned bundle, sha256 check before unpickling,
+  in-sample flag), migration 0005, `GET /incidents/{id}/ml`.
+- Security boundary: agents have no write tool; approvals and execution exist only on human-only API
+  routes with RBAC; failed-login limit; log text reaches models only as JSON-escaped tool output.

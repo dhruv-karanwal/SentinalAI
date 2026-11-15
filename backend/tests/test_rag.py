@@ -227,3 +227,39 @@ def test_hybrid_query_without_lexical_match_and_chunk_ids(kb: AttackKB) -> None:
             c = chunks[h["chunk_id"]]
             assert c.technique_id == h["technique_id"] and c.text == h["text"]
     assert AttackRetriever(store, HashEmbedder(), mode="lexical", kb=kb).search("zzqx qqvv", 3) == []
+
+
+# ---------------------------------------------------------------- failure analysis (2026-11-15)
+
+class _Fixed:
+    """Stub retriever with fixed answers per query text (failure classes only, no embedding)."""
+
+    def __init__(self, answers: dict[str, list[str]]) -> None:
+        self.answers = answers
+
+    def search(self, text: str, k: int = 5) -> list[dict[str, Any]]:
+        return [{"technique_id": t} for t in self.answers[text]][:k]
+
+
+def test_evaluate_classifies_every_miss_and_reports_mrr_and_latency() -> None:
+    from app.rag.retriever import evaluate
+    rel = {"name": "t", "queries": [
+        {"id": "q1", "text": "a", "expected": ["T1110"]},
+        {"id": "q2", "text": "b", "expected": ["T1110.001"]},
+        {"id": "q3", "text": "c", "expected": ["T1046"]},
+        {"id": "q4", "text": "d", "expected": ["T1190"]},
+        {"id": "q5", "text": "e", "expected": ["T9999"]},
+    ]}
+    r = _Fixed({"a": ["T1110"], "b": ["T1110"], "c": ["T1", "T2", "T3", "T4", "T5"],
+                "d": ["T1", "T2", "T1190"], "e": ["T1"]})
+    kb = type("KB", (), {"get": staticmethod(lambda t: None if t == "T9999" else object())})()
+    res = evaluate(r, rel, kb)  # type: ignore[arg-type]
+    by = {p["id"]: p for p in res["per_query"]}
+    assert by["q1"]["outcome"] == "hit@1"
+    assert by["q2"]["outcome"] == "related_only"  # parent of the expected sub-technique
+    assert by["q3"]["outcome"] == "miss"
+    assert by["q4"]["outcome"] == "hit@3"
+    assert by["q5"]["outcome"] == "expected_not_in_kb"
+    assert res["outcomes"] == {"expected_not_in_kb": 1, "hit@1": 1, "hit@3": 1, "miss": 1, "related_only": 1}
+    assert res["mrr"] == round((1 + 1 / 3) / 5, 4)
+    assert res["latency_ms"]["p50"] >= 0 and set(res["latency_ms"]) == {"p50", "max"}

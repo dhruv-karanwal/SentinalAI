@@ -31,6 +31,7 @@ from pydantic import BaseModel, Field
 
 from app.api.auth import (
     AuthError,
+    LoginLimiter,
     Role,
     allowed,
     decode_token,
@@ -71,6 +72,7 @@ def services_from_env() -> Services:
     else:
         objects = LocalObjectStore(data_dir / "objects")
     services = Services(Repository(db), index, objects, jwt_secret())
+    services.extras["retriever"], services.extras["retriever_status"] = _attack_retriever()
     if os.environ.get("SENTINEL_LLM_BASE_URL") and os.environ.get("SENTINEL_LLM_MODEL"):
         from app.agent.client import OpenAICompatibleClient
         from app.agent.config import api_key, load_agent_settings
@@ -92,6 +94,34 @@ def services_from_env() -> Services:
 
         services.extras["model_probe"] = _probe
     return services
+
+
+def _attack_retriever() -> tuple[Any, str]:
+    """ATT&CK search for product investigations: hybrid over an existing index only.
+
+    ``SENTINEL_RAG_DIR`` (default ``data/platform``) must already hold ``vectors.db`` from
+    ``rag-index``; this never creates or fills an index and never downloads a model. Any problem
+    leaves retrieval off, and the reason is shown on the System health status.
+    """
+    rag_dir = Path(os.environ.get("SENTINEL_RAG_DIR", REPO_ROOT / "data" / "platform"))
+    stix = REPO_ROOT / "data" / "raw" / "mitre" / "enterprise-attack.json"
+    if not os.environ.get("SENTINEL_DB_URL") and not (rag_dir / "vectors.db").exists():
+        return None, f"off: no ATT&CK index in {rag_dir.name}/ (run rag-index)"
+    if not stix.exists():
+        return None, "off: ATT&CK bundle not present in data/raw/mitre"
+    try:
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+        os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+        from app.intel.attack import AttackKB
+        from app.rag.embedding import DIM, FastEmbedEmbedder
+        from app.rag.retriever import AttackRetriever
+        from app.rag.vector_store import open_vector_store
+
+        retriever = AttackRetriever(open_vector_store(rag_dir, DIM), FastEmbedEmbedder(),
+                                    mode="hybrid", kb=AttackKB.from_stix(stix))
+        return retriever, "on: hybrid (BM25 + bge-small), local index"
+    except Exception as exc:  # missing embedding cache etc.: run without ATT&CK search
+        return None, f"off: {type(exc).__name__}: {str(exc)[:160]}"
 
 
 class LoginBody(BaseModel):
@@ -120,6 +150,7 @@ class BuildBody(BaseModel):
 
 class ReportBody(BaseModel):
     incident_id: str = Field(min_length=1, max_length=200)
+    investigation_id: Optional[str] = Field(default=None, min_length=1, max_length=64)
 
 
 class ApprovalBody(BaseModel):
@@ -193,6 +224,9 @@ def create_app(services: Services, *, metrics: Any | None = None) -> FastAPI:
     from app.api.console import add_console_routes
 
     add_console_routes(app, repo, services.index, services.extras, need)
+    from app.api.investigations import add_investigation_routes
+
+    add_investigation_routes(app, services, need)
 
     @app.middleware("http")
     async def _timing(request: Request, call_next: Callable[..., Any]) -> Any:
@@ -210,10 +244,16 @@ def create_app(services: Services, *, metrics: Any | None = None) -> FastAPI:
 
     @app.post("/auth/login")
     def login(body: LoginBody) -> dict[str, Any]:
+        limiter = services.extras.setdefault("login_limiter", LoginLimiter())
+        if limiter.blocked(body.username):
+            repo.audit(body.username, "-", "login.limited", None, {})
+            raise HTTPException(429, "too many failed logins for this user; wait a few minutes")
         user = repo.get_user(body.username)
         if user is None or not verify_password(body.password, str(user["password_hash"])):
+            limiter.failed(body.username)
             repo.audit(body.username, "-", "login.failed", None, {})
             raise HTTPException(401, "invalid credentials")
+        limiter.succeeded(body.username)
         if user.get("disabled_utc"):
             repo.audit(body.username, "-", "login.refused", None, {"reason": "deactivated"})
             raise HTTPException(401, "account deactivated")
@@ -338,7 +378,32 @@ def create_app(services: Services, *, metrics: Any | None = None) -> FastAPI:
         inc = repo.get_incident(body.incident_id)
         if inc is None:
             raise HTTPException(404, "no such incident")
-        report = build_report(inc, _incident_alerts(inc))
+        findings = None
+        inv: Optional[dict[str, Any]] = None
+        if body.investigation_id is not None:
+            from app.evaluation.metrics import Claim
+
+            inv = repo.get_investigation(body.investigation_id)
+            if inv is None:
+                raise HTTPException(404, "no such investigation")
+            if inv["incident_id"] != body.incident_id:
+                raise HTTPException(422, "the investigation belongs to another incident")
+            if inv["status"] != "completed" or not inv["result"]:
+                raise HTTPException(409, f"the investigation is {inv['status']}, not completed; "
+                                         "a failed run never feeds a report")
+            res = inv["result"]
+            findings = {"cited": res["conclusion"]["cited_alert_ids"],
+                        "claims": [Claim(record_id=o["record_id"], field=o["field"], value=o["value"],
+                                         kind=o["kind"]) for o in res["observed"]]}
+        report = build_report(inc, _incident_alerts(inc), findings=findings)
+        if inv is not None and "findings" in report:
+            res = inv["result"]
+            report["findings"]["source"] = {
+                "investigation_id": body.investigation_id, "workflow": inv["workflow"],
+                "prompt_version": res["prompt_version"], "model_id": inv["model_id"],
+                "verdict": res["conclusion"]["verdict"],
+                "hypotheses": [h["summary"] for h in res["hypotheses"]],
+                "note": "agent output after the evidence verifier; hypotheses are unverified model text"}
         from app.outputs.analytics import fact_from_row, report_charts
 
         report["charts"] = report_charts(inc, sorted((fact_from_row(r) for r in repo.get_alerts(inc["alert_ids"])),
@@ -348,7 +413,8 @@ def create_app(services: Services, *, metrics: Any | None = None) -> FastAPI:
         services.objects.put(f"{key}.pdf", render_pdf(report), "application/pdf")
         services.objects.put(f"{key}.csv", render_csv(report).encode("utf-8"), "text/csv")
         repo.db.execute("UPDATE reports SET object_key = ? WHERE report_id = ?", (key, rid))
-        repo.audit(p.username, p.role.value, "report.create", rid, {"incident_id": body.incident_id})
+        repo.audit(p.username, p.role.value, "report.create", rid,
+                   {"incident_id": body.incident_id, "investigation_id": body.investigation_id})
         return {"report_id": rid, "incident_id": body.incident_id, "object_key": key,
                 "formats": ["json", "pdf", "csv"]}
 
@@ -460,13 +526,16 @@ def create_app(services: Services, *, metrics: Any | None = None) -> FastAPI:
         from app.api import explain as ex
 
         client = services.extras.get("copilot_client")
+        retrieval = services.extras.get("retriever_status") or (
+            "on" if services.extras.get("retriever") is not None else "off")
         if client is None:
-            return {"state": "offline", "model": None, "reason": "no model endpoint configured"}
+            return {"state": "offline", "model": None, "reason": "no model endpoint configured",
+                    "retrieval": retrieval}
         if ex.MODEL_LOCK.locked():
-            return {"state": "busy", "model": client.model_id}
+            return {"state": "busy", "model": client.model_id, "retrieval": retrieval}
         probe = services.extras.get("model_probe")
         ok = bool(probe()) if probe is not None else True
-        return {"state": "online" if ok else "offline", "model": client.model_id}
+        return {"state": "online" if ok else "offline", "model": client.model_id, "retrieval": retrieval}
 
     @app.post("/copilot/ask")
     def copilot_ask(body: CopilotBody,

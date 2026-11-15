@@ -208,6 +208,81 @@ class Repository:
     def set_incident_status(self, incident_id: str, status: str) -> None:
         self.db.execute("UPDATE incidents SET status = ? WHERE incident_id = ?", (status, incident_id))
 
+    # --- ML scores (C4) ---------------------------------------------------------------------
+    def put_ml_scores(self, model_version: str, rows: Sequence[dict[str, Any]]) -> int:
+        with self.db.transaction():
+            for r in rows:  # re-scoring with the same version replaces the row
+                self.db.execute("DELETE FROM ml_scores WHERE alert_id = ? AND model_version = ? AND model = ?",
+                                (r["alert_id"], model_version, r["model"]))
+                self.db.execute("INSERT INTO ml_scores (alert_id, model_version, model, score, flag, "
+                                "in_sample, explanation, scored_utc) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                                (r["alert_id"], model_version, r["model"], float(r["score"]),
+                                 int(bool(r["flag"])), int(bool(r["in_sample"])),
+                                 encode_json(r["explanation"]), r["scored_utc"]))
+        return len(rows)
+
+    def ml_scores(self, alert_ids: Sequence[str], chunk: int = 500) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        ids = list(alert_ids)
+        for i in range(0, len(ids), chunk):
+            part = ids[i:i + chunk]
+            rows = self.db.query("SELECT * FROM ml_scores WHERE alert_id IN (" + ",".join("?" * len(part))
+                                 + ") ORDER BY model_version, model, alert_id", part)
+            out.extend({**r, "flag": bool(r["flag"]), "in_sample": bool(r["in_sample"]),
+                        "explanation": decode_json(r["explanation"]), "scored_utc": str(r["scored_utc"])}
+                       for r in rows)
+        return out
+
+    # --- investigations (C2) -------------------------------------------------------------
+    def start_investigation(self, incident_id: str, workflow: str, requested_by: str,
+                            model_id: str | None) -> str:
+        """Insert a running investigation; ValueError if one is already running for the incident."""
+        investigation_id = f"inv-{uuid.uuid4().hex[:16]}"
+        with self.db.transaction():
+            running = self.db.query("SELECT investigation_id FROM investigations WHERE incident_id = ? "
+                                    "AND status = 'running'", (incident_id,))
+            if running:
+                raise ValueError(f"investigation {running[0]['investigation_id']} is already running "
+                                 "for this incident")
+            self.db.execute("INSERT INTO investigations (investigation_id, incident_id, workflow, status, "
+                            "requested_by, model_id, started_utc) VALUES (?, ?, ?, 'running', ?, ?, ?)",
+                            (investigation_id, incident_id, workflow, requested_by, model_id, utc_now()))
+        return investigation_id
+
+    def finish_investigation(self, investigation_id: str, status: str, result: dict[str, Any] | None,
+                             error: str | None) -> None:
+        self.db.execute("UPDATE investigations SET status = ?, result = ?, error = ?, completed_utc = ? "
+                        "WHERE investigation_id = ? AND status = 'running'",
+                        (status, None if result is None else encode_json(result), error, utc_now(),
+                         investigation_id))
+
+    def interrupt_running_investigations(self) -> int:
+        """At API start: a 'running' row from an earlier process can never finish."""
+        rows = self.db.query("SELECT investigation_id FROM investigations WHERE status = 'running'")
+        for r in rows:
+            self.finish_investigation(r["investigation_id"], "interrupted", None,
+                                      "the API process stopped while this investigation ran")
+        return len(rows)
+
+    @staticmethod
+    def _investigation_row(r: dict[str, Any]) -> dict[str, Any]:
+        return {**r, "result": None if r["result"] is None else decode_json(r["result"]),
+                "started_utc": str(r["started_utc"]),
+                "completed_utc": None if r["completed_utc"] is None else str(r["completed_utc"])}
+
+    def get_investigation(self, investigation_id: str) -> dict[str, Any] | None:
+        rows = self.db.query("SELECT * FROM investigations WHERE investigation_id = ?", (investigation_id,))
+        return self._investigation_row(rows[0]) if rows else None
+
+    def list_investigations(self, incident_id: str | None = None) -> list[dict[str, Any]]:
+        clause, params = (" WHERE incident_id = ?", (incident_id,)) if incident_id else ("", ())
+        rows = self.db.query(f"SELECT investigation_id, incident_id, workflow, status, requested_by, "
+                             f"model_id, started_utc, completed_utc, error FROM investigations{clause} "
+                             f"ORDER BY started_utc DESC", params)
+        return [{**r, "started_utc": str(r["started_utc"]),
+                 "completed_utc": None if r["completed_utc"] is None else str(r["completed_utc"])}
+                for r in rows]
+
     def put_report(self, incident_id: str, body: dict[str, Any],
                    object_key: str | None = None) -> str:
         report_id = f"rep-{uuid.uuid4().hex[:16]}"

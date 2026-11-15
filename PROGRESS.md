@@ -10,6 +10,51 @@ Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
   answered by the local model in 1.7 s, report PDF 29 KB. Study shows pilot rows of the latest prompt
   revision, labelled "not final results".
 
+## Finalization status (2026-11-15) — read this first
+- Product chain works end to end on synthetic data (automated test + browser walk); details in
+  `docs/PRODUCT_READINESS_REPORT.md`. pytest 567 passed, 12 skipped; mypy clean; frontend 87/87.
+- **Next, on Windows (`docs/windows-guide.md`):** pytest with data; `triage` / `sigma` / `ml-baselines` /
+  `ml-train` / `ml-score` / `rag-eval` for real numbers; `pilot-preflight --smoke`; m5-v5 dev re-pilot;
+  gate with `--prompt-version m5-v5`. Freeze and held-out only after a PASS and the user's go.
+- Branch `claude/amazing-edison-ns3q8m` is not merged (no PR, per the user's instruction).
+
+## RAG evaluation + security controls (2026-11-15)
+- `rag-eval`: per-query outcomes, MRR, latency. Failed-login limit (429). Security tests for SQL and log
+  injection. pytest 565 passed, 12 skipped.
+
+## C6 correlation reasons (2026-11-15)
+- Every newly built incident carries `detail.correlation` (why grouped, shared indicators, gaps, strength
+  label); shown in the incident header. Rebuild incidents (`triage`) to add it to stored ones.
+
+## C4 / C5 detection (2026-11-15, code; real-data numbers pending on Windows)
+- Sigma: per-rule coverage funnel in the `sigma` report and CLI; per-rule usefulness (attack event_label
+  share of hits) in the dev baseline file.
+- ML: `ml-baselines` adds a four-model comparison (+ logistic regression, random forest; PR-AUC, ROC-AUC,
+  FPR, accuracy, timing) and a `no_host_counts` ablation; `ml-train` / `ml-score` put scores on stored
+  alerts (migration 0005), shown per incident, never used for severity.
+- pytest 553 passed, 12 skipped; mypy clean (95 files); frontend 87/87, build ok.
+
+## C2 resolved: investigations in the product (2026-11-15)
+- Incidents > Investigate: start a single-agent or graph investigation; steps, supervisor route, ATT&CK
+  retrieved, verifier, unverified hypotheses and playbook recommendations are stored (migration 0004)
+  and shown. Copilot (one question) stays below it. Browser walk vs the real API + scripted stub model:
+  0 console errors, no horizontal scroll at 390 px, tabs fit at 1366 px.
+- pytest 544 passed, 12 skipped; mypy clean (93 files); frontend 86/86, typecheck + build ok.
+
+## C1 resolved, m5-v5 (2026-11-15, user's option a)
+- Single agent now has `search_attack` (same tool and retriever as the graph); prompt m5-v5, m5-v4 text
+  preserved. Shared notes stay graph-only (documented in `docs/research-methodology.md`).
+- New `pilot-preflight` (+ `--smoke`). Fixed a test that wrote into `data/platform/`; guard fixture added.
+- pytest 535 passed, 12 skipped; mypy clean (91 files). **Next (Windows):** preflight, m5-v5 dev re-pilot, gate.
+
+## Product readiness audit (2026-11-15, Milestone 1)
+- `docs/PRODUCT_READINESS_AUDIT.md` (status per feature, issues C1-C8, roadmap) and
+  `docs/IMPLEMENTATION_LOG.md`. No code changed. Cloud container: pytest 525 passed, 12 skipped;
+  mypy clean; frontend 80/80, typecheck + build ok; synthetic API walk as expected.
+- **Decision needed before the re-pilot (C1):** the single agent has no `search_attack` / note
+  tools, the graph has them, so single vs graph confounds architecture with RAG access.
+- Recommended first build milestone: product investigation route + workspace + synthetic e2e test.
+
 ## Pilot gate (2026-11-13): FAIL, held-out blocked
 - Dev pilot finished 12/12 runs (336 case runs). Gate review in `results/PILOT_GATE.md`.
 - Stop rule (> 20 % parse failures in any arm) tripped in 2 cells: russellmitchell aminer graph and

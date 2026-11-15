@@ -138,19 +138,41 @@ def load_relevance_set(path: str | Path = DEFAULT_RELEVANCE_SET) -> dict[str, An
 
 def evaluate(retriever: AttackRetriever, relevance: dict[str, Any],
              kb: AttackKB | None = None) -> dict[str, Any]:
+    import time
+
     kmax = max(RECALL_KS)
     per_query = []
+    latencies: list[float] = []
     for q in relevance["queries"]:
         expected = set(q["expected"])
         unknown = sorted(e for e in expected if kb is not None and kb.get(e) is None)
+        t0 = time.perf_counter()
         got = [r["technique_id"] for r in retriever.search(q["text"], kmax)]
+        latencies.append((time.perf_counter() - t0) * 1000)
         rank = next((i + 1 for i, t in enumerate(got) if t in expected), None)
-        per_query.append({"id": q["id"], "rank": rank, "retrieved": got,
+        # why a query missed (2026-11-15): the failure list the audit asked for
+        if rank is not None:
+            outcome = f"hit@{rank}"
+        elif unknown and len(unknown) == len(expected):
+            outcome = "expected_not_in_kb"
+        elif any(g.split(".")[0] == e.split(".")[0] for g in got for e in expected):
+            outcome = "related_only"  # parent / sibling sub-technique retrieved, not the expected id
+        else:
+            outcome = "miss"
+        per_query.append({"id": q["id"], "rank": rank, "outcome": outcome, "retrieved": got,
                           "expected": sorted(expected), "expected_not_in_kb": unknown})
     n = len(per_query)
+    outcomes: dict[str, int] = {}
+    for p in per_query:
+        outcomes[p["outcome"]] = outcomes.get(p["outcome"], 0) + 1
+    ordered = sorted(latencies)
     recall = {f"recall@{k}": sum(1 for p in per_query if p["rank"] is not None and p["rank"] <= k) / n
               for k in RECALL_KS}
     return {"relevance_set": relevance.get("name"), "queries": n, **recall,
+            "mrr": round(sum(1 / p["rank"] for p in per_query if p["rank"]) / n, 4) if n else 0.0,
+            "outcomes": dict(sorted(outcomes.items())),
+            "latency_ms": {"p50": round(ordered[len(ordered) // 2], 2) if ordered else 0.0,
+                           "max": round(ordered[-1], 2) if ordered else 0.0},
             "hits": {f"@{k}": sum(1 for p in per_query if p["rank"] is not None and p["rank"] <= k)
                      for k in RECALL_KS},
             "per_query": per_query}

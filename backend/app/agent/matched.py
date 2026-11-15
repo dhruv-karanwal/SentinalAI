@@ -48,6 +48,7 @@ from app.agent.agent import CaseRun, conservative_tokens, investigate
 from app.agent.client import ChatClient
 from app.agent.config import AgentSettings
 from app.agent.graph import (
+    AGENT_TOOLS,
     AGENTS,
     GRAPH_PROMPT_VERSION,
     PROMPTS,
@@ -72,6 +73,12 @@ from app.study.cases import baseline_summaries, summarize_scores
 
 ARMS = ("single", "graph")
 SCORE_ROWS = ("single", "single+verifier", "graph", "graph+verifier")
+# C1 (2026-11-15, option a): both arms reach ATT&CK through the same AttackSearchTool; the shared
+# notes (recall_notes, search_notes) are the graph's architectural difference and stay graph-only.
+TOOL_ACCESS: dict[str, list[str]] = {
+    "single": ["list_alerts", "get_alert", "search_alerts", "get_raw_log", "search_attack"],
+    "graph": sorted({t for tools in AGENT_TOOLS.values() for t in tools}),
+}
 BUDGET_STATUSES = ("token_budget_exceeded", "tool_budget_exceeded")
 _SUMMARY_FIELDS = ("status", "parse_status", "verdict", "input_tokens", "output_tokens",
                    "usage_reported", "requests", "tool_calls", "repairs", "latency_seconds",
@@ -229,7 +236,8 @@ def run_matched(prep: PreparedRun, settings: AgentSettings, clients: dict[str, C
                 resumed.append(i)
                 continue
 
-        kit = _toolkit(prep, i, alerts, settings, f"{digest}:single")
+        kit = _toolkit(prep, i, alerts, settings, f"{digest}:single",
+                       AttackSearchTool(retriever) if retriever else None)
         single = investigate(clients["single"], kit, settings.agent, settings.model)
         checked = verify_answer(single.cited_alert_ids, single.claims, alerts)
         single_ver = {**checked.summary(), "dropped_citations": checked.dropped_citations,
@@ -302,6 +310,7 @@ def run_matched(prep: PreparedRun, settings: AgentSettings, clients: dict[str, C
         "agent_budgets_both_arms": asdict(settings.agent), "graph_settings": asdict(graph),
         "prompt_versions": {"single": PROMPT_VERSION, "graph": GRAPH_PROMPT_VERSION},
         "graph_agents": list(AGENTS), "graph_prompts_sha256": PROMPTS_SHA256,
+        "tool_access": TOOL_ACCESS,
         "graph_prompt_chars": {k: len(v) for k, v in PROMPTS.items()},
         "retrieval": retriever is not None, "retrieval_mode": retrieval,
         "estimate": estimate_matched(prep, settings, graph),

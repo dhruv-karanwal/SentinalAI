@@ -1,5 +1,5 @@
 // Incidents: the queue on the left (highest severity, open, most recent first), the selected
-// incident on the right: header, time strip, then alerts with their evidence, findings, response.
+// incident on the right: header, time strip, then alerts with their evidence, investigate (agents + copilot), response.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 
@@ -10,6 +10,7 @@ import { EntityGraph, type GraphNode } from '../charts/EntityGraph.tsx';
 import { DataTable, type Column } from '../components/DataTable.tsx';
 import { EvidencePane } from '../components/EvidencePane.tsx';
 import { AskForm, Finding, type AskStore } from '../components/Findings.tsx';
+import { InvestigationPanel } from '../components/Investigation.tsx';
 import { SplitPane } from '../components/SplitPane.tsx';
 import { TimeStrip, type TimeRange } from '../components/TimeStrip.tsx';
 import {
@@ -33,6 +34,7 @@ import {
 import { Term } from '../components/Term.tsx';
 import { useApp, useLoad, useScreenContext, type Route } from '../hooks.ts';
 import { incidentLabel, mainFromNodes, whatHappened } from '../lib/explain.ts';
+import { mlLine } from '../lib/investigation.ts';
 import { Icon } from '../icons.tsx';
 import { compareQueue, epochSeconds, fmtDuration, fmtInt, parseEntity } from '../lib/format.ts';
 import { fitColumns, useNarrow } from '../components/narrow.ts';
@@ -271,7 +273,7 @@ export function IncidentsScreen({ route, askStore, searchRef }: Props) {
 // ---- detail ----------------------------------------------------------------------------------
 
 type AlertRowT = TimelineEntry & { t: number };
-type Tab = 'alerts' | 'attack' | 'graph' | 'findings' | 'response';
+type Tab = 'alerts' | 'attack' | 'graph' | 'investigation' | 'response';
 
 interface RuleGroup {
   key: string;
@@ -401,7 +403,7 @@ function IncidentDetail({
     { id: 'alerts', label: 'Alerts and evidence', count: fmtInt(timeline.length) },
     { id: 'attack', label: 'ATT&CK lanes', count: analysis.data ? analysis.data.lanes.lanes.length : '...' },
     { id: 'graph', label: 'Entity graph', count: analysis.data ? fmtInt(analysis.data.graph.nodes_total) : '...' },
-    { id: 'findings', label: 'Findings', count: findings.length },
+    { id: 'investigation', label: 'Investigate', count: findings.length || undefined },
     { id: 'response', label: 'Response' },
   ];
   const panel = (id: Tab) => ({ role: 'tabpanel', id: `inc-panel-${id}`, 'aria-labelledby': `inc-tab-${id}` }) as const;
@@ -549,14 +551,18 @@ function IncidentDetail({
         </div>
       )}
 
-      {tab === 'findings' && (
-        <div className="tabpanel tab-enter" {...panel('findings')}>
+      {tab === 'investigation' && (
+        <div className="tabpanel tab-enter" {...panel('investigation')}>
+          <InvestigationPanel incidentId={incident.incident_id} onOpenEvidence={openEvidence} />
           <div className="block">
+            <div className="block-title">
+              Ask one question <span className="meta">copilot: the single agent answers one question; answers are kept for this session only</span>
+            </div>
             <AskForm incidentId={incident.incident_id} store={askStore} />
           </div>
           {findings.length === 0 && !askStore.modelOffline && (
             <EmptyState title="No findings for this incident in this session.">
-              Findings come from the copilot. Each cited alert is checked by the verifier; anything it drops is listed with the reason.
+              The copilot answers one question with the single agent. For a full investigation with every agent step stored, use the Investigation tab. Each cited alert is checked by the verifier; anything it drops is listed with the reason.
             </EmptyState>
           )}
           {findings.map((f) => (
@@ -970,6 +976,29 @@ function IncidentHeader({
               ),
             },
             {
+              label: 'Why these alerts are together',
+              value: d.correlation ? (
+                <span className="def-span">
+                  <span className="tag" data-tone={d.correlation.strength === 'weak' ? 'dropped' : d.correlation.strength === 'strong' ? 'approved' : 'pending'}>
+                    {d.correlation.strength}
+                  </span>{' '}
+                  {d.correlation.reason}
+                  {d.correlation.shared_indicators.length > 0 && (
+                    <span className="faint block-line">
+                      Shared: {d.correlation.shared_indicators.slice(0, 4).map((x) => `${x.entity} (${fmtInt(x.alerts)} alerts)`).join(', ')}
+                      {d.correlation.shared_indicators.length > 4 ? `, +${d.correlation.shared_indicators.length - 4} more` : ''}. Strength is a rule, not a probability.
+                    </span>
+                  )}
+                </span>
+              ) : (
+                <span className="faint">not recorded: this incident was built before correlation reasons existed; Build incidents again to add them.</span>
+              ),
+            },
+            {
+              label: 'ML detection (not used for severity)',
+              value: <MlSummary incidentId={incident.incident_id} />,
+            },
+            {
               label: 'Entities',
               value: (
                 <span className="def-span entity-list">
@@ -995,5 +1024,21 @@ function IncidentHeader({
         />
       </div>
     </header>
+  );
+}
+
+function MlSummary({ incidentId }: { incidentId: string }) {
+  const ml = useLoad((signal) => api.incidentMl(incidentId, signal), [incidentId]);
+  if (ml.loading && !ml.data) return <span className="faint">loading...</span>;
+  if (ml.error) return <span className="faint">not available ({ml.error.status || 'no answer'})</span>;
+  if (!ml.data || ml.data.models.length === 0) return <span className="faint">no scores (run ml-train, then ml-score for this scenario)</span>;
+  return (
+    <span className="def-span">
+      {ml.data.models.map((m) => (
+        <span key={`${m.model_version}-${m.model}`} className="block-line">
+          {mlLine(m)} <span className="faint">{m.model_version}</span>
+        </span>
+      ))}
+    </span>
   );
 }

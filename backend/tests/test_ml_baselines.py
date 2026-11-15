@@ -220,3 +220,33 @@ def test_ml_cli_refuses_held_out(tmp_path: Path) -> None:
 def test_matrix_is_float(tmp_path: Path) -> None:
     rows = fx.raw_features([mk("a", 0)])
     assert fx.FeatureEncoder.fit(rows).transform(rows).dtype == np.float64
+
+
+# ---------------------------------------------------------------- comparison (C4, 2026-11-15)
+
+def test_comparison_models_report_threshold_free_metrics_and_timing() -> None:
+    alerts, attack = synthetic_alerts()
+    labels = labels_for(alerts, attack)
+    res = ml.fit_and_score(alerts[:72], alerts[72:], labels, seed=7, models=ml.COMPARISON_MODELS)
+    assert set(res["models"]) == set(ml.COMPARISON_MODELS)
+    for name, m in res["models"].items():
+        ev = m["event_label"]
+        assert {"accuracy", "fpr", "pr_auc", "roc_auc", "tp", "fp", "fn", "tn"} <= set(ev), name
+        assert 0.0 <= ev["roc_auc"] <= 1.0
+        assert set(res["timing"][name]) == {"fit_seconds", "predict_seconds"}
+    # determinism of everything except wall-clock timing
+    again = ml.fit_and_score(alerts[:72], alerts[72:], labels, seed=7, models=ml.COMPARISON_MODELS)
+    assert again["models"] == res["models"]
+
+
+def test_default_output_is_unchanged_by_the_comparison() -> None:
+    alerts, attack = synthetic_alerts()
+    labels = labels_for(alerts, attack)
+    res = ml.fit_and_score(alerts[:72], alerts[72:], labels, seed=7)
+    assert "timing" not in res and set(res["models"]) == {"isolation_forest", "hist_gradient_boosting"}
+
+
+def test_no_host_counts_set_drops_only_the_rate_features() -> None:
+    assert ml.COMPARISON_FEATURE_SETS["no_host_counts"] == tuple(
+        f for f in EXPECTED_FEATURES if f not in ("host_count_60s", "host_count_600s"))
+    assert ml.COMPARISON_FEATURE_SETS["all"] == EXPECTED_FEATURES
