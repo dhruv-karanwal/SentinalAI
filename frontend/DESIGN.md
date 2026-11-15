@@ -1,637 +1,283 @@
-# DESIGN.md — SentinelAI analyst console
+# DESIGN.md — SentinelAI console design system
 
-Design spec for the Wave D dashboard. Written before any markup (2026-11-10). The UI design
-brief from the user is the authority; where the `ui-ux-pro-max` skill output disagrees with the
-brief, the brief wins (section 9 lists what was taken and what was rejected).
+The design authority for `frontend/`. Rewritten for wave H (2026-11-14, branch
+`phase3/wave-h-premium`); it replaces the layered v1 / v2 / explainable / motion / palette
+sections of the earlier file (history: `git log -- frontend/DESIGN.md`, `docs/session-notes.md`).
+Change this file in the same commit as a token or a base component.
 
-Keep this file and `frontend/CLAUDE.md` in step with the code: a token or component change is
-made here in the same commit.
+Quality bar: a console that would pass as a shipped product from a design-led company. The way
+there is restraint. Typography, spacing and alignment carry the design; colour is reserved for
+meaning; nothing moves unless the movement explains something.
 
-## 1. Users and tasks
+## 1. Audit of the wave G console (what was wrong)
 
-| Role (API role) | Task | What they need first |
-|---|---|---|
-| SOC analyst (`analyst`) | Triage the incident queue, open an incident, read the evidence, set status, request an action, ask the copilot | The highest-severity open incident; then its alerts, raw log lines and findings without leaving the page |
-| Manager (`manager`, `admin`) | Review pending approvals (four-eyes: cannot decide own request), decide with a reason, execute once, read the audit log | Pending approvals with requester, action, target and incident; the evidence behind the request |
-| Executive (`executive`) | Read incident status and reports. Read-only, no raw records (`read.raw` is not granted) | Open incidents by severity and status; report downloads |
+Source: the wave G screenshot set of every screen in both themes (`docs/ui/wave-g/`, taken from the
+same code as `main` at the start of this wave) and a read of the four stylesheets. The patterns that
+made the console read as generated:
 
-The UI shows only what the role may do. A control the role cannot use is not rendered (not
-disabled-and-mysterious); a 403 from the API is shown as an error state, never swallowed.
+| Pattern | Where it was |
+|---|---|
+| Grain / fine-line texture | every screen (fixed body background layer) |
+| Glass (translucent panels, `backdrop-filter`) | top bar, tour, toasts, chat panel; translucent blocks on Overview and About |
+| Decorative glow | primary button hover, chat button, Overview "look first" cards, About stage rings, High glyph |
+| Pulse (looping) | High severity glyph outside tables, chat button ring, About stage wave and packets |
+| Shimmer (looping) | every skeleton |
+| Hover tilt | About screen cards |
+| Count-up numbers | Overview status row, About hero counters |
+| Spring / overshoot easing | chat panel, floating layers |
+| More than one accent | lime (logo, nav, buttons, links, focus, chat) next to red, amber, green, teal, copper, rose; lime links inside data tables |
+| Mono caps kickers ("01 · THE PROBLEM") | About sections |
+| Centred hero cliches | About hero: big title, six ringed nodes, three counter cards, two buttons |
+| Cards inside cards | Overview "look first" cards inside a chart block; About counters inside the hero panel; Executive tiles inside sections |
+| Too many borders | Overview: every block boxed, plus boxed status cells, boxed legends; Incidents detail: six stacked bordered strips before the tabs; dashed "demo data" badge |
+| Uneven radii | 2 px controls, 4 px panes, 10-12 px About panels, round chat button, pill chips |
+| Inconsistent spacing | page padding 12 / 16 / 24 by screen; block gaps 8 / 12 / 16; About uses its own scale |
+| No page pattern | titles at four sizes and positions; Overview title shares a line with mono metadata; Incidents has no title row at all |
+| Stacked secondary detail | Overview: What / Why paragraphs under every chart, then "More detail" with five more charts; Incidents: summary, why-severity, entities, strip all above the tabs |
+| System fonts | Segoe UI / Consolas: no typographic identity; numbers in mono bold in the middle of sans text |
+| Flat navigation | twelve rail items in one list with no grouping; search and navigation are separate |
 
-## 2. Screens and information hierarchy
+Per screen:
 
-Shell on every screen: left rail (text labels with a 16 px icon: Incidents, Alerts, Approvals,
-Reports, Ask, Audit; Ask and Audit only for roles that may use them) and a slim top bar (data
-source selector with its stored alert count, user and role, density toggle, theme toggle,
-shortcut list, sign out). No breadcrumbs. Skip link to main content is the first tab stop.
+- **Sign in**: grain, boxed schematic of six bordered stages (borders on borders), lime button.
+- **About**: every pattern in the table except tables: kickers, ringed glowing nodes, looping packets,
+  counter cards in a panel, tilt cards, spring reveals, its own radii and spacing.
+- **Overview**: count-up, glowing cards with a coloured edge, four boxed status cells, What / Why
+  text under each chart, legend chips, a second page of charts under "More detail".
+- **Executive**: tiles in sections (card in card), mixed heading sizes, chart draw-in plus counters.
+- **Study**: banner + explainer + selector + empty state stacked with equal weight.
+- **Incidents**: no page title; detail header is six bordered strips; chips with borders for every
+  fact; pulsing High glyph in the header; 24 px rows with 12 px type feel cramped next to 13 px text.
+- **Alerts**: facet sidebar where every value is a full-width button row with a bar; three toolbars.
+- **Approvals / Reports / Audit / Users / Settings / Ask**: plain, but each has its own header layout,
+  button sizes (24 px) and paddings; forms use raised-fill inputs with strong borders everywhere.
+- **Chat**: 52 px lime button with a pulse ring and glow; glass panel that springs open.
 
-1. **Incidents** (landing page). Split pane.
-   - Left: incident table. Default sort: severity (High first), then status (open first), then
-     `last_ts` descending; the top row is selected on load. Columns: severity, status, last seen
-     (UTC), alerts, duration, first entity (+n). The id, first seen and detectors are in the
-     detail (the list pane is about 590 px wide at 1366 px). Filters: severity buttons with
-     counts, status, text filter on id / host / IP.
-   - Right: incident detail for the selected row.
-     1. Header: severity, status control, id (copy), time range, alert count, triage gap used.
-     2. Time-axis strip (section 6).
-     3. Three tabs under the strip:
-        - **Alerts and evidence**: the incident's alerts (windowed table, sortable, filtered by
-          the strip's time range; "Group by rule" turns the 11,208-alert burst into a short
-          list of rules with counts). Selecting an alert opens its evidence *below* the table,
-          log lines first, then fields, so the list stays in view and the arrow keys walk
-          through evidence.
-        - **Findings**: the question box and the copilot's answers for this incident: cited
-          alert ids as links into the evidence, verified claims, and everything the verifier
-          dropped with its reason. Model offline state when no endpoint is configured.
-        - **Response**: the incident's report (created on request), ATT&CK techniques (native
-          ids and the fixed rule table only), playbook recommendations with "Request approval",
-          and the approval requests of this incident.
-   - Esc closes the evidence. Evidence is never a page navigation.
-2. **Alerts**. Split pane: alert table (time, detector, severity as the detector reports it,
-   rule id, rule name, host, source IP) with detector / host / time filters and full-text search
-   (`/alerts/search`); right: the evidence view of the selected alert.
-3. **Approvals**. Table: status, action, target, incident, requested by, requested at (UTC),
-   decided by, executed at. Detail pane: the request, the incident link, decision form (reason
-   required), execute button (approved only, once). States the executor is simulated.
-4. **Reports**. Table of reports; detail has three tabs (techniques and actions, timeline with
-   the evidence below the table, citations) and JSON / CSV / PDF downloads.
-5. **Ask** (copilot). The questions asked in this session (memory only) with their answers,
-   the same citation links and verifier markings as the Findings tab, evidence in a side
-   overlay. "Model offline" state when no endpoint is configured.
-6. **Audit** (manager, admin). Read-only table: time, user, role, action, target.
-7. **Sign in**. Username and password form; errors next to the field; no decoration.
+## 2. Principles
 
-v1 had no overview page. v2 (section 11) adds one, but it is a page of decision charts over
-the stored alerts and incidents, not stat cards: one compact status row, then charts that each
-link to a filtered table. Counts still also live where they are acted on.
+1. **Restraint.** No grain, scanline, glass blur, glow, pulse, tilt, gradient, gradient text or
+   count-up. An effect that carries no information is removed, not toned down.
+2. **Type carries the design.** One UI family and one mono family, six sizes, tabular numerals,
+   tight tracking on headings, sentence case everywhere (no upper-case labels).
+3. **One page pattern.** Title, the one question the screen answers, primary action on the right;
+   then sections with headers; secondary detail behind tabs or a disclosure, never stacked.
+4. **Colour means something.** Neutral surfaces; severity and detector identity are the only hues.
+   The accent is ink (section 3).
+5. **One of each.** One radius scale, one button hierarchy, one card, one table, one icon set.
+6. **Motion with purpose.** 150-250 ms, one curve, each animation once. Nothing loops.
 
-## 3. Tokens
-
-Tokens are CSS custom properties on `:root[data-theme="dark"]` (default) and
-`:root[data-theme="light"]`. Components use tokens only; no raw hex outside `tokens.css`.
+## 3. Tokens (`src/tokens.css`, the only file with raw colours and sizes)
 
 ### Colour
 
-Palette since wave G (2026-11-13): **warm graphite + phosphor lime** (section 14). The old
-blue palette is gone; `palette.test.ts` fails on any blue hue in `tokens.css`.
+Three elevation levels, `--bg` < `--surface` < `--raised`, plus `--selected`. Regions are separated
+by one hairline (`--border`); surfaces in the page flow have **no shadow**. The single shadow token
+`--shadow-overlay` is for floating layers only (menu, dialog, command palette, chat panel, toast);
+they keep the hairline too, because a shadow alone disappears on the dark theme.
 
 | Token | Dark | Light | Use |
 |---|---|---|---|
-| `--bg` | `#151311` | `#f3f0e8` | page (warm charcoal / warm paper) |
-| `--surface` | `#1d1a17` | `#fbf9f4` | panes, tables |
-| `--raised` | `#26221e` | `#ece8de` | row hover, table header, inputs |
-| `--selected` | `#322d26` | `#e7e1d1` | selected row (plus a 2 px accent bar at the row start) |
-| `--border` | `#3a352f` | `#d9d3c6` | 1 px hairlines between regions (separators, not controls) |
-| `--border-strong` | `#7d766b` | `#7a7266` | control outlines (inputs, buttons, toggles) |
-| `--text` | `#ece8df` | `#1b1815` | primary text (bone / ink) |
-| `--text-muted` | `#a39d91` | `#514b43` | secondary text, column headers |
-| `--text-faint` | `#9a9488` | `#625b52` | units, placeholders, timestamps' relative part |
-| `--accent` | `#c8f03c` | `#5f6400` | logo, active nav mark, primary action, focus ring, chat button, links. Nothing else |
-| `--on-accent` | `#151311` | `#ffffff` | text on a lime / olive fill |
-| `--sev-high` | `#ff6b57` | `#9b1036` | severity High (signal red); also destructive / error / dropped |
-| `--sev-medium` | `#e8a33a` | `#8a5a00` | severity Medium (amber) |
-| `--sev-low` | `#a39a8c` | `#5e574e` | severity Low (warm slate) |
-| `--verified` | `#46c46a` | `#0b6a4a` | verifier kept / verified (green, never the lime, apart from AMiner) |
-| `--det-wazuh` | `#f08a4b` | `#a3440a` | detector identity (copper, mid lightness) |
-| `--det-suricata` | `#f7b3d6` | `#6b1d49` | detector identity (rose; lightest in dark, darkest in light) |
-| `--det-aminer` | `#2fa89f` | `#04687a` | detector identity (sea green in dark, cyan in light) |
-| `--det-sigma` | `#a39d91` | `#625b52` | detector identity (neutral, hollow mark) |
-| `--heat-1..4` | `#2a2a1c` .. `#4b5b21` | `#ebead4` .. `#b8c76c` | heat cells, olive ramp, counts printed in the cell |
-| `--mark` | `#4a3d0c` | `#ffe58a` | highlighted matched span in a log line (plus an underline in `--sev-medium`) |
+| `--bg` | `#151311` | `#f3f0e8` | page |
+| `--surface` | `#1d1a17` | `#fbf9f4` | cards, panes, tables, inputs |
+| `--raised` | `#26221e` | `#ece8de` | hover, table header, skeleton |
+| `--selected` | `#322d26` | `#e7e1d1` | selected row, pressed toggle |
+| `--border` | `#332f2a` | `#ddd7ca` | hairlines (separation only) |
+| `--border-strong` | `#7d766b` | `#7a7266` | input outlines, hover outlines (>= 3:1) |
+| `--text` / `--text-muted` / `--text-faint` | `#ece8df` / `#a39d91` / `#9a9488` | `#1b1815` / `#514b43` / `#625b52` | text (all >= 4.5:1 on the four surfaces) |
+| `--accent` / `--on-accent` | `#f4f1ea` / `#151311` | `#1b1815` / `#fbf9f4` | primary button, focus ring, active tab / nav mark |
+| `--sev-high` / `-medium` / `-low` | `#ff6b57` / `#e8a33a` / `#a39a8c` | `#9b1036` / `#8a5a00` / `#5e574e` | severity; High also error / dropped |
+| `--verified`, `--online` | `#46c46a` | `#0b6a4a` | verifier kept; model reachable dot |
+| `--det-wazuh` / `-suricata` / `-aminer` / `-sigma` | `#f08a4b` / `#f7b3d6` / `#2fa89f` / `#a39d91` | `#a3440a` / `#6b1d49` / `#04687a` / `#625b52` | detector identity |
+| `--heat-1..4` | `#2b2723` .. `#5a5248` | `#e6e1d5` .. `#b3a893` | heat cells: a neutral ramp, the count is printed in every cell |
+| `--grid`, `--ref`, `--mark`, `--scrim` | | | gridlines, reference lines, matched span in a log line, dialog backdrop |
 
-Measured contrast (WCAG 2, computed 2026-11-13, asserted by `lib/charts.test.ts` for every text-like
-token on `--bg`, `--surface`, `--raised` and `--selected`): all text, accent, severity, verified and
-detector tokens >= 4.5:1 in both themes; `--on-accent` on `--accent` 14.1 dark, 6.1 light; `--text`
-on every heat step >= 4.5; `--border-strong` >= 3:1 on `--bg` and `--surface`. `--border` hairlines
-are low contrast by design: they separate regions and carry no information.
+**The accent decision.** Wave G used a phosphor lime. At small doses it still read as a second
+brand colour competing with six semantic hues (red, amber, green, teal, copper, rose), and its
+light-theme olive was muddy. Every free hue is either taken by a semantic colour or banned (blue,
+indigo, purple: the palette guard). The quiet accent is therefore **ink**: the highest-contrast
+neutral (bone on dark, near-black on light). Primary button = ink fill; focus ring = 2 px ink
+outline with 2 px offset; active tab and nav item = ink mark + medium weight on a raised fill;
+links = text colour with an underline. Result: any hue on screen is data.
 
-Colour-vision deficiency (measured, `lib/palette.test.ts`): the three detector hues are spread over
-lightness as well as hue, so after a Machado 2009 (severity 1) protanopia, deuteranopia or tritanopia
-simulation every pair stays >= 0.10 apart in OKLab in both themes (final minimum: 0.109
-dark under protanopia, 0.105 light under deuteranopia). Colour is still never the only carrier:
-
-**Never colour alone.**
-- Severity = glyph + word. High: three stacked bars filled; Medium: two of three; Low: one of
-  three (the `sev-*` icons), always followed by the word. It is the first column, so position
-  also carries it.
-- Detector = its own row in the strip (labelled) and a text label in tables. Sigma ticks are
-  hollow.
-- Verifier status = text tag ("dropped: quote not found in log line") and a strike or dashed
-  rule, not a colour change alone.
+**Never colour alone** (unchanged): severity = glyph + word; detector = mark + name (dash pattern
+on graph edges); verifier status = tag + text (strike or dashed rule for dropped). Detector and
+severity tokens keep the wave G values, so the measured contrast (>= 4.5:1 on the four surfaces,
+both themes) and colour-blind separation (Machado 2009 simulation, OKLab distance, `palette.test.ts`)
+still hold. PDF colours (`DETECTOR_PRINT` in `backend/app/outputs/reports.py`) mirror the light
+detector tokens.
 
 ### Type
 
-- Sans: `system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif`.
-- Mono: `ui-monospace, Consolas, Menlo, monospace`. Used for alert ids, incident ids, IPs, rule
-  ids, hashes, timestamps and every log line.
-- No web fonts, no font files.
-- Scale (px / line height): 11/16 (column headers, units; upper case not used), 12/16 (compact
-  table rows, tags), 13/20 (default body and comfortable rows), 14/20 (pane titles), 16/24
-  (screen title). Weights 400 and 600 only.
-- `font-variant-numeric: tabular-nums` on every numeric column and on timestamps.
+- UI: **Geist** (`"Geist Variable"`); data: **Geist Mono** (`"Geist Mono Variable"`). Both are
+  open-source (OFL), self-hosted through `@fontsource-variable/*` (imported in `main.tsx`, bundled by
+  Vite; no network font request). Mono is for ids, IPs, rule ids, hashes, timestamps and log lines,
+  not for ordinary numbers.
+- Scale (size / line height): `--fs-micro` 11/16 (column headers, units), `--fs-small` 12/16 (dense
+  rows, tags, meta), `--fs-body` 13/20 (body, controls), `--fs-title` 15/24 (section and pane
+  titles), `--fs-heading` 20/28 (page title, KPI value), `--fs-display` 32/40 (About hero only).
+  No other size.
+- Weights 400, 500 (controls, tabs, active items), 600 (headings, KPI values). Headings use
+  `--track-tight` (-0.02em). Micro labels use `--track-label` (0.04em) and stay sentence case.
+- `font-variant-numeric: tabular-nums` is set on `body`: every number is tabular.
 
-### Spacing, radius, elevation, motion
+### Space, radius, layout
 
-- Spacing scale: 2, 4, 8, 12, 16, 24 px. Nothing larger inside the app frame.
-- Row height: compact 24 px, comfortable 32 px (density toggle, stored per user in
-  `localStorage`). Fixed row heights are what the virtualiser relies on.
-- Radius: 2 px (tags, inputs, buttons), 4 px (panes, menus, dialog). Nothing rounder.
-- Borders: 1 px hairlines. Shadow: none, except one `0 1px 2px rgb(0 0 0 / 0.3)` on floating
-  layers (menu, dialog, toast).
-- Motion: 100 ms `ease-out` for hover, focus and pane open; nothing above 150 ms; no animated
-  counters; skeletons do not shimmer. `prefers-reduced-motion: reduce` sets all durations to 0.
-- Focus: 2 px `--accent` outline with 1 px offset on every focusable element; never removed.
-- Layout: rail 176 px (56 px below 1024 px), top bar 36 px, split per screen (Incidents
-  50 / 50, Alerts 60 / 40, Reports 34 / 66) with a draggable, keyboard-operable divider whose
-  position is remembered. Minimum supported width 1366 px with no horizontal scroll;
-  below 1024 px the detail pane takes the full width (no phone layout is promised).
+- Spacing: 4 / 8 scale `--sp-4, 8, 12, 16, 24, 32, 48, 64` (`--sp-2` only for optical gaps inside a
+  control). Card padding 16; gap between cards 16; gap between page sections 32; page gutter 24.
+- Radius: `--radius-s` 4 (buttons, inputs, tags), `--radius-m` 6 (cards, panes), `--radius-l` 10
+  (overlays), `--radius-full` (dots, the chat button). Nothing else.
+- Controls 28 px (`--control-h`), large 36 px (`--control-h-lg`: sign-in, About actions, tabs).
+  Rows: compact 28 px / 12 px type, comfortable 36 px / 13 px type (`rowHeight` in `App.tsx` must
+  match `--row-h`).
+- Layout: rail 224 px (collapsed 52 px), top bar 48 px, content max width 1280 px, 12-column grid
+  (`.grid-12`, `.col-3 .. .col-12`, 16 px gap; one column below 900 px).
+- Supported widths: 1366 px and 390 px with no horizontal page scroll.
 
-## 4. Components
+### Motion
 
-| Component | Notes |
+`--ease` cubic-bezier(0.2, 0, 0, 1) is the only curve. `--dur-fast` 150 ms (hover, press, focus),
+`--dur-mid` 200 ms (tabs, accordions, panels, page enter, list rows), `--dur-slow` 250 ms (overlays,
+scroll reveals, chart draw-in), `--stagger` 30 ms. Only `opacity` and `transform` animate (plus
+colour on hover). Allowed: page and panel enter, short-list row enter (never the windowed tables),
+chart draw-in once on first view, tab and accordion change, button press (scale 0.98), scroll
+reveals on About, the About pipeline flow (plays once per view, replay on request). Nothing loops:
+no `infinite`. `prefers-reduced-motion: reduce` sets every duration to 0 and the last block of
+`system.css` switches all animation and transition off.
+
+## 4. Components (base layer: `base.css`, `system.css`, `components/ui.tsx`)
+
+| Component | Rule |
 |---|---|
-| `AppShell`, `Rail`, `TopBar` | rail items are links with `aria-current` |
-| `DataTable` | sticky header, fixed column widths (`table-layout: fixed` semantics on a grid), sortable headers (`aria-sort`), row hover, single selection, own fixed-row-height virtualiser (only visible rows + overscan in the DOM), footer with row count |
-| `SplitPane` | list / detail; divider is a `separator` with arrow-key resize |
-| `EvidencePane` | log lines first (span highlight with `<mark>`, copy per line, cut at 600 characters with "Show all"), then alert fields, then the raw alert JSON collapsed |
-| `TimeStrip` | section 6 |
-| `Finding` | text, citation links, claim list with verifier status |
-| `SeverityCell`, `DetectorTag`, `StatusTag` | glyph or mark + text |
-| `Time` | absolute UTC ISO (`2022-01-24T03:01:07Z`), relative time in `title` and on focus |
-| `Mono`, `CopyButton`, `Truncate` | truncation with click to expand; copy for ids and log lines |
-| `FilterBar`, `SearchInput` | `/` focuses search |
-| `Button` (primary, default, danger), `Select`, `TextInput`, `Textarea`, `Toggle` | visible labels; errors under the field with `aria-describedby` |
-| `Dialog` | decision reason, confirm execute; focus trapped, Esc closes |
-| `ShortcutHelp` | `?` opens the list |
-| `SkeletonRows`, `EmptyState`, `ErrorState`, `ErrorNotice`, `ModelOffline`, `ScreenBoundary` | section 5; the boundary replaces a screen that throws while rendering |
-| `Toast` | `role="status"`; errors use `role="alert"` |
-| `Icon` | one file, `icons.tsx`: about 20 hand-authored inline SVGs, 16 px, 1.5 px stroke, `currentColor`, `aria-hidden` unless it is the only label |
+| `PageHeader` | every screen: optional breadcrumb, `h1`, one-line purpose (the question the screen answers), actions right. `bar` variant sits above a split pane |
+| `Page`, `Section` | scrolling page with max width; a section = `h2` + optional one-line description + content |
+| Buttons | `primary` (ink fill; one per view), default = secondary (hairline, surface), `ghost` (no outline; toolbars, icon buttons), `danger` (secondary in the High colour). `.lg` 36 px. `.segmented` for 2-3 exclusive options |
+| Card | `.card`: surface + hairline + 6 px radius + 16 px padding. One style. Never a card inside a card: inside a card use hairline dividers |
+| `Kpi` in `.kpi-row` | one card split by hairlines: label, value (20 px, 600), one line of context. No icon, no trend arrow without a trend, no animation |
+| `DefGrid` | key facts as label over value (incident header, entity, approval) |
+| `Tabs` | underline tabs, roving tabindex, arrow keys; the panel enters with `.tab-enter` |
+| `Disclosure` | native `details` with a rotating chevron |
+| `DataTable` | the one table: sticky header, fixed row height from density, windowed, hover row, selected row = `--selected` + 2 px mark, footer with count |
+| Tags | `SeverityCell` (glyph + word), `DetectorTag` (mark + name), `StatusTag` (hairline tag) |
+| States | skeleton (still bars in the shape of the content, `aria-busy`), empty (what fills it), empty after filter (with "Clear filters"), error (status + API message + Retry, old data kept), forbidden, model offline. Designed for every data view |
+| `Dialog`, toast | overlay radius, hairline + `--shadow-overlay`, `--scrim` backdrop |
+| `Term` | word + "?" with a tooltip (hover and focus); definitions only from `content/glossary.ts` |
+| Icons | `icons.tsx` only: 16 px grid, 1.5 px stroke, round caps, `currentColor`. No emoji, no filled glyphs except the severity bars |
 
-Keyboard (global unless a text field has focus): `j` / `k` or arrow keys move the row
-selection, `Enter` moves focus to the detail of the selected row or opens a citation, `Esc` closes the evidence pane or dialog, `/`
-focuses search, `?` shows shortcuts, `g i` / `g a` / `g p` / `g r` go to Incidents / Alerts /
-Approvals / Reports, `c` copies the selected id, `d` toggles density, `t` toggles the theme.
-Tab order follows the reading order: skip link, top bar, rail, list (filters, table), divider,
-detail. A table is one tab stop; its sortable headers are buttons after it.
+Charts (`src/charts/`, `ChartFrame`): each states the decision it supports as its question line;
+labelled axes with units; legend with mark + name; tooltip on hover and focus (text nodes only);
+a visually hidden table with the same numbers; draw-in once. No pie, no 3D, no gradient fill, no
+looping. Bars per bin for alert volume (a line would interpolate between bins that do not exist).
 
-## 5. States
+## 5. Information architecture
 
-Every screen implements all of these; copy is plain and literal.
+Rail, grouped and collapsible, items the role cannot use are not rendered:
 
-| State | Behaviour | Example copy |
+- **Understand**: About, Study
+- **Monitor**: Overview, Executive
+- **Investigate**: Incidents, Alerts, Ask
+- **Respond**: Approvals, Reports
+- **Govern**: Audit, Users, Settings
+
+Top bar: brand, data source, command palette trigger, notifications, user menu. **Command palette**
+(Ctrl+K, also `s`): one input that merges global search (alert id, IP, rule id, incident id),
+navigation (every screen) and actions (theme, density, tour, sign out); arrow keys, Enter, Esc;
+focus trapped, returns to the opener.
+
+Screens (each answers one question, stated in its header):
+
+| Screen | Question | Structure |
 |---|---|---|
-| Loading | skeleton rows with the table's own column widths and row height, `aria-busy`; never a spinner over a blank page | (no text) |
-| Empty | one line saying what is missing and the command or action that fills it | "No incidents for russellmitchell. Run triage (Incidents > Build) or `app.main triage --scenario russellmitchell`." |
-| Empty after filter | says the filter caused it, with "Clear filters" | "No alerts match detector = suricata, host = 10.143.2.4." |
-| Error | HTTP status, the API's message, a Retry button; the previous data stays visible if there is any | "Could not load incidents: 503 from /incidents. Retry" |
-| Forbidden | which permission is missing | "Your role (executive) cannot read raw alert records." |
-| Session expired | 401 returns to Sign in and keeps the current location | "Session expired. Sign in again." |
-| Model offline | shown wherever findings or Ask need a model; the rest of the screen works | "No model endpoint is configured. Findings and Ask are unavailable; alerts, incidents and evidence are not affected." |
-| Truncated | whenever the API caps a list (reports: 500 timeline rows) | "Showing 500 of 11,208 rows (10,708 omitted by the report limit)." |
-| Simulated | on every approval execution | "Simulated: no connector is called." |
-
-## 6. Time-axis strip
-
-Above the findings in incident detail. One labelled row per detector present (Wazuh, Suricata,
-AMiner, Sigma), a shared UTC axis with start, end and duration printed in mono. Alerts are
-1 px ticks in the detector colour; when more than one alert falls on a pixel column the column
-is drawn as a bar whose height is the count (log scale, scale stated in the axis label), so an
-11,208-alert burst is one canvas pass over binned counts, not 11,208 nodes. Drawn on a
-`<canvas>` with a visually hidden table of the same bins for screen readers. Drag or
-shift+arrow selects a time range and filters the alert table below; activating a tick selects
-that alert in the table. It exists to show bursts and gaps; it has no other decoration.
-
-## 7. Safety and data rules in the UI
-
-- Log lines, rule names and every other field from alerts are untrusted text: rendered as text
-  nodes only. No `dangerouslySetInnerHTML`, no HTML or Markdown rendering of alert or model
-  output; highlighting splits the string and wraps the match in `<mark>`. URLs in log text are
-  not turned into links.
-- The UI shows platform outputs only. It never shows labels, phases or study scores, and it
-  never talks to held-out scenarios (the API already enforces dev-only replay).
-- Numbers come from the API. No placeholder figures, no lorem ipsum; fixtures used for
-  screenshots are named `synthetic_*` and labelled SYNTHETIC on screen.
-- The JWT is kept in memory (lost on reload) rather than `localStorage`.
-- Counts use thousands separators (`11,208`); durations and sizes always carry a unit.
-
-## 8. Checklist (run per screen, result recorded in `docs/session-notes.md`)
-
-1. A first-time analyst finds the highest-severity open incident in under 5 seconds.
-2. Keyboard-only use works.
-3. Focus is always visible.
-4. No horizontal scroll at 1366 px width.
-5. Large lists (10,000+ rows) stay responsive.
-6. Untrusted log text is escaped.
-7. Both themes pass contrast.
-8. Nothing on the screen exists only for decoration.
-9. No item from the brief's "Avoid" list is present.
-10. (v2) Every chart has a text alternative (hidden table) and states the decision it supports.
-11. (v2) Colour is never the only encoding (glyph, word, dash pattern, shape or printed count).
-12. (v2) A 10,000-alert incident renders its detail in under 2 seconds.
-13. (v2) The chart module has unit tests for scales, ticks and edge cases (empty, one point, huge).
-14. (v2) Log and rule text stays escaped in tooltips (text nodes only).
-
-Loop per screen: build, render a screenshot with `scripts/shots.mjs` (Playwright is not
-installed; the script drives the headless Chrome or Edge already on the machine and also prints
-horizontal-scroll, row-overflow, DOM-size and Tab-order checks), critique against the list, fix,
-re-render; at most 3 passes. Results: `docs/session-notes.md`.
-
-## 9. What the skill returned and what was kept
-
-`ui-ux-pro-max` was run on 2026-11-10 (`--design-system` with density 9, motion 1, variance 2,
-plus `ux`, `chart` and `react` searches).
-
-Kept:
-- Style family "Minimalism & Swiss": grid-based, functional, high contrast, no ornament.
-- Dense spacing scale; accessibility requirements (4.5:1 text, keyboard, visible focus,
-  reduced motion); no emoji as icons.
-- UX rows: full keyboard operation with tab order = visual order; skip link; never colour
-  alone; errors announced (`role="alert"`) and placed at the field; stable skeletons with
-  `aria-busy`; empty states that say what to do.
-- React row: window long lists; stable ids as keys.
-- Chart row: above 10,000 points aggregate to intervals and draw on canvas; give a table
-  fallback (applied to the strip).
-
-Rejected, with the reason:
-- "Enterprise Gateway" landing pattern (hero, client logos, Contact Sales): not an app pattern.
-- Fira Code / Fira Sans from Google Fonts: the brief forbids web fonts and downloads.
-- Blue foreground and blue-tinted borders palette: the brief asks for neutral greys with one
-  accent; the palette above was built and contrast-measured instead.
-- Hover transitions of 150-300 ms and the GSAP scroll reveal: the brief caps motion at 150 ms
-  and forbids gratuitous animation.
-- Line chart for time data: the strip is a tick / bin plot per detector, which is what shows
-  bursts and gaps.
-- 44 px touch targets and mobile-first breakpoints: this is a desktop console with 24 / 32 px
-  rows; pointer targets are the full row width, and every action has a keyboard path.
-- Heroicons / Lucide: the brief asks for a small hand-authored icon set.
-
-## 10. Stack
-
-React 19 + TypeScript + Vite 8, plain CSS with the tokens above (no Tailwind, no component kit,
-no chart library, no router, no virtualisation package: `DataTable`, `TimeStrip` and the hash
-router are written here). Installed 2026-11-10 after the user's go: 23 packages, 69 MB of
-`node_modules`. Pure logic is tested with Node's built-in test runner (no test dependency).
-
-## 11. v2 (2026-11-12): product shell, overview and charts
-
-Brief: "make it look and work like a finished product, informative through graphics". The v1
-Incidents screen (dense table, split pane, detector strip) stays the visual reference: same
-tokens, same 24 / 32 px rows, same hairlines; v2 adds screens and charts in that language.
-
-### 11.1 Shell
-
-- **Rail** (top to bottom): Overview (default after sign-in; executives land on Executive),
-  Incidents, Alerts, Approvals, Reports, Ask, Study, Audit, Users (admin); Settings and Help at
-  the bottom. Items the role cannot use are not rendered.
-- **Top bar**: brand mark + name, data source with stored count, environment badge
-  ("Dataset replay: demo data"), global search (alert id, IP, rule id, incident id; Ctrl+K or
-  `s` focuses it), notification bell with a count, user and role, sign out. Density, theme and
-  time format live in Settings (the `d` and `t` keys still work).
-- **Footer** on every screen: version, data source (AIT-ADS replay, scenario), API status, link
-  to the security notes.
-- **Page titles**: `<screen> · SentinelAI`; favicon = the brand mark (inline SVG data URL).
-- **Brand mark**: original SVG, a shield outline with signal arcs inside; one colour
-  (`currentColor`), 16 / 24 / 40 px. No stock icon.
-- **Error page**: one `state` block for unknown routes, render errors and API outages, saying
-  what happened, what still works, and a link back.
-
-### 11.2 Sign in
-
-Split layout at >= 1024 px: the form column (420 px) on the left, the pipeline schematic on the
-right. Form: mark, "SentinelAI", one line ("Security operations console for the AIT-ADS alert
-replay"), environment badge, username, password with a show / hide toggle, caps-lock warning
-under the field (`getModifierState`), role hint ("Your role comes from your account: analyst,
-manager, admin or executive"), errors announced (`role="alert"`): wrong credentials (401), API
-unreachable (0), any other status with its message; "Session expired" banner above the form.
-Schematic: six boxes Ingest, Normalize, Detect, Investigate, Report, Review joined by arrows,
-each with the real component names under it (replay collector, stream; alert normalizer,
-enrichment; Wazuh, Suricata, AMiner, Sigma, triage; single agent, LangGraph graph, verifier;
-reports JSON / CSV / PDF; approvals four-eyes, audit). Hairline boxes, no gradient, no
-illustration, no marketing copy.
-
-### 11.3 Chart rules (every chart)
-
-1. It supports a decision, stated as the chart's question line ("Where did alert volume spike?").
-2. Labelled axes with units (alerts, alerts per bin, UTC time, share in %).
-3. Direct labels or a legend with mark + name; colour is never the only carrier (detector series
-   also differ by stack position and are named in legend and tooltip; severity bars carry the
-   glyph and word; graph edges carry a dash pattern per detector).
-4. Tooltip with exact values on hover and on keyboard focus; tooltip content is text nodes only
-   (log and rule text stays escaped).
-5. A visually hidden `<table>` with the same numbers (the text alternative).
-6. Both themes through tokens; nothing decorative, no 3D, no pie, no animated counters, no
-   gradients, no transitions on data.
-7. Empty data says what fills it; one point and huge values render (scales are unit-tested).
-8. Every overview chart links to the filtered table under it (click, or Enter on a focused mark).
-
-Chart module: `src/lib/scale.ts` (linear, log, band and time scales, nice ticks, time ticks,
-compact numbers; pure, tested), `src/lib/graph.ts` (deterministic force layout: initial
-positions from a hash of the node id, fixed iteration count, no randomness; tested),
-`src/charts/` (React SVG: `ChartFrame` with question line, legend, tooltip and hidden table;
-`TimeBars`, `HBars`, `StackedHBars`, `HeatStrip`, `ChainStrip`, `EntityGraph`, `Lanes`,
-`DotPairs`). No chart library, no CDN.
-
-### 11.4 Chart tokens
-
-Detector and severity colours are reused (section 3). New tokens:
-
-| Token | Dark | Light | Use |
-|---|---|---|---|
-| `--grid` | `#262b31` | `#e3e6ea` | gridlines (separation only, carries no value) |
-| `--heat-1` .. `--heat-4` | `#1b2c40` `#1f3d5f` `#244f7e` `#2a62a0` | `#e3edf9` `#c3d8f2` `#9dbfe9` `#76a2dc` | ATT&CK heat cells; the count is printed in every non-empty cell in `--text`, so shade is never alone |
-| `--ref` | `#c9ced4` | `#3a4149` | baseline reference lines on the study charts (dashed) |
-
-Contrast of text on the heat steps and of `--ref` on the surfaces is computed by
-`src/lib/contrast.test.ts` from the hex values in `tokens.css` (WCAG relative luminance); the
-test fails below 4.5:1 for text and 3:1 for marks.
-
-### 11.5 Screens added or changed
-
-- **Overview** (`/overview`): status row (open incidents by severity, alerts stored, oldest
-  unreviewed High with its age in the queue, pending approvals), then: alerts over time stacked
-  by detector (linear / log toggle, incident-start markers on the time axis, brush to filter
-  the table below); incident severity x status stacked bars and age in queue; ATT&CK heat strip
-  (tactic columns, technique cells, click filters alerts); top hosts and top source IPs (bar
-  tone = highest incident severity the entity appears in, glyph + word in the label; click opens
-  the entity view); detector comparison (alerts, share mapped to ATT&CK, share with IOC match,
-  duplicate rate; IOC says "no indicator list loaded" instead of 0 % when none is loaded);
-  kill-chain strip for the scenario or a chosen incident (tactics in ATT&CK order, empty cells
-  for gaps). Under the charts: the alert table filtered by whatever chart was used.
-- **Entity view** (`/entity?kind=host|ip&value=`): counts by detector, first / last seen,
-  activity bars, top rules, incidents that contain the entity.
-- **Incident detail**: one-glance summary strip (severity, the triage rule in plain words with
-  its inputs, first / last seen, detectors agreeing); ATT&CK lanes under the strip (one lane per
-  tactic, binned ticks); a Graph tab (hosts and source IPs as nodes, alert count as edge width,
-  detector as edge colour + dash, capped at 60 nodes with "Show more", focusable nodes, click
-  filters the alert table); Findings with cited alerts as chips, verified / dropped tags and
-  the matched span marked in the evidence line.
-- **Alerts**: facet sidebar (detector, level, rule id, ATT&CK technique, host) with counts and
-  inline bars, saved filters (localStorage, per viewer), CSV export of the filtered view.
-- **Reports**: preview with the embedded timeline and entity graph (SVG); the PDF draws the same
-  two charts with reportlab from the same data and the same layout algorithm (ported to
-  Python, cross-checked by a test); printable executive summary.
-- **Approvals**: queue table + side pane (proposed action, evidence, audit trail of that
-  approval); the self-approval block and the reason requirement are stated in the pane before
-  the controls, not discovered from an error.
-- **Audit**: filters (user, action, text) and an activity-over-time bar chart.
-- **Executive** (`/executive`, read-only): severity trend, top risks, ATT&CK coverage strip,
-  time to review, open approvals, a plain-language caption under each chart; print stylesheet.
-- **Study** (`/study`): renders `scores.json` of matched runs only (FakeClient runs are excluded
-  and counted). Coverage bars with cite-all / top-k / noise reference lines, citation
-  precision, unsupported-claim rate before and after the verifier as paired dots, tokens and
-  latency per arm, detector-by-arm heat table. Banner: "dev scenarios, pilot numbers, not paper
-  results". No confidence intervals (the files have none). Empty state before any run.
-- **Settings** (theme, density, time format, default scenario), **Users** (admin: list,
-  create, deactivate, reset; passwords only from `SENTINEL_NEW_USER_PASSWORD` on the API host,
-  never typed in the browser), **Notifications** (pending approvals for deciders, decisions on
-  your own requests, failed runs), **Help** (shortcuts and what each screen is for).
-
-The console still shows no labels. The Study page shows run-level aggregates from result files
-(rates over cases), never a per-alert or per-case label.
-
-### 11.6 Performance
-
-The 11,208-alert incident must render its detail (strip, lanes, graph, table) in under 2 s:
-lanes and strip are binned, the graph is capped at 60 nodes before layout, the table is
-windowed. Server aggregates come from an in-memory per-scenario index (rebuilt when the stored
-alert count changes), so the charts never ship raw records.
-
-### 11.7 v2 skill run
-
-`ui-ux-pro-max` was run again on 2026-11-12 (`--design-system` density 9, motion 1, variance
-2; `chart` searches for time series, heatmap and network graph; `ux` searches for login errors
-and chart focus). Kept: Swiss / minimal style; chart rows "never colour alone", "table
-fallback", "focus reveals hover values", "print values in heat cells", "network graph: the
-adjacency table is the accessible source of truth, SVG up to 100 nodes"; login rows "password
-visibility toggle" and "errors announced". Rejected again: the Enterprise Gateway landing
-pattern, Fira fonts from Google Fonts, the blue-tinted palette, 150-300 ms hovers and the GSAP
-scroll reveal, line charts for alert volume (bars per bin show bursts; a line interpolates
-between bins that do not exist), Heroicons / Lucide, pie charts (forbidden by the brief).
-
-## 12. Explainable console (2026-11-13)
-
-Brief: "make the console understandable to a professor who has never seen it; system worthy, not
-AI generated". Review of the v2 screenshots found: no page explains the project, Overview is eight
-stacked chart blocks in analyst jargon, Alerts shows 200 identical rows, Executive "Top risks" has
-rows with the same label, the Study page reads as broken when empty, graph labels overlap, no
-glossary or help. The Approvals and Executive "In plain words" lines are the voice to copy.
-
-### 12.1 Pieces
-
-- **Glossary** (`src/content/glossary.ts`, the one source): 41 terms, each a plain definition
-  (at most two sentences, tested) and "why it matters here". Used by `<Term>`, the About page and
-  the help chat's offline answers.
-- **`<Term id>`** (`components/Term.tsx`): the word plus a 14 px round "?" button. The tooltip opens
-  on hover and on keyboard focus, closes on Esc, blur or pointer leave, is `role="tooltip"` tied with
-  `aria-describedby`, and is `position: fixed` from the button rect so a scrolling pane never clips
-  it. Text nodes only. Used on Overview, Incidents, Alerts, Executive, Reports, Approvals, Study, About.
-- **What / Why pair** (`<Explain>`; `ChartFrame` props `what`, `why`, `term`): one line "What you're
-  looking at", one line "Why it matters", under every Overview section and the Study page.
-- **About** (`/about`, first in the rail; landing page in Professor demo mode, which is on by default
-  and switched in Settings, `localStorage` `sentinel.demo`): the problem, the five pipeline stages
-  as hairline boxes with the real component names, the study question in one sentence, the live
-  results status from `/study/results` (pilot vs final vs in progress; never a number), what each
-  screen shows (links), limits and honesty notes, the filterable glossary.
-- **Guided tour** ("Start here" in the top bar and on About): six stops About, Overview, Incidents,
-  Alerts, Approvals, Study; a non-modal panel bottom left (never over the chat launcher) with Skip,
-  Back, Next and a six-step progress rule; Esc ends it.
-- **Help chat** (`components/HelpChat.tsx`): an "Explain" launcher on the footer bar at the bottom
-  right (it covers no content: the footer reserves its width), a 400 px panel above it. It sends the
-  question, the screen name, a plain-text screen summary (`useScreenContext`), the selected incident
-  and the matching glossary entries to `POST /copilot/ask` in `mode: "explain"` (one request, at most
-  300 output tokens, temperature 0; the API answers 429 instead of queueing a second one). Each
-  answer says "answered by local model <id>" or "answered from the glossary (no model)". Offline (no
-  endpoint, Ollama unreachable, role without `copilot.ask`, model busy): a deterministic glossary
-  search, with the status "Local model offline: showing glossary answers only"; the model is tried
-  again after 60 s. Suggested questions per screen (`content/about.ts`). Esc closes and returns
-  focus to the launcher. Answers are plain text.
-- **Overview in two layers**: four headline numbers in plain words, alerts over time, "Incidents to
-  look at first" (queue order, each named by its main host or source IP and first-seen data time);
-  everything else under a collapsed "More detail" (remembered per browser; a chart filter opens it).
-- **"What happened"** at the top of incident detail: one or two sentences built by
-  `lib/explain.ts whatHappened` from the incident's own data (time span, alert count, detectors,
-  main host and source IP by alert count, most frequent rule, triage rule). Never from the model;
-  the label says so.
-- **Folded alert rows** (`components/AlertRunsTable.tsx`, `GET /alerts/runs`): consecutive alerts
-  with the same detector, rule, level, host and source IP are one row with "×14,436 · same rule,
-  same host"; the chevron button expands up to 50 of them inline; "Fold repeats" turns it off (URL
-  `fold=0`). "Level (detector-native)" is renamed "Detector's own severity" / "Own level".
-- **Distinct incident labels** (`incidentLabel`, `distinctLabels`): main host (most alerts), else
-  main source IP, plus first-seen data time to the minute; a repeat gets the incident id appended.
-  The API adds `detail.main_host` / `main_ip` to `/incidents/summary` and Executive `top_risks`
-  (the stored `entities` list is sorted by value, so its first item is not the main one).
-- **Graph labels without overlap** (`lib/graph.ts placeLabels`, `graph_layout.place_labels` for the
-  PDF): most alerts first, each label tries right, left, below, above; a spot must stay inside the
-  plot and clear of placed labels and other nodes. A label that fits nowhere shows on hover / focus,
-  and the caption says how many are hidden; the adjacency table keeps every name.
-- **Dates**: `<Time kind="data" | "created">` adds a faint "data date" or "created" word (and the
-  meaning in the hover text) wherever 2022 dataset times and console creation times appear together
-  (report detail, incident response, approvals, column headers "(UTC, data date)").
-- **Study**: a "What this page shows" block with terms; runs split by study part (pilot, final
-  held-out, ad hoc) with a selector; every row names scenario and variant; the empty state says what
-  will appear.
-
-### 12.2 Tokens
-
-No new colour token. New component styles live in `src/explain.css` (tokens only). The "?" uses
-`--border-strong` (>= 3:1 on every surface, measured in section 3) and `--text-muted`; the tooltip
-is `--raised` with `--text` and `--text-muted` (both measured in section 3); the offline chat status
-uses `--sev-medium` text on `--surface` (4.5:1 or more, section 3). Motion: none added.
-
-### 12.3 Skill run (2026-11-13)
-
-`ui-ux-pro-max` `--design-system` (density 8, motion 1, variance 2) and `ux` searches for tooltip
-focus, onboarding tour, progressive disclosure, dialog focus, live regions and graph labels. Kept:
-Minimalism & Swiss; "users can skip tutorials: Skip and Back buttons"; "focus not obscured: chat
-widgets must not cover focus" (the launcher sits on the footer, the tour panel avoids it); "one
-atomic status message" (the chat status line); "compact labels: expose the full text to keyboard and
-pointer" (hidden graph labels on focus, titles on truncated cells); network graph "the adjacency
-view is the accessible source of truth". Rejected again: the Trust & Authority landing pattern,
-Fira fonts, the blue / green palette, 200-250 ms hovers and scroll reveals. The chat-panel query
-returned no database match; its design follows the existing Dialog and toast rules instead.
-
-## 13. Motion and mission-control layer (wave F, 2026-11-13)
-
-Brief (user, 2026-11-13): "make the console feel alive and premium, and turn the chat into a real
-floating button"; direction: security-operations mission control (dark glass panels, subtle grid /
-scanline texture, glowing severity accents, monospace data type), data still readable. **This brief
-replaces the earlier motion rules** of sections 3, 9, 11.3 and 12.2 ("nothing above 150 ms", "no
-animated counters", "skeletons do not shimmer", "no transitions on data") for the pieces listed here.
-Everything else in sections 3-12 stands: tokens only, never colour alone, tables windowed, text nodes
-only, honest numbers.
-
-### 13.1 Visual layer
-
-- `src/motion.css` holds the whole layer (tokens only; a test fails on a hex value in it).
-- The dark base moved to a blue-black: `--bg #0a0d12`, `--surface #10151c`, `--raised #171e27`,
-  `--selected #1c2a3d`, `--border #242c37`, `--grid #1f2731` (light unchanged). The contrast test
-  (`charts.test.ts`, WCAG from `tokens.css`) still passes for every text token on the new surfaces.
-- New non-text tokens (decorative, or a state mark always next to a word, so no 4.5:1 need):
-  `--online` (model reachable; `#3fca7a` dark / `#1a7f45` light, a mark >= 3:1 on the surfaces),
-  `--glass`, `--glass-edge`, `--grid-line`, `--scanline`, `--glow-accent`, `--glow-high`,
-  `--glow-medium`, `--glow-low`, `--glow-online`, `--sheen`, `--shimmer`, `--lift-shadow`.
-- Texture: one fixed body background (32 px blueprint grid + 3 px scanlines) behind the app.
-- Glass: translucent panels on Overview / About blocks; `backdrop-filter` only on floating chrome
-  (top bar, tour, toasts, chat panel), never over a table.
-- Data type: `.num`, status values and KPIs in the mono stack with tabular numerals. Section kickers
-  ("01 · THE PROBLEM") in mono caps with the accent.
-
-### 13.2 Motion system
-
-Tokens: `--ease-out` cubic-bezier(0.22, 1, 0.36, 1), `--ease-in`, `--ease-spring` (slight overshoot,
-floating layers only, never data), `--dur-fast` 140 ms (hover, press), `--dur-mid` 240 ms (page,
-panel, nav, toast), `--dur-slow` 420 ms (scroll reveal), `--dur-draw` 900 ms (chart draw-in,
-counters). Only `transform` and `opacity` are animated (plus a `filter` halo on the High glyph).
-
-| Piece | Where | How |
-|---|---|---|
-| Page transition | every screen | `.screen-enter` wrapper keyed by route: fade + 6 px rise |
-| Nav indicator | rail | one 2 px bar translated to the current item |
-| Skeleton shimmer | `.skeleton-bar` | a translated sheen pseudo-element |
-| Counters | Overview status row, About hero | `<Count>`: rAF count-up once seen; exact value in `aria-label` |
-| Chart draw-in | `.draw-charts` pages (Overview, Executive) | `ChartFrame` sets `data-drawn` on first view; bars grow (`scaleY`), marks fade |
-| High pulse | `.sev[data-sev=high]` glyph, look-first cards | soft halo / edge pulse; **off inside tables** |
-| Micro | buttons, chips | press scale 0.97; primary hover glow |
-| Toasts | bottom right | slide in from the right |
-| Reveal | About sections, look-first cards | `<Reveal>`: IntersectionObserver once, staggered 70 ms |
-
-Not animated, on purpose: table rows (hover only), the incident strip canvas, the entity graph,
-anything in Incidents / Alerts beyond hover. `prefers-reduced-motion: reduce` turns every animation
-and transition off (last block of `motion.css`), shows reveals and counters at their final state and
-hides the decorative packets. Primitives: `components/motion.tsx` (`useSeen`, `Reveal`, `Count`,
-`DrawOnView`, `tiltHandlers`); pure maths in `lib/motion.ts` (tested). No animation library.
-
-### 13.3 About as a scroll story
-
-Hero: kicker, title, the six stages Ingest, Normalize, Detect, Investigate, Report, Review as SVG
-nodes with alert packets (detector-coloured dots) running each segment and the stage rings lighting
-in a wave; three counters from `/overview` (alerts stored, incidents, detectors with alerts). Then
-numbered sections with a sticky stepper (current section from the scroll position, `activeSection`):
-the problem; the five-stage detail; the study with an interactive diagram (source toggle Wazuh /
-Suricata / AMiner / Fused / Oracle / Noise / Shuffled feeding the fixed agent; Fused uses the real
-detector shares of the scenario, the rest is marked SCHEMATIC; four arms as lanes, the verified lanes
-drop packets at a dashed verifier line); the verifier demo (the real quote rule, exact case-sensitive
-substring of at least 8 characters, on a SAMPLE line with a TEST-NET address, plus an input to try a
-quote; real run text is not used because the transcripts sit next to per-case scores); results
-status (unchanged, never a number); screen cards with pointer tilt and glow; limits; glossary.
-
-### 13.4 Floating help chat
-
-A 52 px round button fixed bottom right on every screen (z-index 90, above the tour at 55 and the
-toasts), accent fill, a slow pulse ring, a status dot (green `--online`: model reachable; amber:
-busy; grey: glossary only) and an unread count. The dot comes from `GET /copilot/status`, a probe
-that lists the endpoint's models and never generates (no GPU load), polled on mount, on open and
-every 60 s while the tab is visible. The panel (400 x 560; "larger" 640 x 720) springs out of the
-button: header with status, clear, resize, minimise, close; a scrolling log with bubbles, a typing
-indicator and a copy button per answer; three suggested questions per screen; the question box. Esc
-closes, Tab is trapped, focus returns to the button. Below 640 px wide it is a bottom sheet. Open
-state, size and the last 40 messages live in `sessionStorage` (try/catch; works without it). Logic in
-`lib/chat.ts` (tested: reducer, focus trap, error notes for 429 / 503 / 0, chips, storage). Scrolling
-pages keep 88 px under their last block so the button never hides it; split-pane screens (Incidents,
-Alerts) accept that it overlaps the bottom-right corner of the detail table.
-
-### 13.5 Skill run (2026-11-13)
-
-`ui-ux-pro-max --design-system` (motion 6, density 8) returned Minimalism & Swiss with a navy /
-green palette, Inter and a GSAP stagger. Kept: the reduced-motion rule (final state, no
-scroll-jacking), "animate 1-2 key elements per view" (hero pipeline, counters; tables stay still),
-a focus ring on every modal control, "no back-out easing on dense data" (spring only on floating
-layers). Rejected: Inter from Google Fonts (no web fonts), GSAP (CSS + rAF cover it, no dependency),
-the navy / green palette (the measured tokens stay; only the dark base moved). The `frontend-design`
-skill named in the brief is not installed in this session; the direction was set by hand from the
-brief.
-
-## 14. Palette: warm graphite + phosphor lime (wave G, 2026-11-13)
-
-Why: the blue palette read as every other dark SOC dashboard. The console now looks like an
-instrument panel lit by an old phosphor display: warm charcoal surfaces (no blue tint), bone text,
-and one lime accent that marks only what an analyst acts on. Token values are in section 3.
-
-### 14.1 Where the lime goes (and nowhere else)
-
-Logo, the active nav indicator, primary buttons, the focus ring, the floating chat button and links.
-It is never a data colour: no chart series, heat step, severity, detector or verifier state uses it.
-Text on a lime fill is `--on-accent` (near-black in dark, white on the light-theme olive).
-
-### 14.2 Semantic colours
-
-- Severity: High signal red, Medium amber, Low warm slate; glyph + word as before (section 3).
-- Verifier: kept / verified = `--verified` (green, measured apart from the lime and from AMiner);
-  dropped / unsupported = the `--sev-high` red family with a strike or dashed rule.
-- Detectors: copper (Wazuh), rose / wine (Suricata), sea green / cyan (AMiner), neutral hollow (Sigma). Spread over
-  lightness as well as hue so they survive protanopia, deuteranopia and tritanopia; dash patterns
-  and names stay the non-colour cue. The PDF uses the light-theme values (`DETECTOR_PRINT` in
-  `backend/app/outputs/reports.py`), because it prints on white.
-- Heat strips and the ATT&CK grid: an olive ramp `--heat-1..4`, counts printed in every cell.
-
-### 14.3 Texture and glow
-
-The blue blueprint grid and scanlines are replaced by a faint warm grain / fine-line layer
-(`--grain`, `--fine-line`, about 2-3 % opacity, one fixed background layer). Glows exist only on
-High severity and the chat button, with a small radius; everything else uses borders.
-
-### 14.4 Skill run
-
-`ui-ux-pro-max` colour search ("security dashboard dark lime accent") returned slate-navy
-dashboards with a green accent: rejected (that is the blue look this wave removes). Kept from it:
-a visible focus ring on every control and "colour never alone" for charts. The brief pinned the
-palette; values were then tuned by measurement (contrast and CVD scripts) before they were written.
-
-Retunes after measurement and review (2026-11-13, all measured by `palette.test.ts`):
-
-- First light values `--sev-high #b3261e` / `--sev-medium #8a5300` collapsed under deuteranopia (OKLab
-  0.014). High is now crimson `#9b1036` (0.077, contrast 6.6:1).
-- The visual review found verified teal and AMiner reading as one colour (dark `#3fbf8f` vs `#2fa89f`,
-  light `#0d6a62` vs `#08706a`). Verified is now green (`#46c46a` dark, `#0b6a4a` light) and light
-  AMiner cyan `#04687a` (hue 189, just under the blue guard's 190). In light the olive accent, verified
-  green and AMiner cyan must all reach 4.5:1 on paper, which squeezes them: the accent moved to a
-  yellower olive `#5f6400` (6.35:1 with white text) and verified vs accent / AMiner is >= 0.07 under
-  no simulation and deuteranopia (0.062 under protanopia: the tag word carries it there).
-- `--selected` lost its olive tint (read as extra lime): `#322d26` dark, `#e7e1d1` light; the 2 px
-  accent bar still marks the row.
-- Overview numbers and "look first" card titles are links but read as data: bone / ink text, lime
-  only on hover and focus (`motion.css`).
-
-Accepted, not changed: light Suricata (wine `#6b1d49`) sits near High crimson in hue, and light Wazuh
-copper near Medium amber. They never share a mark: severity carries a glyph + word, detectors a name +
-dash pattern, and moving them would break the measured colour-blind separation.
+| About | What is this system and how far has the study got? | product page (section 7) |
+| Study | What do the finished runs say so far? | status, then runs by study part in tabs |
+| Overview | What needs attention right now? | KPI row; one primary chart (alerts over time); "Incidents to look at first" as a list; the rest in tabs (ATT&CK, entities, detectors, kill chain, alerts) |
+| Executive | Is the situation under control? | KPI row, trend, top risks, print layout |
+| Incidents | Which incident do I open, and what happened in it? | master-detail: list left; detail = header (severity, what happened, definition grid of key facts), time strip, tabs (alerts and evidence, ATT&CK, graph, findings, response) |
+| Alerts | Which alerts match? | facets left, folded table, evidence right |
+| Ask | What does the model say, and what did the verifier keep? | question, answers with citations |
+| Approvals | What is waiting for a second person? | queue + detail with the rules stated before the controls |
+| Reports | What was written up? | list + preview tabs + downloads |
+| Audit | Who did what? | filters, activity chart, table |
+| Users, Settings | | forms in sections |
+
+Exempt from `PageHeader`: About (its hero is the header, section 7), the error page (a single
+message and a way back) and Sign in (no shell).
+
+Kept from earlier waves, restyled only: glossary and `<Term>`, the deterministic "What happened"
+sentence, folded alert repeats, distinct incident labels, data vs created dates, the six-stop tour,
+Professor demo mode, notifications, keyboard shortcuts (`j` / `k` / Enter / Esc / `/` / `?` / `g x` /
+`c` / `d` / `t`), skip link, role-based rendering, all states of section 4.
+
+## 6. Time strip, tables and performance
+
+The incident time strip stays a `<canvas>` of binned counts per detector with a hidden table; the
+ATT&CK lanes are binned; the entity graph is capped at 60 nodes before layout; tables are windowed.
+The 11,208-alert incident must stay responsive (frame time recorded in `docs/session-notes.md`).
+Nothing in Incidents or Alerts animates beyond hover, tab change and panel enter.
+
+## 7. About as a product page
+
+Sections, with a sticky section nav and quiet scroll reveals: hero (one sentence, one supporting
+line, a live mini-view of the product fed by the API, two actions); "How it works" as a flow where
+alerts move once through the five stages and each stage expands on click; the study as an
+interactive diagram (alert source switch, the fixed agent, the four arms); the verifier demo on a
+labelled SAMPLE line; a feature grid by category (Detect, Investigate, Respond, Govern); honest
+results status and limits; the glossary. Every number comes from the API; schematic parts are
+labelled SCHEMATIC, sample text SAMPLE. No number is invented and results never show before a real
+run exists.
+
+## 8. Floating help chat
+
+A round button bottom right (ink fill, no pulse, no glow) with a status dot (`--online` reachable,
+amber busy, grey glossary only) and an unread count; the panel is an overlay (radius `--radius-l`,
+hairline + `--shadow-overlay`), enters with fade-rise, traps focus, Esc closes and returns focus.
+Offline it answers from the glossary and says so. Bottom sheet below 640 px.
+
+## 9. Safety and data rules in the UI (unchanged)
+
+- Alert fields, log lines, rule names and model output are untrusted: text nodes only, no
+  `dangerouslySetInnerHTML`, no Markdown or HTML rendering, no links made from log text;
+  highlighting through `splitHighlight` and `<mark>`.
+- Platform outputs only: no labels, phases or per-case scores. Study shows run-level aggregates
+  from `scores.json` with the "dev scenarios, pilot numbers, not paper results" banner.
+- Numbers come from the API with thousands separators and units; times are UTC. No placeholder data.
+- The JWT lives in memory. Passwords are never typed for other users in the browser.
+- Nothing executes without an approved approval; the executor is simulated and says so.
+
+## 10. Guards (tests in `src/lib/`)
+
+- `palette.test.ts`, `charts.test.ts`: contrast of every text-like token on the four surfaces in
+  both themes; colour-blind separation of detector and severity colours; no raw colour outside
+  `tokens.css`; no blue / indigo / purple hue in it.
+- `guard.test.ts`: fails on banned effects in any stylesheet: `backdrop-filter`, blur or
+  drop-shadow filters, `infinite` animations, any `box-shadow` other than `var(--shadow-overlay)`
+  or a zero-blur hairline, gradients, `background-clip: text`, a `font-size`, `border-radius` or
+  duration that is not a token.
+
+## 11. Checklist per screen
+
+1. Header pattern present; the screen's question is stated in one line.
+2. One primary button at most; one card style; no card in a card.
+3. Only the six type sizes; numbers tabular; sentence case.
+4. Spacing only from the scale; aligned to the 12-column grid.
+5. Skeleton, empty, empty-after-filter, error states exist and were looked at.
+6. Keyboard-only use works; focus is always visible; tab order follows reading order.
+7. Both themes pass contrast; colour is never the only carrier.
+8. No horizontal scroll at 1366 px and 390 px; 0 console errors.
+9. Nothing loops; reduced motion shows the final state.
+10. Untrusted text is escaped; no invented number.
+
+## 12. What the skill returned and what was kept
+
+`ui-ux-pro-max` was run on 2026-11-14 (`--design-system`, density 8, motion 3, variance 2;
+`typography` and `ux` searches). Kept: the "Minimalism & Swiss" style family (grid, type, no
+ornament), the accessibility requirements (4.5:1 text, keyboard, visible focus, reduced motion),
+keyboard navigation with tab order = visual order, skip link, "no emoji as icons". Rejected: the
+"Trust & Authority" landing pattern (logo carousel, Contact Sales), the navy + green palette (blue
+is banned here), Inter and the Fira / IBM Plex pairings from Google Fonts (the brief asks for a
+self-hosted family that is not Inter; Geist + Geist Mono chosen), the GSAP scroll reveal (CSS and
+IntersectionObserver cover it without a dependency). The command-palette query returned only
+generic keyboard rows; the palette follows the WAI-ARIA combobox / listbox pattern instead.
+
+Stack: React 19 + TypeScript + Vite 8, plain CSS with tokens, no UI kit, no chart, router,
+virtualisation, icon or animation library. The only runtime dependencies besides React are the two
+`@fontsource-variable` font packages (added in wave H with the user's brief).

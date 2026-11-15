@@ -59,7 +59,7 @@ test('what happened is built from the incident data only', () => {
   assert.match(whatHappened(many, null), /concerned 2 hosts, from 2 source IPs\./);
   assert.match(whatHappened(many, null, { host: 'b', ip: '2.2.2.2' }), /concerned mostly host b \(2 hosts in all\), mostly from source IP 2\.2\.2\.2 \(2 source IPs in all\)\./);
   assert.deepEqual(mainFromNodes([{ kind: 'host', value: 'x', alerts: 2 }, { kind: 'host', value: 'y', alerts: 9 }, { kind: 'ip', value: 'z', alerts: 1 }]), { host: 'y', ip: 'z' });
-  assert.match(s, /^Between 2022-01-24 03:01:07 and 03:04:49 UTC \(data time, 3 min 42 s\), 3 alerts from Wazuh and AMiner/);
+  assert.match(s, /^Between 2022-01-24 03:01:07 and 03:04:49 UTC \(data time, 3 min 42 s\), 3 alerts from Wazuh and AMiner/);
   assert.match(s, /host 10\.143\.2\.4/);
   assert.match(s, /source IP 192\.168\.230\.122/);
   assert.match(s, /most frequent rule was "Web 400 error" \(2 of 3 alerts\)/);

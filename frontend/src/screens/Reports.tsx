@@ -11,9 +11,11 @@ import { TimeBars } from '../charts/TimeBars.tsx';
 import { DataTable, type Column } from '../components/DataTable.tsx';
 import { EvidencePane } from '../components/EvidencePane.tsx';
 import { SplitPane } from '../components/SplitPane.tsx';
-import { Button, describeError, DetectorTag, detectorName, EmptyState, ErrorNotice, ErrorState, Id, SeverityCell, Time, TruncatedText } from '../components/ui.tsx';
+import { Button, DefGrid, describeError, DetectorTag, detectorName, EmptyState, ErrorNotice, ErrorState, Id, PageHeader, SeverityCell, SkeletonLines, Tabs, Time, TruncatedText } from '../components/ui.tsx';
+import { Icon } from '../icons.tsx';
 import { useApp, useLoad, type Route } from '../hooks.ts';
-import { epochSeconds, fmtDuration, fmtInt } from '../lib/format.ts';
+import { epochSeconds, fmtDuration, fmtInt, isoUtc } from '../lib/format.ts';
+import { fitColumns, useNarrow } from '../components/narrow.ts';
 
 interface Props {
   route: Route & { setParams: (patch: Record<string, string | null>, replace?: boolean) => void };
@@ -37,20 +39,13 @@ export function ReportsScreen({ route }: Props) {
       { id: 'created', header: 'Created (UTC, console)', width: '152px', sortKey: (r) => r.created_utc, render: (r) => <Time ts={r.created_utc} /> },
       { id: 'sev', header: 'Severity', width: '82px', render: (r) => <SeverityCell value={r.body.incident.severity} /> },
       { id: 'alerts', header: 'Alerts', width: '56px', align: 'right', sortKey: (r) => r.body.incident.alerts, render: (r) => fmtInt(r.body.incident.alerts) },
-      { id: 'incident', header: 'Incident', width: 'minmax(0, 1fr)', sortKey: (r) => r.incident_id, title: (r) => r.incident_id, render: (r) => <span className="mono">{r.incident_id}</span> },
+      { id: 'incident', header: 'Incident', width: 'minmax(0, 1fr)', sortKey: (r) => r.incident_id, title: (r) => r.incident_id, render: (r) => <span className="mono">…{r.incident_id.slice(-8)}</span> },
     ],
     [],
   );
 
   const list = (
     <>
-      <div className="pane-head">
-        <h1>Reports</h1>
-        <span className="spacer" />
-        <Button icon="refresh" onClick={reload} disabled={loading}>
-          Reload
-        </Button>
-      </div>
       {error && data && <ErrorNotice what="reports" error={error} onRetry={reload} />}
       {error && !data ? (
         <ErrorState what="reports" error={error} onRetry={reload} />
@@ -77,8 +72,28 @@ export function ReportsScreen({ route }: Props) {
     </>
   );
 
-  const detail = selected ? <ReportDetail key={selected.report_id} report={selected} route={route} /> : <EmptyState title="No report selected." />;
-  return <SplitPane id="reports" left={list} right={detail} initial={34} />;
+  const detail = selected ? (
+    <ReportDetail key={selected.report_id} report={selected} route={route} />
+  ) : loading && !data ? (
+    <SkeletonLines lines={5} />
+  ) : (
+    <EmptyState title="No report selected.">Select a report to preview it and download it.</EmptyState>
+  );
+  return (
+    <div className="work">
+      <PageHeader
+        bar
+        title="Reports"
+        purpose="What was written up?"
+        actions={
+          <Button icon="refresh" className="no-print" onClick={reload} disabled={loading}>
+            Reload
+          </Button>
+        }
+      />
+      <SplitPane id="reports" left={list} right={detail} initial={34} />
+    </div>
+  );
 }
 
 function ReportDetail({ report, route }: { report: Report; route: Props['route'] }) {
@@ -96,6 +111,8 @@ function ReportDetail({ report, route }: { report: Report; route: Props['route']
     }
   };
 
+  const panel = (id: string) => ({ role: 'tabpanel', id: `rp-panel-${id}`, 'aria-labelledby': `rp-tab-${id}` }) as const;
+
   const columns = useMemo<Column<TimelineRow>[]>(
     () => [
       { id: 'ts', header: 'Time (UTC, data date)', width: '152px', sortKey: (r) => r.ts, render: (r) => <Time ts={r.ts} /> },
@@ -107,97 +124,100 @@ function ReportDetail({ report, route }: { report: Report; route: Props['route']
     [],
   );
 
+  const narrow = useNarrow();
+  const cols = useMemo(() => fitColumns(columns, narrow, ['rule', 'tech']), [columns, narrow]);
+
   return (
     <>
-      <div className="pane-head">
+      <div className="pane-bar">
         <h2 id="report-detail-title" tabIndex={-1}>
           Report
         </h2>
         <Id value={report.report_id} label="Copy report id" />
         <span className="spacer" />
-        <Button
-          icon="print"
-          className="no-print"
-          onClick={() => {
-            setTab('preview');
-            window.setTimeout(() => window.print(), 50);
-          }}
-          title="Print the executive summary of this report (light theme)"
-        >
-          Print summary
-        </Button>
-        <span className="label">Download</span>
-        {(['json', 'csv', 'pdf'] as const).map((f) => (
-          <Button key={f} icon="download" onClick={() => void download(f)}>
-            {f.toUpperCase()}
+        <div className="btn-row no-print">
+          <Button
+            icon="print"
+            onClick={() => {
+              setTab('preview');
+              window.setTimeout(() => window.print(), 50);
+            }}
+            title="Print the executive summary of this report (light theme)"
+          >
+            Print summary
           </Button>
-        ))}
-      </div>
-      <div className="section">
-        <div className="meta-row">
-          <span>
-            <span className="k">Incident</span>
-            <a className="mono" href={`#/incidents?id=${encodeURIComponent(report.incident_id)}`}>
-              {report.incident_id}
-            </a>
-          </span>
-          <SeverityCell value={b.incident.severity} />
-          <span>
-            <span className="k">Alerts</span>
-            <span className="num">{fmtInt(b.incident.alerts)}</span>
-          </span>
-          <span>
-            <span className="k">Created</span>
-            <Time ts={report.created_utc} kind="created" />
-          </span>
-        </div>
-        <div className="meta-row">
-          <span>
-            <span className="k">First seen</span>
-            <Time ts={b.incident.first_ts} kind="data" />
-          </span>
-          <span>
-            <span className="k">Last seen</span>
-            <Time ts={b.incident.last_ts} kind="data" />
-          </span>
-          {Object.entries(b.incident.detectors).map(([d, n]) => (
-            <span key={d}>
-              <DetectorTag value={d} /> <span className="num">{fmtInt(n)}</span>
-            </span>
+          {(['json', 'csv', 'pdf'] as const).map((f) => (
+            <Button key={f} icon="download" onClick={() => void download(f)} title={`Download the report as ${f.toUpperCase()}`}>
+              {f.toUpperCase()}
+            </Button>
           ))}
         </div>
       </div>
+      <section className="block" aria-label="Report facts">
+        <DefGrid
+          items={[
+            {
+              label: 'Incident',
+              value: (
+                <span className="def-span">
+                  <a className="mono" href={`#/incidents?id=${encodeURIComponent(report.incident_id)}`}>
+                    {report.incident_id}
+                  </a>
+                </span>
+              ),
+            },
+            { label: 'Severity', value: <SeverityCell value={b.incident.severity} /> },
+            { label: 'Alerts', value: <span className="num">{fmtInt(b.incident.alerts)}</span> },
+            { label: 'Created (UTC)', value: <Time ts={report.created_utc} kind="created" /> },
+            { label: 'First seen (UTC)', value: <Time ts={b.incident.first_ts} kind="data" /> },
+            { label: 'Last seen (UTC)', value: <Time ts={b.incident.last_ts} kind="data" /> },
+            {
+              label: 'Detectors',
+              value: (
+                <span className="det-counts">
+                  {Object.entries(b.incident.detectors).map(([d, n]) => (
+                    <span key={d}>
+                      <DetectorTag value={d} /> <span className="num">{fmtInt(n)}</span>
+                    </span>
+                  ))}
+                </span>
+              ),
+            },
+          ]}
+        />
+      </section>
       {b.timeline_rows_omitted > 0 && (
-        <div className="notice">
-          Showing {fmtInt(b.timeline.length)} of {fmtInt(b.incident.alerts)} rows ({fmtInt(b.timeline_rows_omitted)} omitted by the report limit). Technique
-          counts cover all alerts.
+        <div className="notice" role="status">
+          <Icon name="warning" />
+          <span>
+            Showing {fmtInt(b.timeline.length)} of {fmtInt(b.incident.alerts)} rows ({fmtInt(b.timeline_rows_omitted)} omitted by the report limit). Technique counts
+            cover all alerts.
+          </span>
         </div>
       )}
-      <div className="tabs" role="tablist" aria-label="Report sections">
-        {(
-          [
-            ['preview', 'Preview'],
-            ['summary', 'Techniques and actions'],
-            ['timeline', `Timeline (${fmtInt(b.timeline.length)})`],
-            ['citations', `Citations (${fmtInt(b.citations.length)})`],
-          ] as const
-        ).map(([id, label]) => (
-          <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id)}>
-            {label}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        tabs={[
+          { id: 'preview', label: 'Preview' },
+          { id: 'summary', label: 'Techniques and actions', count: fmtInt(b.techniques.length) },
+          { id: 'timeline', label: 'Timeline', count: fmtInt(b.timeline.length) },
+          { id: 'citations', label: 'Citations', count: fmtInt(b.citations.length) },
+        ]}
+        value={tab}
+        onChange={setTab}
+        label="Report sections"
+        idBase="rp"
+      />
 
       {tab === 'preview' && (
-        <div className="tabpanel detail-scroll report-preview" role="tabpanel">
+        <div className="tabpanel detail-scroll report-preview tab-enter" {...panel('preview')}>
           <ReportPreview report={report} />
         </div>
       )}
 
       {tab === 'summary' && (
-        <div className="tabpanel detail-scroll" role="tabpanel">
-          <div className="section">
-            <h3>
+        <div className="tabpanel detail-scroll tab-enter" {...panel('summary')}>
+          <section className="block" aria-label="ATT&CK techniques">
+            <h3 className="block-title">
               <Term id="attack-technique">ATT&amp;CK techniques</Term>
             </h3>
             {b.techniques.length === 0 ? (
@@ -220,11 +240,12 @@ function ReportDetail({ report, route }: { report: Report; route: Props['route']
                 </tbody>
               </table>
             )}
-          </div>
-          <div className="section">
-            <h3>
-              Recommended actions (<Term id="playbook">playbooks</Term>)
+          </section>
+          <section className="block" aria-label="Recommended actions">
+            <h3 className="block-title">
+              Recommended actions <span className="meta"><Term id="playbook">playbooks</Term></span>
             </h3>
+            <div className="table-scroll">
             <table className="plain-table">
               <thead>
                 <tr>
@@ -245,26 +266,25 @@ function ReportDetail({ report, route }: { report: Report; route: Props['route']
                 ))}
               </tbody>
             </table>
-            <p className="faint" style={{ marginTop: 4 }}>
-              Request an approval from the incident's Response tab.
-            </p>
-          </div>
-          {b.notice && (
-            <div className="section">
-              <p className="muted">{b.notice}</p>
             </div>
+            <p className="quiet-note">Request an approval from the incident's Response tab.</p>
+          </section>
+          {b.notice && (
+            <section className="block">
+              <p className="muted">{b.notice}</p>
+            </section>
           )}
         </div>
       )}
 
       {tab === 'timeline' && (
-        <div className="tabpanel" role="tabpanel">
-          <div style={{ flex: ev ? '1 1 40%' : 1, minHeight: 96, display: 'flex', flexDirection: 'column' }}>
+        <div className="tabpanel tab-enter" {...panel('timeline')}>
+          <div className="inc-list-split">
           <DataTable
             label="Report timeline"
             unit="rows"
             rows={b.timeline}
-            columns={columns}
+            columns={cols}
             rowKey={(r) => r.alert_id}
             selectedKey={ev}
             onSelect={(r) => route.setParams({ ev: r.alert_id })}
@@ -273,7 +293,7 @@ function ReportDetail({ report, route }: { report: Report; route: Props['route']
           />
           </div>
           {ev && (
-            <div style={{ flex: '1 1 60%', minHeight: 0, display: 'flex', borderTop: '1px solid var(--border-strong)' }}>
+            <div className="inc-ev-split">
               <EvidencePane alertId={ev} focusKey={focusEvidence} onClose={() => route.setParams({ ev: null })} />
             </div>
           )}
@@ -281,12 +301,13 @@ function ReportDetail({ report, route }: { report: Report; route: Props['route']
       )}
 
       {tab === 'citations' && (
-        <div className="tabpanel detail-scroll" role="tabpanel">
-          <div className="section">
-            {b.citations.length === 0 && <p className="muted">No citations.</p>}
+        <div className="tabpanel detail-scroll tab-enter" {...panel('citations')}>
+          <div className="block">
+            {b.citations.length === 0 && <EmptyState title="No citations.">This report cites no alert.</EmptyState>}
+            <div>
             {b.citations.slice(0, 200).map((c) => (
-              <div className="logline" key={c.alert_id} style={{ gridTemplateColumns: 'minmax(0, 1fr)' }}>
-                <span>
+              <div className="rp-cite" key={c.alert_id}>
+                <span className="head">
                   <button type="button" className="linklike mono" onClick={() => {
                       setTab('timeline');
                       setFocusEvidence(Date.now());
@@ -302,8 +323,9 @@ function ReportDetail({ report, route }: { report: Report; route: Props['route']
                 </span>
               </div>
             ))}
+            </div>
             {b.citations.length > 200 && (
-              <p className="muted" style={{ marginTop: 8 }}>
+              <p className="muted">
                 Showing 200 of {fmtInt(b.citations.length)} citations. The Timeline tab lists every row; the JSON download has all of them.
               </p>
             )}
@@ -324,25 +346,26 @@ function ReportPreview({ report }: { report: Report }) {
   const dets = ts ? DETECTOR_ORDER.filter((d) => ts.series[d]) : [];
   const span = epochSeconds(b.incident.last_ts) - epochSeconds(b.incident.first_ts);
   return (
-    <div className="section" style={{ display: 'grid', gap: 'var(--sp-12)' }}>
-      <div>
-        <h3 className="chart-title">Executive summary</h3>
-        <p style={{ margin: '4px 0 0', lineHeight: '20px' }}>
+    <div className="block">
+      <div className="inc-what">
+        <h3 className="block-title">Executive summary</h3>
+        <p className="rp-summary">
           <SeverityCell value={b.incident.severity} /> incident <span className="mono">{b.incident.incident_id}</span> in {b.incident.scenario}: {fmtInt(b.incident.alerts)} alerts over{' '}
-          {fmtDuration(span)} ({b.incident.first_ts} to {b.incident.last_ts}, UTC), from {Object.keys(b.incident.detectors).length} detector
+          {fmtDuration(span)} ({isoUtc(b.incident.first_ts)} to {isoUtc(b.incident.last_ts)}, UTC), from {Object.keys(b.incident.detectors).length} detector
           {Object.keys(b.incident.detectors).length === 1 ? '' : 's'}, involving {fmtInt(b.incident.entities.length)} hosts and addresses.{' '}
           {b.techniques.length > 0 ? `Mapped ATT&CK techniques: ${b.techniques.map((t) => `${t.technique_id} (${fmtInt(t.alerts)})`).join(', ')}.` : 'No alert is mapped to ATT&CK.'}{' '}
           {b.recommendations.length > 0 ? `${b.recommendations.length} playbook suggestion${b.recommendations.length === 1 ? '' : 's'}; nothing runs without an approved request.` : ''}
         </p>
-        <p className="faint" style={{ margin: '4px 0 0', fontSize: 'var(--fs-12)' }}>
-          Report {report.report_id}, created {report.created_utc}. Platform output on replayed demo data; no labels.
+        <p className="quiet-note">
+          Report {report.report_id}, created {isoUtc(report.created_utc)}. Platform output on replayed demo data; no labels.
         </p>
       </div>
       {!c ? (
-        <div className="notice">This report was stored before charts were added (report version {String(b.report_version ?? 'd1')}). Create a new report from the incident to get the timeline and entity graph.</div>
+        <div className="notice" role="status">This report was stored before charts were added (report version {String(b.report_version ?? 'd1')}). Create a new report from the incident to get the timeline and entity graph.</div>
       ) : (
         <>
           <ChartFrame
+            className="flat-chart"
             title="Alert timeline"
             question="When did the incident's alerts arrive, and from which detector?"
             legend={dets.map((d) => ({ key: d, label: detectorName(d), tone: detectorTone(d), value: fmtInt(ts!.series[d]!.reduce((x, y) => x + y, 0)) }))}

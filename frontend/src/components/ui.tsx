@@ -223,7 +223,7 @@ export function ModelOffline() {
 
 export function SkeletonLines({ lines = 4 }: { lines?: number }) {
   return (
-    <div className="state" aria-busy="true" aria-label="Loading">
+    <div className="state" role="status" aria-busy="true" aria-label="Loading">
       {Array.from({ length: lines }, (_, i) => (
         <div key={i} className="skeleton-bar" style={{ width: `${[60, 85, 40, 70][i % 4]}%`, minWidth: 120 }} />
       ))}
@@ -246,14 +246,10 @@ export function Dialog({ title, onClose, children, footer }: { title: string; on
       className="dialog"
       aria-label={title}
       onClose={onClose}
-      onCancel={(e) => {
-        e.preventDefault();
-        onClose();
-      }}
     >
       <div className="dialog-head">
         <h2>{title}</h2>
-        <button type="button" className="copy-btn" onClick={onClose} aria-label="Close">
+        <button type="button" className="btn ghost icon-only" onClick={() => ref.current?.close()} aria-label="Close">
           <Icon name="close" />
         </button>
       </div>
@@ -298,4 +294,148 @@ export class ScreenBoundary extends Component<{ children: ReactNode; resetKey: s
       </div>
     );
   }
+}
+
+// ---- page pattern (DESIGN.md 5): header, sections, tabs, KPI row ------------------------------
+
+export interface Crumb {
+  label: string;
+  href?: string;
+}
+
+/**
+ * The header of every screen: optional breadcrumb, the title, the one question the screen answers,
+ * and the primary action on the right. `bar` is the slim variant above a split pane.
+ */
+export function PageHeader({ title, purpose, crumbs, actions, bar }: { title: ReactNode; purpose?: ReactNode; crumbs?: readonly Crumb[]; actions?: ReactNode; bar?: boolean }) {
+  return (
+    <header className={`page-header${bar ? ' bar' : ''}`}>
+      {crumbs && crumbs.length > 0 && (
+        <nav className="crumbs" aria-label="Breadcrumb">
+          {crumbs.map((c, i) => (
+            <span key={i}>
+              {c.href ? <a href={c.href}>{c.label}</a> : c.label}
+              {i < crumbs.length - 1 && <span aria-hidden="true"> /</span>}
+            </span>
+          ))}
+        </nav>
+      )}
+      <h1>{title}</h1>
+      {purpose && <p className="purpose">{purpose}</p>}
+      {actions && <div className="actions">{actions}</div>}
+    </header>
+  );
+}
+
+/** A scrolling page: max content width, the header, then sections. */
+export function Page({ children, className, label }: { children: ReactNode; className?: string; label?: string }) {
+  return (
+    <div className={`page${className ? ` ${className}` : ''}`} aria-label={label}>
+      <div className="page-inner">{children}</div>
+    </div>
+  );
+}
+
+/** A titled block of a page. `description` is one line; `actions` sit right of the title. */
+export function Section({ id, title, description, actions, children, className }: { id?: string; title: ReactNode; description?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string }) {
+  const hid = id ? `${id}-t` : undefined;
+  return (
+    <section className={`sec${className ? ` ${className}` : ''}`} id={id} aria-labelledby={hid}>
+      <div className="sec-head">
+        <div>
+          <h2 id={hid}>{title}</h2>
+          {description && <p>{description}</p>}
+        </div>
+        {actions && <div className="actions">{actions}</div>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+export interface TabItem<T extends string> {
+  id: T;
+  label: ReactNode;
+  count?: number | string;
+}
+
+/**
+ * Tab list (WAI-ARIA tabs: roving tabindex, Left / Right / Home / End). The caller renders the panel
+ * with `role="tabpanel"`, `id={`${idBase}-panel-${id}`}` and `aria-labelledby={`${idBase}-tab-${id}`}`.
+ */
+export function Tabs<T extends string>({ tabs, value, onChange, label, idBase, inset }: { tabs: readonly TabItem<T>[]; value: T; onChange: (id: T) => void; label: string; idBase: string; inset?: boolean }) {
+  const onKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const i = tabs.findIndex((t) => t.id === value);
+    const n = tabs.length;
+    const to = e.key === 'ArrowRight' ? (i + 1) % n : e.key === 'ArrowLeft' ? (i - 1 + n) % n : e.key === 'Home' ? 0 : e.key === 'End' ? n - 1 : -1;
+    const next = tabs[to];
+    if (!next) return;
+    e.preventDefault();
+    onChange(next.id);
+    document.getElementById(`${idBase}-tab-${next.id}`)?.focus();
+  };
+  return (
+    <div className={`tabs${inset ? ' inset' : ''}`} role="tablist" aria-label={label} onKeyDown={onKey}>
+      {tabs.map((t) => (
+        <button
+          key={t.id}
+          type="button"
+          role="tab"
+          id={`${idBase}-tab-${t.id}`}
+          aria-selected={t.id === value}
+          aria-controls={`${idBase}-panel-${t.id}`}
+          tabIndex={t.id === value ? 0 : -1}
+          onClick={() => onChange(t.id)}
+        >
+          {t.label}
+          {t.count !== undefined && <span className="count num">{t.count}</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** One cell of a `.kpi-row`: label, value, one line of context; a link when `href` is set. */
+export function Kpi({ label, value, hint, href }: { label: ReactNode; value: ReactNode; hint?: ReactNode; href?: string }) {
+  const body = (
+    <>
+      <span className="kpi-label">{label}</span>
+      <span className="kpi-value num">{value}</span>
+      {hint && <span className="kpi-hint">{hint}</span>}
+    </>
+  );
+  return href ? (
+    <a className="kpi" href={href}>
+      {body}
+    </a>
+  ) : (
+    <div className="kpi">{body}</div>
+  );
+}
+
+/** Key facts as a definition grid (label over value). */
+export function DefGrid({ items }: { items: readonly { label: ReactNode; value: ReactNode }[] }) {
+  return (
+    <dl className="def-grid">
+      {items.map((it, i) => (
+        <div key={i}>
+          <dt>{it.label}</dt>
+          <dd>{it.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/** Secondary detail behind a disclosure (native details: keyboard and find-in-page work). */
+export function Disclosure({ summary, children, open, onToggle }: { summary: ReactNode; children: ReactNode; open?: boolean; onToggle?: (open: boolean) => void }) {
+  return (
+    <details className="disclosure" open={open} onToggle={onToggle ? (e) => onToggle(e.currentTarget.open) : undefined}>
+      <summary>
+        <Icon name="chevronRight" />
+        {summary}
+      </summary>
+      {children}
+    </details>
+  );
 }

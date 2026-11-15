@@ -1,4 +1,4 @@
-// Alerts: facet sidebar (detector, level, rule id, ATT&CK technique, host; counts and inline bars),
+// Alerts: facet sidebar (detector, level, rule id, ATT&CK technique, host; counts and thin bars),
 // the filtered table (GET /alerts/query, exact total), saved filters (this browser only), CSV
 // export of the filtered view, full-text search, and the evidence of the selected alert.
 // Filters live in the URL so charts elsewhere can link to a filtered view.
@@ -6,20 +6,20 @@
 import { useMemo, useState } from 'react';
 
 import { api, ApiError, downloadAlertsCsv, type AlertFilter, type FacetName, type SearchHit } from '../api.ts';
-import { MiniBar } from '../charts/Bars.tsx';
 import { TimeBars } from '../charts/TimeBars.tsx';
-import { ChartFrame, DETECTOR_ORDER, detectorTone, type Tone } from '../charts/ChartFrame.tsx';
+import { ChartFrame, DETECTOR_ORDER, detectorTone } from '../charts/ChartFrame.tsx';
 import { AlertQueryTable, describeFilter, filterKey } from '../components/AlertQueryTable.tsx';
 import { AlertRunsTable } from '../components/AlertRunsTable.tsx';
 import { Term } from '../components/Term.tsx';
 import { DataTable, type Column } from '../components/DataTable.tsx';
 import { EvidencePane } from '../components/EvidencePane.tsx';
 import { SplitPane } from '../components/SplitPane.tsx';
-import { Button, DetectorTag, Dialog, EmptyState, ErrorState, Time, describeError, detectorName } from '../components/ui.tsx';
+import { Button, DetectorTag, Dialog, EmptyState, ErrorState, PageHeader, Time, describeError, detectorName } from '../components/ui.tsx';
 import { storageGet, storageSet, useApp, useLoad, useScreenContext, type RouteApi } from '../hooks.ts';
 import { Icon } from '../icons.tsx';
 import { epochSeconds, fmtInt } from '../lib/format.ts';
 import { needlesFromQuery } from '../lib/highlight.ts';
+import { fitColumns, useNarrow } from '../components/narrow.ts';
 
 const KEYS: Array<keyof AlertFilter> = ['detector', 'level', 'rule_id', 'technique', 'host', 'ip', 'since', 'until'];
 const FACETS: Array<[FacetName, string, string]> = [
@@ -65,6 +65,7 @@ export function AlertsScreen({ scenario, route, searchRef }: { scenario: string;
 
   const set = (patch: Partial<Record<keyof AlertFilter | 'q' | 'id' | 'fold', string | null>>) => route.setParams(patch as Record<string, string | null>);
   const toggle = (facet: FacetName, value: string) => set({ [facet]: filter[facet] === value ? null : value });
+  const clearAll = () => route.setParams(Object.fromEntries(KEYS.map((k) => [k, null])));
 
   const [naming, setNaming] = useState<string | null>(null);
   const save = () => setNaming(describeFilter(filter));
@@ -104,65 +105,85 @@ export function AlertsScreen({ scenario, route, searchRef }: { scenario: string;
     [],
   );
 
+  const narrow = useNarrow();
+  const hitCols = useMemo(() => fitColumns(hitColumns, narrow, ['id']), [hitColumns, narrow]);
+
   const sidebar = (
     <aside className="facets" aria-label="Facets">
       {facets.error && !facets.data && <ErrorState what="facets" error={facets.error} onRetry={facets.reload} />}
-      {!facets.data && !facets.error && <div className="facet faint">Counting...</div>}
+      {!facets.data && !facets.error && (
+        <div className="fc-group" aria-busy="true" aria-label="Counting facets">
+          {[70, 50, 85, 40, 60].map((w, i) => (
+            <div key={i} className="fc-v" aria-hidden="true">
+              <span />
+              <span className="fc-label">
+                <span className="skeleton-bar" style={{ display: 'block', width: `${w}%` }} />
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
       {facets.data &&
         FACETS.map(([name, label, term]) => {
           const f = facets.data!.facets[name];
           const max = Math.max(1, ...f.values.map((v) => v.count));
           return (
-            <section key={name} className="facet" aria-labelledby={`fc-${name}`}>
-              <h3 id={`fc-${name}`}>
+            <section key={name} className="fc-group" aria-labelledby={`fc-${name}`}>
+              <h3 id={`fc-${name}`} className="fc-head">
                 <span>
                   <Term id={term}>{label}</Term>
                 </span>
                 <span className="faint num">{fmtInt(f.distinct)}</span>
               </h3>
+              {f.values.length === 0 && <div className="fc-empty">No value in the filtered alerts.</div>}
               <ul>
                 {f.values.map((v) => {
-                  const tone: Tone = name === 'detector' ? detectorTone(v.value) : 'ref';
                   const pressed = filter[name] === v.value;
                   const text = name === 'detector' ? detectorName(v.value) : v.value;
                   return (
                     <li key={v.value}>
                       <button
                         type="button"
+                        className="fc-v"
                         aria-pressed={pressed}
                         onClick={() => toggle(name, v.value)}
                         title={`${text}${v.label ? ` ${v.label}` : ''}: ${fmtInt(v.count)} alerts${pressed ? ' (click to remove)' : ''}`}
                       >
-                        <span className="fv">
-                          <span className={name === 'detector' ? '' : 'mono'}>{text}</span>
+                        {pressed ? <Icon name="check" /> : <span aria-hidden="true" />}
+                        <span className="fc-label">
+                          {name === 'detector' ? <DetectorTag value={v.value} /> : <span className="mono">{text}</span>}
                           {v.label && <span className="faint"> {v.label}</span>}
                         </span>
-                        <MiniBar value={v.count} max={max} tone={tone} />
-                        <span className="fc">{fmtInt(v.count)}</span>
+                        <span className="fc-count num">{fmtInt(v.count)}</span>
+                        <span className="fc-bar" aria-hidden="true">
+                          <span style={{ width: `${Math.max(2, (v.count / max) * 100)}%` }} />
+                        </span>
                       </button>
                     </li>
                   );
                 })}
               </ul>
-              {f.distinct > f.shown && <div className="faint" style={{ fontSize: 'var(--fs-11)', padding: '2px 4px' }}>top {f.shown} of {fmtInt(f.distinct)}</div>}
+              {f.distinct > f.shown && (
+                <div className="fc-more num">
+                  top {f.shown} of {fmtInt(f.distinct)}
+                </div>
+              )}
             </section>
           );
         })}
-      <section className="facet" aria-labelledby="fc-saved">
-        <h3 id="fc-saved">
+      <section className="fc-group" aria-labelledby="fc-saved">
+        <h3 id="fc-saved" className="fc-head">
           <span>Saved filters</span>
           <span className="faint">this browser</span>
         </h3>
-        {saved.length === 0 && <div className="faint">None yet. Set a filter, then Save.</div>}
+        {saved.length === 0 && <div className="fc-empty">None yet. Set a filter, then Save filter.</div>}
         <ul>
           {saved.map((s) => (
-            <li key={s.name} style={{ display: 'flex' }}>
-              <button type="button" onClick={() => route.setParams({ ...Object.fromEntries(KEYS.map((k) => [k, null])), ...s.params })} title={JSON.stringify(s.params)}>
-                <span className="fv">{s.name}</span>
+            <li key={s.name} className="fc-saved">
+              <button type="button" className="fc-v" onClick={() => route.setParams({ ...Object.fromEntries(KEYS.map((k) => [k, null])), ...s.params })} title={JSON.stringify(s.params)}>
+                <span className="fc-label">{s.name}</span>
               </button>
-              <button type="button" aria-label={`Delete saved filter ${s.name}`} style={{ width: 24, gridTemplateColumns: '1fr' }} onClick={() => removeSaved(s.name)}>
-                <Icon name="close" />
-              </button>
+              <Button kind="ghost" icon="close" aria-label={`Delete saved filter ${s.name}`} title="Delete this saved filter" onClick={() => removeSaved(s.name)} />
             </li>
           ))}
         </ul>
@@ -172,28 +193,16 @@ export function AlertsScreen({ scenario, route, searchRef }: { scenario: string;
 
   const ts = facets.data?.timeseries;
   const list = (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-      <div className="pane-head">
-        <h1>Alerts</h1>
-        <span className="muted num">{facets.data ? `${fmtInt(facets.data.total)} match` : ''}</span>
-        <span className="spacer" />
-        <Button aria-pressed={fold} onClick={() => set({ fold: fold ? '0' : null })} title="Fold consecutive alerts with the same rule, level, host and source IP into one row">
-          Fold repeats
-        </Button>
-        {active.length > 0 && <Button onClick={save}>Save filter</Button>}
-        <Button icon="download" onClick={() => void exportCsv()} disabled={exporting || !facets.data || facets.data.total === 0} title="CSV of the filtered view (no raw records)">
-          {exporting ? 'Exporting...' : 'Export CSV'}
-        </Button>
-      </div>
+    <div className="al-list">
       <form
-        className="filters"
+        className="toolbar"
         role="search"
         onSubmit={(e) => {
           e.preventDefault();
           set({ q: query.trim() || null, id: null });
         }}
       >
-        <div className="search">
+        <div className="searchbox">
           <Icon name="search" />
           <label className="visually-hidden" htmlFor="al-q">
             Search log text
@@ -216,22 +225,30 @@ export function AlertsScreen({ scenario, route, searchRef }: { scenario: string;
           />
         </div>
         <Button type="submit">Search</Button>
+        <Button aria-pressed={fold} onClick={() => set({ fold: fold ? '0' : null })} title="Fold consecutive alerts with the same rule, level, host and source IP into one row">
+          Fold repeats
+        </Button>
+        {active.length > 0 && <Button onClick={save}>Save filter</Button>}
+        <Button icon="download" onClick={() => void exportCsv()} disabled={exporting || !facets.data || facets.data.total === 0} title="CSV of the filtered view (no raw records)">
+          {exporting ? 'Exporting...' : 'Export CSV'}
+        </Button>
         {active.map((k) => (
-          <button key={k} type="button" className="chip" onClick={() => set({ [k]: null })} aria-label={`Remove filter ${k} = ${filter[k]}`}>
-            {k.replace('_', ' ')} = <span className="mono">{k === 'detector' ? detectorName(String(filter[k])) : String(filter[k])}</span>
+          <button key={k} type="button" className="filter-tag" onClick={() => set({ [k]: null })} aria-label={`Remove filter ${k} = ${filter[k]}`}>
+            <span className="k">{k === 'ip' ? 'IP' : k.replace('_', ' ')}</span>
+            <span className="mono">{k === 'detector' ? detectorName(String(filter[k])) : String(filter[k])}</span>
             <Icon name="close" />
           </button>
         ))}
         {active.length > 1 && (
-          <Button kind="ghost" onClick={() => route.setParams(Object.fromEntries(KEYS.map((k) => [k, null])))}>
+          <Button kind="ghost" onClick={clearAll}>
             Clear all
           </Button>
         )}
       </form>
       {!queryApplied && ts && ts.total > 0 && (
-        <div style={{ padding: '0 var(--sp-12)' }}>
+        <div className="al-chart">
           <ChartFrame
-            className="compact-chart"
+            className="flat-chart compact-chart"
             title="Matching alerts over time"
             question="Drag to narrow the time range."
             legend={DETECTOR_ORDER.filter((d) => ts.series[d]).map((d) => ({ key: d, label: detectorName(d), tone: detectorTone(d) }))}
@@ -241,7 +258,7 @@ export function AlertsScreen({ scenario, route, searchRef }: { scenario: string;
               series={ts.series}
               start={ts.start ? epochSeconds(ts.start) : 0}
               binSeconds={ts.bin_seconds ?? 1}
-              height={96}
+              height={80}
               label="Matching alerts over time"
               onSelect={(b) => {
                 const s0 = ts.start ? epochSeconds(ts.start) : 0;
@@ -252,7 +269,7 @@ export function AlertsScreen({ scenario, route, searchRef }: { scenario: string;
           </ChartFrame>
         </div>
       )}
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <div className="al-table">
         {queryApplied ? (
           search.error && !search.data ? (
             <ErrorState what="search results" error={search.error} onRetry={search.reload} />
@@ -262,22 +279,27 @@ export function AlertsScreen({ scenario, route, searchRef }: { scenario: string;
               unit="hits"
               primary
               rows={search.data?.hits ?? []}
-              columns={hitColumns}
+              columns={hitCols}
               rowKey={(h) => h.alert_id}
               selectedKey={selectedId}
               onSelect={(h) => set({ id: h.alert_id })}
               copyText={(h) => h.alert_id}
               loading={search.loading}
               footer={<span>Best matches first; at most 200 hits. Facet filters do not apply to text search.</span>}
-              empty={<EmptyState title={`No alert contains all of: ${needles.join(', ') || queryApplied}.`}>The search covers log lines and rule names of {scenario}.</EmptyState>}
+              empty={
+                <EmptyState title={`No alert contains all of: ${needles.join(', ') || queryApplied}.`}>
+                  The search covers log lines and rule names of {scenario}.{' '}
+                  <button type="button" className="linklike" onClick={() => (setQuery(''), set({ q: null }))}>
+                    Clear the search
+                  </button>
+                </EmptyState>
+              }
             />
           )
+        ) : fold ? (
+          <AlertRunsTable scenario={scenario} filter={filter} primary onClear={active.length > 0 ? clearAll : undefined} label="Alerts in time order, repeats folded" selectedId={selectedId} onSelect={(id) => set({ id })} onFilter={(p) => set({ ...p, fold: '0' })} />
         ) : (
-          fold ? (
-            <AlertRunsTable scenario={scenario} filter={filter} primary label="Alerts in time order, repeats folded" selectedId={selectedId} onSelect={(id) => set({ id })} onFilter={(p) => set({ ...p, fold: '0' })} />
-          ) : (
-            <AlertQueryTable scenario={scenario} filter={filter} primary compact label="Alerts in time order" selectedId={selectedId} onSelect={(a) => set({ id: a.alert_id })} />
-          )
+          <AlertQueryTable scenario={scenario} filter={filter} primary compact onClear={active.length > 0 ? clearAll : undefined} label="Alerts in time order" selectedId={selectedId} onSelect={(a) => set({ id: a.alert_id })} />
         )}
       </div>
     </div>
@@ -292,9 +314,12 @@ export function AlertsScreen({ scenario, route, searchRef }: { scenario: string;
   );
 
   return (
-    <div className="alerts-layout">
-      {sidebar}
-      <SplitPane id="alerts" left={list} right={detail} initial={62} />
+    <div className="work">
+      <PageHeader bar title="Alerts" purpose="Which alerts match?" actions={facets.data ? <span className="tb-meta num">{fmtInt(facets.data.total)} match</span> : undefined} />
+      <div className="al-layout">
+        {sidebar}
+        <SplitPane id="alerts" left={list} right={detail} initial={64} />
+      </div>
       {naming !== null && (
         <Dialog
           title="Save filter"

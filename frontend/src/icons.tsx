@@ -45,6 +45,10 @@ const PATHS = {
   minimise: <path d="M3.5 11.5h9" />,
   expand: <path d="M9.5 2.5h4v4M13.5 2.5 9 7M6.5 13.5h-4v-4M2.5 13.5 7 9" />,
   trash: <path d="M2.5 4.5h11M6 4.5V2.8h4v1.7M4 4.5l.7 9h6.6l.7-9" />,
+  menu: <path d="M2.5 4h11M2.5 8h11M2.5 12h11" />,
+  chevronLeft: <path d="M10 3.5 5.5 8l4.5 4.5" />,
+  sidebar: <path d="M2.5 2.5h11v11h-11zM6 2.5v11" />,
+  arrowRight: <path d="M3 8h10M9 4l4 4-4 4" />,
 } satisfies Record<string, ReactNode>;
 
 export type IconName = keyof typeof PATHS;

@@ -7,14 +7,14 @@ import { Icon } from '../icons.tsx';
 export function ErrorPage({ title, detail, home, onRetry }: { title: string; detail: string; home: string; onRetry?: () => void }) {
   return (
     <div className="page">
-      <div className="state" data-kind="error" role="alert" style={{ maxWidth: 640, margin: '48px auto' }}>
-        <div className="state-title">
+      <div className="err-page" role="alert">
+        <span className="err-icon" aria-hidden="true">
           <Icon name="warning" />
-          {title}
-        </div>
+        </span>
+        <h1>{title}</h1>
         <p>{detail}</p>
-        <p className="muted">The rest of the console still works: use the rail on the left, or go to the start page.</p>
-        <p style={{ display: 'flex', gap: 'var(--sp-8)' }}>
+        <p className="err-note">The rest of the console still works: use the navigation, the command palette (Ctrl+K), or go to the start page.</p>
+        <div className="err-actions">
           <a className="btn" href={`#${home}`}>
             Go to the start page
           </a>
@@ -23,7 +23,7 @@ export function ErrorPage({ title, detail, home, onRetry }: { title: string; det
               Retry
             </Button>
           )}
-        </p>
+        </div>
       </div>
     </div>
   );

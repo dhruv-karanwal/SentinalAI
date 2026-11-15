@@ -4,7 +4,7 @@
 import { useState } from 'react';
 
 import { api, ApiError, type Role } from '../api.ts';
-import { Button, Dialog, EmptyState, ErrorState, SkeletonLines, Time, describeError } from '../components/ui.tsx';
+import { Button, Dialog, EmptyState, ErrorState, Page, PageHeader, Section, SkeletonLines, Time, describeError } from '../components/ui.tsx';
 import { useApp, useLoad } from '../hooks.ts';
 import { Icon } from '../icons.tsx';
 
@@ -51,47 +51,59 @@ export function UsersScreen() {
   };
 
   return (
-    <div className="page">
-      <div className="page-head">
-        <h1>Users</h1>
-        <span className="faint">Admin only. Every change is written to the audit log.</span>
-        <span className="spacer" />
-        <Button icon="refresh" onClick={reload} disabled={loading}>
-          Reload
-        </Button>
-      </div>
-      <div className="page-body" style={{ maxWidth: 960 }}>
-        {data && (
-          <div className="notice" data-kind={data.password_source_set ? undefined : 'error'} role="status">
-            <Icon name={data.password_source_set ? 'check' : 'warning'} />
-            <span>
-              Passwords for new and reset accounts come from <span className="mono">{data.password_source}</span> on the API host
-              {data.password_source_set ? ' (set).' : ' (not set: create and reset will be refused until it is set, at least 8 characters).'} They are never typed or shown here.
-            </span>
-          </div>
-        )}
-        <form className="chart" onSubmit={(e) => void create(e)} noValidate style={{ display: 'flex', gap: 'var(--sp-12)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <div className="field">
-            <label htmlFor="nu-name">Username</label>
-            <input id="nu-name" className="input mono" value={name} onChange={(e) => setName(e.target.value)} aria-invalid={formError ? true : undefined} aria-describedby={formError ? 'nu-err' : undefined} />
-          </div>
-          <div className="field">
-            <label htmlFor="nu-role">Role</label>
-            <select id="nu-role" className="select" value={role} onChange={(e) => setRole(e.target.value as Role)}>
-              {ROLES.map((r) => (
-                <option key={r}>{r}</option>
-              ))}
-            </select>
-          </div>
-          <Button kind="primary" type="submit" disabled={busy}>
-            Create account
+    <Page label="Users">
+      <PageHeader
+        title="Users"
+        purpose="Who can sign in, and with which role? Admin only; every change is written to the audit log."
+        actions={
+          <Button icon="refresh" onClick={reload} disabled={loading}>
+            Reload
           </Button>
-          {formError && (
-            <span className="field-error" id="nu-err" role="alert">
-              {formError}
-            </span>
+        }
+      />
+
+      <Section id="us-new" title="New account" description="The password comes from the API host, never from this browser.">
+        <div className="form-rows">
+          {data && (
+            <div className="status-line" data-kind={data.password_source_set ? undefined : 'error'} role="status">
+              <Icon name={data.password_source_set ? 'check' : 'warning'} />
+              <span>
+                Passwords for new and reset accounts come from <span className="mono">{data.password_source}</span> on the API host
+                {data.password_source_set ? ' (set).' : ' (not set: create and reset will be refused until it is set, at least 8 characters).'} They are never typed or
+                shown here.
+              </span>
+            </div>
           )}
-        </form>
+          <form className="inline-form"onSubmit={(e) => void create(e)} noValidate>
+            <div className="field">
+              <label htmlFor="nu-name">Username</label>
+              <input id="nu-name" className="input mono" value={name} onChange={(e) => setName(e.target.value)} aria-invalid={formError ? true : undefined} aria-describedby={formError ? 'nu-err' : 'nu-help'} />
+            </div>
+            <div className="field">
+              <label htmlFor="nu-role">Role</label>
+              <select id="nu-role" className="select" value={role} onChange={(e) => setRole(e.target.value as Role)}>
+                {ROLES.map((r) => (
+                  <option key={r}>{r}</option>
+                ))}
+              </select>
+            </div>
+            <Button kind="primary" type="submit" disabled={busy}>
+              Create account
+            </Button>
+            {formError ? (
+              <span className="field-error" id="nu-err" role="alert">
+                {formError}
+              </span>
+            ) : (
+              <span className="form-help" id="nu-help">
+                1-64 letters, digits, dot, dash or underscore.
+              </span>
+            )}
+          </form>
+        </div>
+      </Section>
+
+      <Section id="us-list" title="Accounts" description={data ? `${data.users.length} account${data.users.length === 1 ? '' : 's'}.` : undefined}>
         {error && !data ? (
           <ErrorState what="users" error={error} onRetry={reload} />
         ) : !data ? (
@@ -99,49 +111,52 @@ export function UsersScreen() {
         ) : data.users.length === 0 ? (
           <EmptyState title="No accounts">Create one above or with app.main create-user on the API host.</EmptyState>
         ) : (
-          <table className="data-table">
-            <caption className="visually-hidden">Accounts</caption>
-            <thead>
-              <tr>
-                <th>Username</th>
-                <th>Role</th>
-                <th>State</th>
-                <th>Created (UTC)</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.users.map((u) => {
-                const self = u.username === session.username;
-                return (
-                  <tr key={u.username}>
-                    <td className="mono">{u.username}</td>
-                    <td>{u.role}</td>
-                    <td>
-                      <span className="tag" data-tone={u.disabled_utc ? 'rejected' : 'approved'}>
-                        {u.disabled_utc ? 'deactivated' : 'active'}
-                      </span>
-                    </td>
-                    <td>
-                      <Time ts={u.created_utc} />
-                    </td>
-                    <td style={{ display: 'flex', gap: 'var(--sp-4)' }}>
-                      {self ? (
-                        <span className="faint">your account</span>
-                      ) : (
-                        <>
-                          <Button onClick={() => setConfirm({ user: u.username, action: u.disabled_utc ? 'reactivate' : 'deactivate' })}>{u.disabled_utc ? 'Reactivate' : 'Deactivate'}</Button>
-                          <Button onClick={() => setConfirm({ user: u.username, action: 'reset' })}>Reset password</Button>
-                        </>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <div className="card table-scroll">
+            <table className="plain-table">
+              <caption className="visually-hidden">Accounts</caption>
+              <thead>
+                <tr>
+                  <th>Username</th>
+                  <th>Role</th>
+                  <th>State</th>
+                  <th>Created (UTC)</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.users.map((u) => {
+                  const self = u.username === session.username;
+                  return (
+                    <tr key={u.username}>
+                      <td className="mono nowrap">{u.username}</td>
+                      <td className="nowrap">{u.role}</td>
+                      <td>
+                        <span className="tag" data-tone={u.disabled_utc ? 'rejected' : 'approved'}>
+                          {u.disabled_utc ? 'deactivated' : 'active'}
+                        </span>
+                      </td>
+                      <td className="nowrap">
+                        <Time ts={u.created_utc} />
+                      </td>
+                      <td className="nowrap">
+                        {self ? (
+                          <span className="faint">your account</span>
+                        ) : (
+                          <div className="btn-row">
+                            <Button onClick={() => setConfirm({ user: u.username, action: u.disabled_utc ? 'reactivate' : 'deactivate' })}>{u.disabled_utc ? 'Reactivate' : 'Deactivate'}</Button>
+                            <Button onClick={() => setConfirm({ user: u.username, action: 'reset' })}>Reset password</Button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
-      </div>
+      </Section>
+
       {confirm && (
         <Dialog
           title={`${confirm.action === 'reset' ? 'Reset password' : confirm.action === 'deactivate' ? 'Deactivate' : 'Reactivate'}: ${confirm.user}`}
@@ -164,6 +179,6 @@ export function UsersScreen() {
           </p>
         </Dialog>
       )}
-    </div>
+    </Page>
   );
 }

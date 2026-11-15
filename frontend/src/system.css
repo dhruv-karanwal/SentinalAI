@@ -1,0 +1,493 @@
+/* System layer (DESIGN.md 4-6): the base components every screen builds on. Tokens only.
+   Loaded right after base.css; screen stylesheets (shell, dash, work, about) come later. */
+
+/* ---- buttons: primary / secondary (default) / ghost; danger is a secondary in the High colour */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-8);
+  height: var(--control-h);
+  padding: 0 var(--sp-12);
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-s);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--fs-body);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-body);
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+}
+.btn:hover:not(:disabled) {
+  background: var(--raised);
+  border-color: var(--border-strong);
+}
+.btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.btn:disabled {
+  color: var(--text-faint);
+  cursor: not-allowed;
+  border-style: dashed;
+}
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+.btn.primary:hover:not(:disabled) {
+  background: var(--text);
+  border-color: var(--text);
+}
+.btn.danger {
+  color: var(--sev-high);
+}
+.btn.danger:hover:not(:disabled) {
+  border-color: var(--sev-high);
+}
+.btn.ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 0 var(--sp-8);
+}
+.btn.ghost:hover:not(:disabled) {
+  background: var(--raised);
+  border-color: transparent;
+  color: var(--text);
+}
+.btn[aria-pressed="true"] {
+  background: var(--selected);
+  border-color: var(--border-strong);
+}
+.btn.lg {
+  height: var(--control-h-lg);
+  padding: 0 var(--sp-16);
+}
+
+/* segmented control: a row of .btn sharing one outline */
+.segmented {
+  display: inline-flex;
+}
+.segmented > .btn {
+  border-radius: 0;
+  margin-left: calc(-1 * var(--hairline));
+}
+.segmented > .btn:first-child {
+  margin-left: 0;
+  border-radius: var(--radius-s) 0 0 var(--radius-s);
+}
+.segmented > .btn:last-child {
+  border-radius: 0 var(--radius-s) var(--radius-s) 0;
+}
+
+.input,
+.select,
+.textarea {
+  height: var(--control-h);
+  padding: 0 var(--sp-8);
+  border: var(--hairline) solid var(--border-strong);
+  border-radius: var(--radius-s);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--fs-body);
+  min-width: 0;
+  transition: border-color var(--dur-fast) var(--ease);
+}
+.input:hover,
+.select:hover,
+.textarea:hover {
+  border-color: var(--text-muted);
+}
+.textarea {
+  height: auto;
+  padding: var(--sp-8);
+  line-height: var(--lh-body);
+  resize: vertical;
+  width: 100%;
+}
+.input::placeholder,
+.textarea::placeholder {
+  color: var(--text-faint);
+}
+
+/* ---- page: header pattern, max width, sections, 12-column grid ---------------------------- */
+
+.page {
+  height: 100%;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+.page-inner {
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: var(--sp-24) var(--gutter) var(--sp-64);
+  display: grid;
+  gap: var(--sp-32);
+}
+.page-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--sp-4) var(--sp-16);
+}
+/* split-pane screens put the same header in a slim bar above the panes */
+.page-header.bar {
+  flex: none;
+  padding: var(--sp-12) var(--sp-16);
+  border-bottom: var(--hairline) solid var(--border);
+}
+.page-header .crumbs {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: var(--sp-8);
+  font-size: var(--fs-small);
+  line-height: var(--lh-small);
+  color: var(--text-faint);
+}
+.page-header .crumbs a {
+  color: var(--text-muted);
+  text-decoration: none;
+}
+.page-header .crumbs a:hover {
+  color: var(--text);
+}
+.page-header h1 {
+  grid-column: 1;
+  font-size: var(--fs-heading);
+  line-height: var(--lh-heading);
+}
+.page-header .purpose {
+  grid-column: 1;
+  color: var(--text-muted);
+  max-width: var(--measure);
+}
+.page-header .actions {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: end;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+}
+.page-header .crumbs ~ .actions {
+  grid-row: 2 / span 2;
+}
+
+.sec {
+  display: grid;
+  gap: var(--sp-16);
+  min-width: 0;
+}
+.sec-head {
+  display: flex;
+  align-items: end;
+  gap: var(--sp-16);
+}
+.sec-head > div:first-child {
+  flex: 1;
+  min-width: 0;
+}
+.sec-head h2 {
+  font-size: var(--fs-title);
+  line-height: var(--lh-title);
+}
+.sec-head p {
+  color: var(--text-muted);
+  max-width: var(--measure);
+}
+.sec-head .actions {
+  display: flex;
+  gap: var(--sp-8);
+}
+
+.grid-12 {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: var(--grid-gap);
+}
+.col-3 {
+  grid-column: span 3;
+}
+.col-4 {
+  grid-column: span 4;
+}
+.col-5 {
+  grid-column: span 5;
+}
+.col-6 {
+  grid-column: span 6;
+}
+.col-7 {
+  grid-column: span 7;
+}
+.col-8 {
+  grid-column: span 8;
+}
+.col-12 {
+  grid-column: span 12;
+}
+@media (max-width: 900px) {
+  .grid-12 > * {
+    grid-column: span 12;
+  }
+  .page-inner {
+    padding: var(--sp-16) var(--sp-16) var(--sp-64);
+    gap: var(--sp-24);
+  }
+  .page-header {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .page-header .actions,
+  .page-header .crumbs ~ .actions {
+    grid-column: 1;
+    grid-row: auto;
+    flex-wrap: wrap;
+  }
+}
+
+/* ---- card: the one container style (hairline, no shadow). Never a card inside a card. ------ */
+
+.card {
+  background: var(--surface);
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-m);
+  padding: var(--sp-16);
+  min-width: 0;
+}
+.card.flush {
+  padding: 0;
+  overflow: hidden;
+}
+a.card,
+button.card {
+  display: block;
+  text-align: left;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease);
+}
+a.card:hover,
+button.card:hover {
+  border-color: var(--border-strong);
+}
+
+/* ---- KPI row: one card, cells split by hairlines ------------------------------------------ */
+
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--hairline);
+  background: var(--border);
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-m);
+  overflow: hidden;
+}
+.kpi {
+  padding: var(--sp-16);
+  display: grid;
+  gap: var(--sp-4);
+  align-content: start;
+  min-width: 0;
+  background: var(--surface);
+  color: inherit;
+  text-decoration: none;
+  transition: background-color var(--dur-fast) var(--ease);
+}
+a.kpi:hover {
+  background: var(--raised);
+}
+.kpi-label {
+  font-size: var(--fs-small);
+  line-height: var(--lh-small);
+  color: var(--text-muted);
+}
+.kpi-value {
+  font-size: var(--fs-heading);
+  line-height: var(--lh-heading);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--track-tight);
+}
+.kpi-hint {
+  font-size: var(--fs-small);
+  line-height: var(--lh-small);
+  color: var(--text-faint);
+  overflow-wrap: anywhere;
+}
+
+/* ---- definition grid: key facts as label over value --------------------------------------- */
+
+.def-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--sp-12) var(--sp-24);
+}
+.def-grid dt {
+  font-size: var(--fs-micro);
+  line-height: var(--lh-micro);
+  letter-spacing: var(--track-label);
+  color: var(--text-faint);
+}
+.def-grid dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ---- tabs --------------------------------------------------------------------------------- */
+
+.tabs {
+  display: flex;
+  gap: var(--sp-24);
+  padding: 0 var(--sp-16);
+  border-bottom: var(--hairline) solid var(--border);
+  flex: none;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tabs.inset {
+  padding: 0;
+}
+.tabs [role="tab"] {
+  height: var(--control-h-lg);
+  padding: 0;
+  border: 0;
+  border-bottom: var(--focus-w) solid transparent;
+  background: none;
+  color: var(--text-muted);
+  font-size: var(--fs-body);
+  font-weight: var(--fw-medium);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--dur-mid) var(--ease), border-color var(--dur-mid) var(--ease);
+}
+.tabs [role="tab"]:hover {
+  color: var(--text);
+}
+.tabs [role="tab"][aria-selected="true"] {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+.tabs [role="tab"]:focus-visible {
+  outline-offset: calc(-1 * var(--focus-w));
+}
+.tabs .count {
+  margin-left: var(--sp-4);
+  color: var(--text-faint);
+  font-weight: var(--fw-regular);
+}
+.tab-enter {
+  animation: fade-rise var(--dur-mid) var(--ease) both;
+}
+
+/* ---- disclosure (details / summary) ------------------------------------------------------- */
+
+.disclosure > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  min-height: var(--control-h);
+  cursor: pointer;
+  list-style: none;
+  color: var(--text-muted);
+  font-weight: var(--fw-medium);
+}
+.disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+.disclosure > summary .icon {
+  transition: transform var(--dur-mid) var(--ease);
+}
+.disclosure[open] > summary .icon {
+  transform: rotate(90deg);
+}
+.disclosure[open] > summary {
+  color: var(--text);
+}
+.disclosure[open] > :not(summary) {
+  animation: fade-rise var(--dur-mid) var(--ease) both;
+}
+
+/* ---- labels ------------------------------------------------------------------------------- */
+
+.eyebrow {
+  font-size: var(--fs-micro);
+  line-height: var(--lh-micro);
+  letter-spacing: var(--track-label);
+  color: var(--text-faint);
+}
+
+/* ---- skeleton: still bars in the shape of the content (nothing loops) --------------------- */
+
+.skeleton-bar,
+.skel-line {
+  height: var(--sp-8);
+  background: var(--raised);
+  border-radius: var(--radius-s);
+}
+.skel-block {
+  background: var(--raised);
+  border-radius: var(--radius-m);
+  min-height: var(--sp-64);
+}
+
+/* ---- motion: enter once, 150-250 ms, one curve; nothing loops ----------------------------- */
+
+@keyframes fade-rise {
+  from {
+    opacity: 0;
+    transform: translateY(var(--sp-4));
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+.screen-enter {
+  animation: fade-rise var(--dur-mid) var(--ease) both;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.toast {
+  animation: fade-rise var(--dur-mid) var(--ease) both;
+}
+.toasts {
+  z-index: var(--z-toast);
+}
+/* short lists only, never the windowed tables */
+.row-enter {
+  animation: fade-rise var(--dur-mid) var(--ease) both;
+  animation-delay: calc(var(--i, 0) * var(--stagger));
+}
+[data-reveal] {
+  opacity: 0;
+  transform: translateY(var(--sp-8));
+  transition: opacity var(--dur-slow) var(--ease), transform var(--dur-slow) var(--ease);
+  transition-delay: calc(var(--i, 0) * var(--stagger));
+}
+[data-reveal][data-shown] {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+  [data-reveal] {
+    opacity: 1;
+    transform: none;
+  }
+}

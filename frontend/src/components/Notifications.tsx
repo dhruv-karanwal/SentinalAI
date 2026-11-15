@@ -47,8 +47,13 @@ export function Notifications() {
     const onDoc = (e: MouseEvent) => {
       if (box.current && !box.current.contains(e.target as Node)) setOpen(false);
     };
+    const onEsc = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
     document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onEsc);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onEsc);
+    };
   }, []);
   const approvals = useLoad((signal) => api.approvals(signal), [tick]);
   const runs = useLoad((signal) => api.runs(signal).catch(() => ({ runs: [] })), [tick]);
@@ -57,40 +62,49 @@ export function Notifications() {
     [session, approvals.data, runs.data],
   );
   const unseen = notes.filter((n) => !seen.has(n.id)).length;
+  const btn = useRef<HTMLButtonElement | null>(null);
+  const close = () => {
+    setOpen(false);
+    btn.current?.focus();
+  };
   return (
     <div className="bell" ref={box}>
       <button
+        ref={btn}
         type="button"
-        className="btn ghost"
+        className="btn ghost icon-only"
         aria-expanded={open}
         aria-controls="notes"
         aria-label={`Notifications: ${unseen} unread`}
+        title="Notifications"
         onClick={() => {
           setOpen(!open);
           if (!open) window.setTimeout(() => setSeen(new Set(notes.map((n) => n.id))), 1500);
         }}
-        onKeyDown={(e) => e.key === 'Escape' && setOpen(false)}
+        onKeyDown={(e) => e.key === 'Escape' && open && close()}
       >
         <Icon name="bell" />
         {unseen > 0 && <span className="badge">{unseen}</span>}
       </button>
       {open && (
-        <div className="popover" id="notes" style={{ right: 0 }} onKeyDown={(e) => e.key === 'Escape' && setOpen(false)}>
-          <h2>Notifications</h2>
-          {approvals.error && <div className="empty field-error">Approvals could not be loaded ({approvals.error.status || 'no answer'}).</div>}
-          {notes.length === 0 && !approvals.error && <div className="empty">Nothing waiting: no pending approvals for you, no decisions on your requests, no failed runs.</div>}
-          <ul>
-            {notes.map((n) => (
-              <li key={n.id}>
-                <a href={n.href} onClick={() => setOpen(false)} style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 0 }}>
-                  <span style={{ fontWeight: seen.has(n.id) ? 400 : 600 }}>{n.title}</span>
-                  <span className="faint">
-                    {n.sub} · {relTime(n.ts)}
-                  </span>
-                </a>
-              </li>
-            ))}
-          </ul>
+        <div className="menu-pop notes-pop" id="notes" role="region" aria-label="Notifications" onKeyDown={(e) => e.key === 'Escape' && close()}>
+          <h2 className="menu-head">Notifications</h2>
+          {approvals.error && <p className="menu-empty field-error">Approvals could not be loaded ({approvals.error.status || 'no answer'}).</p>}
+          {notes.length === 0 && !approvals.error && <p className="menu-empty">Nothing waiting: no pending approvals for you, no decisions on your requests, no failed runs.</p>}
+          {notes.length > 0 && (
+            <ul className="notes-list">
+              {notes.map((n) => (
+                <li key={n.id}>
+                  <a href={n.href} onClick={() => setOpen(false)} data-unread={seen.has(n.id) ? undefined : ''}>
+                    <span className="note-title">{n.title}</span>
+                    <span className="note-sub">
+                      {n.sub} · {relTime(n.ts)}
+                    </span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
     </div>

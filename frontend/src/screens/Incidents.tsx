@@ -14,6 +14,7 @@ import { SplitPane } from '../components/SplitPane.tsx';
 import { TimeStrip, type TimeRange } from '../components/TimeStrip.tsx';
 import {
   Button,
+  DefGrid,
   describeError,
   DetectorTag,
   Dialog,
@@ -21,16 +22,20 @@ import {
   ErrorNotice,
   ErrorState,
   Id,
+  PageHeader,
   SeverityCell,
   SkeletonLines,
   StatusTag,
+  Tabs,
   Time,
+  type TabItem,
 } from '../components/ui.tsx';
 import { Term } from '../components/Term.tsx';
 import { useApp, useLoad, useScreenContext, type Route } from '../hooks.ts';
 import { incidentLabel, mainFromNodes, whatHappened } from '../lib/explain.ts';
 import { Icon } from '../icons.tsx';
 import { compareQueue, epochSeconds, fmtDuration, fmtInt, parseEntity } from '../lib/format.ts';
+import { fitColumns, useNarrow } from '../components/narrow.ts';
 
 const STATUSES = ['open', 'investigating', 'contained', 'closed'];
 const SEVERITIES = ['High', 'Medium', 'Low'];
@@ -110,6 +115,9 @@ export function IncidentsScreen({ route, askStore, searchRef }: Props) {
     [],
   );
 
+  const narrow = useNarrow();
+  const listColumns = useMemo(() => fitColumns(columns, narrow, ['status', 'duration']), [columns, narrow]);
+
   const build = async () => {
     if (!scenario) return;
     setBuilding(true);
@@ -129,21 +137,14 @@ export function IncidentsScreen({ route, askStore, searchRef }: Props) {
 
   const list = (
     <>
-      <div className="pane-head">
-        <h1>Incidents</h1>
-        <span className="spacer" />
-        <Button icon="refresh" onClick={reload} disabled={loading}>
-          Reload
-        </Button>
-      </div>
-      <div className="filters" role="search">
-        <div className="group" role="group" aria-label="Severity filter">
+      <div className="toolbar" role="search" aria-label="Filter incidents">
+        <div className="segmented" role="group" aria-label="Severity filter">
           <Button aria-pressed={sev === 'all'} onClick={() => setSev('all')}>
-            All <span className="num faint">{fmtInt(all.length)}</span>
+            All <span className="seg-count num">{fmtInt(all.length)}</span>
           </Button>
           {SEVERITIES.map((s) => (
             <Button key={s} aria-pressed={sev === s} onClick={() => setSev(sev === s ? 'all' : s)}>
-              {s} <span className="num faint">{fmtInt(counts[s] ?? 0)}</span>
+              {s} <span className="seg-count num">{fmtInt(counts[s] ?? 0)}</span>
             </Button>
           ))}
         </div>
@@ -158,7 +159,7 @@ export function IncidentsScreen({ route, askStore, searchRef }: Props) {
             </option>
           ))}
         </select>
-        <div className="search">
+        <div className="searchbox">
           <Icon name="search" />
           <label className="visually-hidden" htmlFor="inc-q">
             Filter by incident id, host or IP
@@ -188,7 +189,7 @@ export function IncidentsScreen({ route, askStore, searchRef }: Props) {
           unit="incidents"
           primary
           rows={rows}
-          columns={columns}
+          columns={listColumns}
           rowKey={(i) => i.incident_id}
           selectedKey={selectedId}
           onSelect={(i) => route.setParams({ id: i.incident_id, ev: null })}
@@ -243,7 +244,28 @@ export function IncidentsScreen({ route, askStore, searchRef }: Props) {
     <EmptyState title="No incident selected.">Select a row to see its timeline, alerts and evidence.</EmptyState>
   );
 
-  return <SplitPane id="incidents" left={list} right={detail} initial={50} />;
+  return (
+    <div className="work">
+      <PageHeader
+        bar
+        title="Incidents"
+        purpose="Which incident do I open, and what happened in it?"
+        actions={
+          <>
+            {scenario && can(session.role, 'incident.build') && (
+              <Button onClick={() => void build()} disabled={building} title="Run triage again over the stored alerts (gap 300 s)">
+                {building ? 'Building...' : 'Build incidents'}
+              </Button>
+            )}
+            <Button icon="refresh" onClick={reload} disabled={loading}>
+              Reload
+            </Button>
+          </>
+        }
+      />
+      <SplitPane id="incidents" left={list} right={detail} initial={50} />
+    </div>
+  );
 }
 
 // ---- detail ----------------------------------------------------------------------------------
@@ -331,6 +353,10 @@ function IncidentDetail({
     [],
   );
 
+  const narrow = useNarrow();
+  const alertCols = useMemo(() => fitColumns(alertColumns, narrow, ['level', 'rule']), [alertColumns, narrow]);
+  const groupCols = useMemo(() => fitColumns(groupColumns, narrow, ['rule', 'first']), [groupColumns, narrow]);
+
   const pickNode = async (n: GraphNode | null) => {
     if (!n) return setNode(null);
     try {
@@ -371,63 +397,27 @@ function IncidentDetail({
   const findings = askStore.entries.filter((e) => e.incidentId === incident.incident_id);
   const activeRule = rule ? groups.find((g) => g.key === rule) ?? null : null;
 
-  return (
-    <>
-      <div className="pane-head">
-        <h2 id="incident-detail-title" tabIndex={-1}>
-          Incident
-        </h2>
-        <Id value={incident.incident_id} label="Copy incident id" />
-        <SeverityCell value={incident.severity} />
-        <span className="spacer" />
-        {can(session.role, 'incident.update') ? (
-          <>
-            <label className="label" htmlFor="inc-set-status">
-              Status
-            </label>
-            <select id="inc-set-status" className="select" value={incident.status} onChange={(e) => void setStatus(e.target.value)}>
-              {STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-          </>
-        ) : (
-          <StatusTag value={incident.status} />
-        )}
-      </div>
+  const tabs: TabItem<Tab>[] = [
+    { id: 'alerts', label: 'Alerts and evidence', count: fmtInt(timeline.length) },
+    { id: 'attack', label: 'ATT&CK lanes', count: analysis.data ? analysis.data.lanes.lanes.length : '...' },
+    { id: 'graph', label: 'Entity graph', count: analysis.data ? fmtInt(analysis.data.graph.nodes_total) : '...' },
+    { id: 'findings', label: 'Findings', count: findings.length },
+    { id: 'response', label: 'Response' },
+  ];
+  const panel = (id: Tab) => ({ role: 'tabpanel', id: `inc-panel-${id}`, 'aria-labelledby': `inc-tab-${id}` }) as const;
 
-      <WhatHappened incident={incident} analysis={analysis.data} />
-      <SummaryStrip incident={incident} analysis={analysis.data} />
-      <div className="section">
-        <div className="meta-row">
-          <span className="k">Entities</span>
-          {entities.length === 0 && <span className="faint">none recorded</span>}
-          {shownEntities.map((e) => {
-            const p = parseEntity(e);
-            return (
-              <span key={e}>
-                <span className="faint">{p.kind} </span>
-                <Id value={p.value} label={`Copy ${p.kind} ${p.value}`} />
-              </span>
-            );
-          })}
-          {entities.length > 3 && (
-            <button type="button" className="linklike" onClick={() => setAllEntities(!allEntities)} aria-expanded={allEntities}>
-              {allEntities ? 'Show fewer' : `Show all ${entities.length}`}
-            </button>
-          )}
-        </div>
-        <div className="meta-row faint">
-          <span>
-            Triage: gap {d.gap_seconds ?? '?'} s
-            {d.max_span_seconds ? `, span cap ${fmtInt(d.max_span_seconds)} s` : ''}
-            {d.severity_row ? `, severity rule ${d.severity_row}` : ''}
-            {d.segment && d.segment[1] > 1 ? `, segment ${d.segment[0]} of ${d.segment[1]}` : ''}
-          </span>
-        </div>
-      </div>
+  return (
+    <div className="inc-detail">
+      <IncidentHeader
+        incident={incident}
+        analysis={analysis.data}
+        canUpdate={can(session.role, 'incident.update')}
+        onStatus={(s) => void setStatus(s)}
+        entities={shownEntities}
+        entitiesTotal={entities.length}
+        allEntities={allEntities}
+        onToggleEntities={() => setAllEntities(!allEntities)}
+      />
 
       {timeline.length > 0 ? (
         <TimeStrip ticks={timeline} t0={t0} t1={t1} selection={range} onSelect={setRange} />
@@ -435,57 +425,44 @@ function IncidentDetail({
         <div className="notice">This incident was stored without a timeline; the alert list below is not available.</div>
       )}
 
-      <div className="tabs" role="tablist" aria-label="Incident sections">
-        <button type="button" role="tab" id="tab-alerts" aria-selected={tab === 'alerts'} aria-controls="panel-alerts" onClick={() => setTab('alerts')}>
-          Alerts and evidence <span className="num">({fmtInt(timeline.length)})</span>
-        </button>
-        <button type="button" role="tab" id="tab-attack" aria-selected={tab === 'attack'} aria-controls="panel-attack" onClick={() => setTab('attack')}>
-          ATT&amp;CK lanes <span className="num">({analysis.data ? analysis.data.lanes.lanes.length : '...'})</span>
-        </button>
-        <button type="button" role="tab" id="tab-graph" aria-selected={tab === 'graph'} aria-controls="panel-graph" onClick={() => setTab('graph')}>
-          Entity graph <span className="num">({analysis.data ? fmtInt(analysis.data.graph.nodes_total) : '...'})</span>
-        </button>
-        <button type="button" role="tab" id="tab-findings" aria-selected={tab === 'findings'} aria-controls="panel-findings" onClick={() => setTab('findings')}>
-          Findings <span className="num">({findings.length})</span>
-        </button>
-        <button type="button" role="tab" id="tab-response" aria-selected={tab === 'response'} aria-controls="panel-response" onClick={() => setTab('response')}>
-          Response
-        </button>
-      </div>
+      <Tabs tabs={tabs} value={tab} onChange={setTab} label="Incident sections" idBase="inc" />
 
       {tab === 'alerts' && (
-        <div className="tabpanel" role="tabpanel" id="panel-alerts" aria-labelledby="tab-alerts">
-          <div className="filters">
+        <div className="tabpanel tab-enter inc-alerts" {...panel('alerts')}>
+          <div className="toolbar">
             <Button aria-pressed={grouped} onClick={() => setGrouped(!grouped)} title="One row per detector and rule, with counts">
               Group by rule
             </Button>
             {activeRule && (
-              <Button icon="close" onClick={() => setRule(null)} title="Remove the rule filter">
-                Rule <span className="mono">{activeRule.rule_id ?? '-'}</span>
-              </Button>
+              <button type="button" className="filter-tag" onClick={() => setRule(null)} title="Remove the rule filter" aria-label={`Remove the rule filter ${activeRule.rule_id ?? ""}`}>
+                <span className="k">rule</span> <span className="mono">{activeRule.rule_id ?? '-'}</span>
+                <Icon name="close" />
+              </button>
             )}
             {range && (
-              <Button icon="close" onClick={() => setRange(null)}>
-                Time range
-              </Button>
+              <button type="button" className="filter-tag" onClick={() => setRange(null)} title="Remove the time range filter" aria-label="Remove the time range filter">
+                <span className="k">time range</span>
+                <Icon name="close" />
+              </button>
             )}
             {node && (
-              <Button icon="close" onClick={() => setNode(null)} title="Remove the entity filter">
+              <button type="button" className="filter-tag" onClick={() => setNode(null)} title="Remove the entity filter" aria-label={`Remove the entity filter ${node.label}`}>
                 <span className="mono">{node.label}</span>
-              </Button>
+                <Icon name="close" />
+              </button>
             )}
-            <span className="muted num">
+            <span className="tb-meta num">
               {range || rule || node ? `${fmtInt(visible.length)} of ${fmtInt(timeline.length)} alerts` : `${fmtInt(timeline.length)} alerts`}
               {grouped ? ` in ${fmtInt(groups.length)} rules` : ''}
             </span>
           </div>
-          <div style={{ flex: ev && !grouped ? '1 1 34%' : 1, minHeight: 96, display: 'flex', flexDirection: 'column' }}>
+          <div className="inc-list-split">
             {grouped ? (
               <DataTable
                 label="Alerts grouped by rule"
                 unit="rules"
                 rows={groups}
-                columns={groupColumns}
+                columns={groupCols}
                 rowKey={(g) => g.key}
                 selectedKey={rule}
                 onSelect={(g) => setRule(g.key)}
@@ -498,18 +475,24 @@ function IncidentDetail({
                 label="Alerts of this incident"
                 unit="alerts"
                 rows={visible}
-                columns={alertColumns}
+                columns={alertCols}
                 rowKey={(e) => e.alert_id}
                 selectedKey={ev}
                 onSelect={(e) => (setNeedles([]), route.setParams({ ev: e.alert_id }))}
                 onOpen={() => setFocusEvidence(Date.now())}
                 copyText={(e) => e.alert_id}
-                empty={<EmptyState title="No alerts match the time range or rule filter." />}
+                empty={
+                  <EmptyState title="No alerts match the time range, rule or entity filter.">
+                    <button type="button" className="linklike" onClick={() => (setRange(null), setRule(null), setNode(null))}>
+                      Clear filters
+                    </button>
+                  </EmptyState>
+                }
               />
             )}
           </div>
           {ev && !grouped && (
-            <div style={{ flex: '1 1 66%', minHeight: 0, display: 'flex', borderTop: '1px solid var(--border-strong)' }}>
+            <div className="inc-ev-split">
               <EvidencePane alertId={ev} needles={needles} focusKey={focusEvidence} onClose={() => route.setParams({ ev: null })} />
             </div>
           )}
@@ -517,8 +500,8 @@ function IncidentDetail({
       )}
 
       {tab === 'attack' && (
-        <div className="tabpanel detail-scroll" role="tabpanel" id="panel-attack" aria-labelledby="tab-attack">
-          <div className="section">
+        <div className="tabpanel tab-enter" {...panel('attack')}>
+          <div className="block">
             {analysis.error && !analysis.data && <ErrorState what="the ATT&CK lanes" error={analysis.error} onRetry={analysis.reload} />}
             {!analysis.data && !analysis.error && <SkeletonLines />}
             {analysis.data && analysis.data.lanes.lanes.length === 0 && (
@@ -526,6 +509,7 @@ function IncidentDetail({
             )}
             {analysis.data && analysis.data.lanes.lanes.length > 0 && (
               <ChartFrame
+                className="flat-chart"
                 title="ATT&CK tactic lanes"
                 question="Which tactics do the mapped alerts point to, and when? Click a tick (or Enter) to see those alerts."
                 table={{
@@ -548,8 +532,8 @@ function IncidentDetail({
       )}
 
       {tab === 'graph' && (
-        <div className="tabpanel detail-scroll" role="tabpanel" id="panel-graph" aria-labelledby="tab-graph">
-          <div className="section">
+        <div className="tabpanel tab-enter" {...panel('graph')}>
+          <div className="block">
             {analysis.error && !analysis.data && <ErrorState what="the entity graph" error={analysis.error} onRetry={analysis.reload} />}
             {!analysis.data && !analysis.error && <SkeletonLines />}
             {analysis.data && (
@@ -566,8 +550,8 @@ function IncidentDetail({
       )}
 
       {tab === 'findings' && (
-        <div className="tabpanel detail-scroll" role="tabpanel" id="panel-findings" aria-labelledby="tab-findings">
-          <div className="section">
+        <div className="tabpanel tab-enter" {...panel('findings')}>
+          <div className="block">
             <AskForm incidentId={incident.incident_id} store={askStore} />
           </div>
           {findings.length === 0 && !askStore.modelOffline && (
@@ -576,7 +560,7 @@ function IncidentDetail({
             </EmptyState>
           )}
           {findings.map((f) => (
-            <div className="section" key={f.id}>
+            <div className="block" key={f.id}>
               <Finding entry={f} onOpenEvidence={openEvidence} />
             </div>
           ))}
@@ -584,11 +568,11 @@ function IncidentDetail({
       )}
 
       {tab === 'response' && (
-        <div className="tabpanel detail-scroll" role="tabpanel" id="panel-response" aria-labelledby="tab-response">
+        <div className="tabpanel tab-enter" {...panel('response')}>
           <ResponsePanel incident={incident} />
         </div>
       )}
-    </>
+    </div>
   );
 }
 
@@ -622,14 +606,13 @@ function ResponsePanel({ incident }: { incident: Incident }) {
 
   return (
     <>
-      <div className="section">
-        <h3>Report</h3>
+      <section className="block" aria-label="Report">
+        <h3 className="block-title">Report</h3>
         {report ? (
-          <div className="meta-row">
+          <div className="btn-row">
             <Id value={report.report_id} label="Copy report id" />
-            <span>
-              <span className="k">Created</span>
-              <Time ts={report.created_utc} kind="created" />
+            <span className="muted">
+              created <Time ts={report.created_utc} kind="created" />
             </span>
             <a href={`#/reports?id=${encodeURIComponent(report.report_id)}`}>Open in Reports</a>
             {can(session.role, 'report.create') && (
@@ -639,7 +622,7 @@ function ResponsePanel({ incident }: { incident: Incident }) {
             )}
           </div>
         ) : (
-          <div className="meta-row">
+          <div className="btn-row">
             <span className="muted">
               No report for this incident. ATT&amp;CK techniques and playbook recommendations are computed when a report is created.
             </span>
@@ -650,12 +633,14 @@ function ResponsePanel({ incident }: { incident: Incident }) {
             )}
           </div>
         )}
-      </div>
+      </section>
 
       {report && (
         <>
-          <div className="section">
-            <h3>ATT&amp;CK techniques (detector-native ids and the fixed rule table only)</h3>
+          <section className="block" aria-label="ATT&CK techniques">
+            <h3 className="block-title">
+              ATT&amp;CK techniques <span className="meta">detector-native ids and the fixed rule table only</span>
+            </h3>
             {report.body.techniques.length === 0 ? (
               <p className="muted">No alert of this incident maps to a technique.</p>
             ) : (
@@ -676,9 +661,12 @@ function ResponsePanel({ incident }: { incident: Incident }) {
                 </tbody>
               </table>
             )}
-          </div>
-          <div className="section">
-            <h3>Recommended actions (suggestions; nothing runs without an approved request)</h3>
+          </section>
+          <section className="block" aria-label="Recommended actions">
+            <h3 className="block-title">
+              Recommended actions <span className="meta">suggestions; nothing runs without an approved request</span>
+            </h3>
+            <div className="table-scroll">
             <table className="plain-table">
               <thead>
                 <tr>
@@ -707,12 +695,13 @@ function ResponsePanel({ incident }: { incident: Incident }) {
                 ))}
               </tbody>
             </table>
-          </div>
+            </div>
+          </section>
         </>
       )}
 
-      <div className="section">
-        <h3>Approval requests for this incident</h3>
+      <section className="block" aria-label="Approval requests">
+        <h3 className="block-title">Approval requests for this incident</h3>
         {approvals.error ? (
           <p className="field-error" role="alert">
             {describeError(approvals.error)}
@@ -720,6 +709,7 @@ function ResponsePanel({ incident }: { incident: Incident }) {
         ) : mine.length === 0 ? (
           <p className="muted">None.</p>
         ) : (
+          <div className="table-scroll">
           <table className="plain-table">
             <thead>
               <tr>
@@ -748,8 +738,9 @@ function ResponsePanel({ incident }: { incident: Incident }) {
               ))}
             </tbody>
           </table>
+          </div>
         )}
-      </div>
+      </section>
 
       {requesting && (
         <RequestApprovalDialog
@@ -848,77 +839,161 @@ function RequestApprovalDialog({
   );
 }
 
-// ---- what happened (deterministic, from the incident's own data; never from the model) ---------
+// ---- header: severity, label, id, status; what happened (deterministic); key facts -----------
 
-function WhatHappened({ incident, analysis }: { incident: Incident; analysis: IncidentAnalysis | null }) {
-  const rule = analysis?.summary.rule ?? null;
-  const text = whatHappened(incident, rule, analysis ? mainFromNodes(analysis.graph.nodes) : null);
-  useScreenContext('incident', `Selected incident ${incident.incident_id} (${incidentLabel(incident)}). What happened: ${text} Status: ${incident.status}.`);
-  return (
-    <p className="what-happened" aria-label="What happened">
-      <span className="k">
-        What happened <span className="faint">(built from this incident's stored data, not by the AI)</span>
-      </span>
-      {text}
-    </p>
-  );
-}
-
-// ---- one-glance summary strip ---------------------------------------------------------------
-
-function SummaryStrip({ incident, analysis }: { incident: Incident; analysis: IncidentAnalysis | null }) {
+function IncidentHeader({
+  incident,
+  analysis,
+  canUpdate,
+  onStatus,
+  entities,
+  entitiesTotal,
+  allEntities,
+  onToggleEntities,
+}: {
+  incident: Incident;
+  analysis: IncidentAnalysis | null;
+  canUpdate: boolean;
+  onStatus: (status: string) => void;
+  entities: readonly string[];
+  entitiesTotal: number;
+  allEntities: boolean;
+  onToggleEntities: () => void;
+}) {
+  const d = incident.detail;
   const s = analysis?.summary;
-  const dets = Object.entries(incident.detail.detectors ?? s?.detectors ?? {});
+  const rule = s?.rule ?? null;
+  // the What happened sentence is built from the incident's own data, never from the model
+  const main = analysis ? mainFromNodes(analysis.graph.nodes) : null;
+  const text = whatHappened(incident, rule, main);
+  // the same distinct label as everywhere else; without a main entity it starts with the id, which the kicker already shows
+  const label = incidentLabel(incident);
+  const title = label.startsWith(incident.incident_id) ? `Incident${label.slice(incident.incident_id.length)}` : label;
+  useScreenContext('incident', `Selected incident ${incident.incident_id} (${label}). What happened: ${text} Status: ${incident.status}.`);
+  const dets = Object.entries(d.detectors ?? s?.detectors ?? {});
   const inputs = s?.inputs;
+  const triage = [
+    `gap ${d.gap_seconds ?? '?'} s`,
+    d.max_span_seconds ? `span cap ${fmtInt(d.max_span_seconds)}\u00a0s` : null,
+    d.segment && d.segment[1] > 1 ? `segment ${d.segment[0]} of ${d.segment[1]}` : null,
+  ].filter(Boolean);
+
   return (
-    <div className="summary-strip" role="group" aria-label="Incident summary">
-      <div className="why">
-        <div className="k">
-          Why this severity {s?.rule ? <>(<Term id="triage-rule">triage rule {s.rule.row}</Term>)</> : ''}
+    <header className="inc-head">
+      <div className="inc-title-row">
+        <div className="inc-title">
+          <div className="inc-kicker">
+            <SeverityCell value={incident.severity} />
+            <Id value={incident.incident_id} label="Copy incident id" />
+          </div>
+          <h2 id="incident-detail-title" tabIndex={-1}>
+            {title}
+          </h2>
         </div>
-        <span>
-          <SeverityCell value={incident.severity} />{' '}
-          {s?.rule ? `because ${s.rule.rule}.` : incident.detail.severity_row ? `triage rule ${incident.detail.severity_row}` : 'no triage rule recorded'}
-        </span>
-        {inputs && (
-          <span className="inputs" aria-label="Triage inputs">
-            <span className="tag">detectors {inputs.detectors ?? '?'}</span>
-            <span className="tag">max level {inputs.max_level ?? '?'}</span>
-            <span className="tag">ATT&amp;CK {inputs.attack_mapped ? 'mapped' : 'not mapped'}</span>
-            <span className="tag">
-              <Term id="ioc">IOC</Term> {inputs.ioc_match ? 'match' : 'no match'}
-            </span>
-            <span className="tag">{fmtInt(inputs.size ?? incident.alert_ids.length)} alerts</span>
-          </span>
-        )}
-      </div>
-      <div>
-        <div className="k">
-          First / last seen (UTC, <Term id="data-date">data date</Term>)
-        </div>
-        <div>
-          <Time ts={incident.first_ts} />
-        </div>
-        <div>
-          <Time ts={incident.last_ts} />{' '}
-          <span className="faint num">({fmtDuration(epochSeconds(incident.last_ts) - epochSeconds(incident.first_ts))})</span>
+        <div className="inc-status">
+          {canUpdate ? (
+            <>
+              <label className="tb-label" htmlFor="inc-set-status">
+                Status
+              </label>
+              <select id="inc-set-status" className="select" value={incident.status} onChange={(e) => onStatus(e.target.value)}>
+                {STATUSES.map((st) => (
+                  <option key={st} value={st}>
+                    {st}
+                  </option>
+                ))}
+              </select>
+            </>
+          ) : (
+            <StatusTag value={incident.status} />
+          )}
         </div>
       </div>
-      <div>
-        <div className="k">
-          <Term id="detector">Detectors</Term> agreeing
-        </div>
-        <div className="num" style={{ fontWeight: 600 }}>
-          {dets.length} <span className="faint" style={{ fontWeight: 400 }}>of 3</span>
-        </div>
-        <div style={{ display: 'flex', gap: 'var(--sp-8)', flexWrap: 'wrap' }}>
-          {dets.map(([det, n]) => (
-            <span key={det}>
-              <DetectorTag value={det} /> <span className="num faint">{fmtInt(n)}</span>
-            </span>
-          ))}
-        </div>
+
+      <div className="inc-what" aria-label="What happened">
+        <p>{text}</p>
+        <span className="quiet-note">What happened: built from this incident's stored data, not by the AI.</span>
       </div>
-    </div>
+
+      <div className="inc-facts">
+        <DefGrid
+          items={[
+            {
+              label: (
+                <>
+                  First seen (UTC, <Term id="data-date">data date</Term>)
+                </>
+              ),
+              value: <Time ts={incident.first_ts} />,
+            },
+            { label: 'Last seen (UTC)', value: <Time ts={incident.last_ts} /> },
+            { label: 'Duration', value: <span className="num">{fmtDuration(epochSeconds(incident.last_ts) - epochSeconds(incident.first_ts))}</span> },
+            { label: 'Alerts', value: <span className="num">{fmtInt(incident.alert_ids.length)}</span> },
+            {
+              label: (
+                <>
+                  <Term id="detector">Detectors</Term> agreeing
+                </>
+              ),
+              value: (
+                <span className="det-counts">
+                  <span className="num">
+                    {dets.length} of 3
+                  </span>
+                  {dets.map(([det, n]) => (
+                    <span key={det}>
+                      <DetectorTag value={det} /> <span className="num">{fmtInt(n)}</span>
+                    </span>
+                  ))}
+                </span>
+              ),
+            },
+            { label: 'Triage', value: <span className="num">{triage.join(', ')}</span> },
+            {
+              label: (
+                <>
+                  Why this severity{rule ? <> (<Term id="triage-rule">triage rule {rule.row}</Term>)</> : ''}
+                </>
+              ),
+              value: (
+                <span className="def-span">
+                  {rule ? `${rule.severity} because ${rule.rule}.` : d.severity_row ? `Triage rule ${d.severity_row}.` : 'No triage rule recorded.'}
+                  {inputs && (
+                    <span className="faint">
+                      {' '}
+                      Inputs: {inputs.detectors ?? '?'} detector{inputs.detectors === 1 ? '' : 's'}, max level {inputs.max_level ?? '?'}, ATT&amp;CK{' '}
+                      {inputs.attack_mapped ? 'mapped' : 'not mapped'}, <Term id="ioc">IOC</Term> {inputs.ioc_match ? 'match' : 'no match'},{' '}
+                      {fmtInt(inputs.size ?? incident.alert_ids.length)} alerts.
+                    </span>
+                  )}
+                </span>
+              ),
+            },
+            {
+              label: 'Entities',
+              value: (
+                <span className="def-span entity-list">
+                  {entitiesTotal === 0 && <span className="faint">none recorded</span>}
+                  {entities.map((e) => {
+                    const p = parseEntity(e);
+                    return (
+                      <span key={e}>
+                        <span className="kind">{p.kind}</span>
+                        <Id value={p.value} label={`Copy ${p.kind} ${p.value}`} />
+                      </span>
+                    );
+                  })}
+                  {entitiesTotal > 3 && (
+                    <button type="button" className="linklike" onClick={onToggleEntities} aria-expanded={allEntities}>
+                      {allEntities ? 'Show fewer' : `Show all ${fmtInt(entitiesTotal)}`}
+                    </button>
+                  )}
+                </span>
+              ),
+            },
+          ]}
+        />
+      </div>
+    </header>
   );
 }

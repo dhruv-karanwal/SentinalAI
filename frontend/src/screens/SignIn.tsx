@@ -1,4 +1,4 @@
-// Sign in (DESIGN.md 11.2): brand, one line about the product, the environment badge, the form
+// Sign in (DESIGN.md 5): brand, one line about the product, the data source as quiet text, the form
 // (show / hide password, caps-lock warning, role hint, announced errors, session-expired banner)
 // and a schematic of the real pipeline with the component names used in the code.
 
@@ -42,23 +42,24 @@ export function SignIn({ onSignedIn, expired }: { onSignedIn: (session: Session)
   return (
     <main className="login">
       <section className="login-form" aria-labelledby="login-title">
-        <div className="brand" style={{ fontSize: 'var(--fs-16)' }}>
-          <BrandMark size={40} />
+        <div className="login-brand">
+          <BrandMark size={24} />
+          <span>SentinelAI</span>
         </div>
-        <div>
-          <h1 id="login-title">SentinelAI</h1>
-          <p className="lede">Security operations console for the AIT-ADS alert replay.</p>
+        <div className="login-head">
+          <h1 id="login-title">Sign in</h1>
+          <p className="login-lede">Security operations console for the AIT-ADS alert replay.</p>
+          <p className="login-src" title="Alerts are replayed from the AIT-ADS dataset (dev scenarios). Nothing here is live traffic.">
+            Dataset replay: demo data, no live traffic
+          </p>
         </div>
-        <span className="env-badge" style={{ alignSelf: 'flex-start' }}>
-          Dataset replay: demo data
-        </span>
         {expired && (
           <div className="notice" role="status">
             <Icon name="warning" />
             <span>Session expired. Sign in again; you will return to the page you were on.</span>
           </div>
         )}
-        <form onSubmit={(e) => void submit(e)} noValidate style={{ display: 'grid', gap: 'var(--sp-12)' }}>
+        <form className="login-fields" onSubmit={(e) => void submit(e)} noValidate>
           <div className="field">
             <label htmlFor="si-user">Username</label>
             <input
@@ -93,12 +94,12 @@ export function SignIn({ onSignedIn, expired }: { onSignedIn: (session: Session)
                 aria-invalid={error?.field === 'pass' || undefined}
                 aria-describedby={[error?.field === 'pass' ? 'si-err-pass' : '', caps ? 'si-caps' : ''].filter(Boolean).join(' ') || undefined}
               />
-              <Button aria-pressed={show} aria-controls="si-pass" onClick={() => setShow(!show)}>
+              <Button className="lg" aria-pressed={show} aria-controls="si-pass" onClick={() => setShow(!show)}>
                 {show ? 'Hide' : 'Show'}
               </Button>
             </div>
             {caps && (
-              <span className="warn" id="si-caps" role="status">
+              <span className="login-warn" id="si-caps" role="status">
                 <Icon name="warning" /> Caps Lock is on.
               </span>
             )}
@@ -108,84 +109,58 @@ export function SignIn({ onSignedIn, expired }: { onSignedIn: (session: Session)
               </span>
             )}
           </div>
-          <p className="hint">Your role comes from your account: analyst, manager, admin or executive. The screens you see depend on it.</p>
-          <Button kind="primary" type="submit" disabled={busy}>
+          <p className="login-hint">Your role comes from your account: analyst, manager, admin or executive. The screens you see depend on it.</p>
+          <Button kind="primary" className="lg" type="submit" disabled={busy}>
             {busy ? 'Signing in...' : 'Sign in'}
           </Button>
           {error?.field === 'form' && (
-            <p className="field-error" role="alert" style={{ margin: 0 }}>
+            <p className="field-error" role="alert">
               {error.text}
             </p>
           )}
         </form>
-        <p className="hint">
+        <p className="login-hint">
           Accounts are created by an admin (Users) or on the API host with <span className="mono">app.main create-user</span>. The session is kept in memory and ends
           when the page is reloaded.
         </p>
       </section>
       <section className="login-art" aria-labelledby="pipe-title">
-        <h2 id="pipe-title">How alerts move through the platform</h2>
+        <h2 id="pipe-title">From a replayed alert to a reviewed response</h2>
+        <p className="login-art-lede">From replay to review, each step a part of the code. Findings cite the alerts they come from, and a second person approves every response action.</p>
         <Pipeline />
       </section>
     </main>
   );
 }
 
-const STAGES: Array<[string, string, string]> = [
-  ['Ingest', 'replay collector', 'stream (memory / Kafka)'],
-  ['Normalize', 'alert normalizer', 'enrichment'],
-  ['Detect', 'Wazuh, Suricata, AMiner', 'Sigma engine, triage'],
-  ['Investigate', 'agent, LangGraph graph', 'evidence verifier'],
-  ['Report', 'JSON, CSV, PDF', 'playbook suggestions'],
-  ['Review', 'four-eyes approvals', 'audit log'],
+const STAGES: Array<[string, string]> = [
+  ['Ingest', 'replay collector, stream (memory / Kafka)'],
+  ['Normalize', 'alert normalizer, enrichment'],
+  ['Detect', 'Wazuh, Suricata, AMiner; Sigma engine, triage'],
+  ['Investigate', 'agent, LangGraph graph, evidence verifier'],
+  ['Report', 'JSON, CSV, PDF; playbook suggestions'],
+  ['Review', 'four-eyes approvals, audit log'],
 ];
 
-/** Schematic of the real pipeline: stage boxes, arrows, component names, the shared stores. */
+/** Schematic of the real pipeline as a hairline flow: stage, its components, the shared stores. */
 function Pipeline() {
-  const W = 146;
-  const G = 16;
-  const H = 86;
-  const total = STAGES.length * W + (STAGES.length - 1) * G;
   return (
-    <svg className="pipeline-svg" viewBox={`0 0 ${total + 2} 190`} width="100%" role="img" aria-labelledby="pipe-desc">
-      <desc id="pipe-desc">
-        {STAGES.map(([s, a, b]) => `${s}: ${a}; ${b}`).join('. ')}. All stages read and write the stores: SQLite or PostgreSQL, FTS5 or OpenSearch, local
-        files or MinIO.
-      </desc>
-      <defs>
-        <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto">
-          <path d="M0 0 8 4 0 8z" fill="var(--text-faint)" />
-        </marker>
-      </defs>
-      {STAGES.map(([stage, a, b], i) => {
-        const x = 1 + i * (W + G);
-        return (
-          <g key={stage}>
-            <rect x={x} y={1} width={W} height={H} rx={4} fill="var(--surface)" stroke="var(--border-strong)" />
-            <text x={x + 10} y={20} className="num-label">
+    <div className="login-flow">
+      <ol aria-label="Pipeline stages">
+        {STAGES.map(([stage, comps], i) => (
+          <li key={stage}>
+            <span className="flow-n" aria-hidden="true">
               {i + 1}
-            </text>
-            <text x={x + 10} y={40} className="stage">
-              {stage}
-            </text>
-            <text x={x + 10} y={60} className="comp">
-              {a}
-            </text>
-            <text x={x + 10} y={76} className="comp">
-              {b}
-            </text>
-            {i < STAGES.length - 1 && <line x1={x + W + 2} y1={H / 2} x2={x + W + G - 3} y2={H / 2} stroke="var(--text-faint)" strokeWidth={1.5} markerEnd="url(#arrow)" />}
-            <line x1={x + W / 2} y1={H + 1} x2={x + W / 2} y2={128} stroke="var(--border-strong)" strokeDasharray="2 3" />
-          </g>
-        );
-      })}
-      <rect x={1} y={128} width={total} height={40} rx={4} fill="none" stroke="var(--border-strong)" />
-      <text x={12} y={146} className="stage" style={{ fontSize: 12 }}>
-        Stores
-      </text>
-      <text x={12} y={161} className="comp">
-        SQLite or PostgreSQL (alerts, incidents, approvals, audit) · FTS5 or OpenSearch (search) · local files or MinIO (report files) · truth area kept separate
-      </text>
-    </svg>
+            </span>
+            <span className="flow-stage">{stage}</span>
+            <span className="flow-comp">{comps}</span>
+          </li>
+        ))}
+      </ol>
+      <p className="flow-stores">
+        <span className="flow-stage">Stores</span>
+        <span className="flow-comp">SQLite or PostgreSQL (alerts, incidents, approvals, audit) · FTS5 or OpenSearch (search) · local files or MinIO (report files) · truth area kept separate</span>
+      </p>
+    </div>
   );
 }

@@ -149,19 +149,19 @@ export function TimeStrip({ ticks, t0, t1, selection, onSelect }: Props) {
   const coarse = useMemo(() => binTicks(ticks, t0, t1, buckets, detectors), [ticks, t0, t1, buckets, detectors]);
 
   return (
-    <div className="strip">
-      <div className="strip-grid">
-        <div className="strip-labels">
+    <div className="ts">
+      <div className="ts-grid">
+        <div className="ts-labels">
           {detectors.map((d) => (
-            <div key={d}>
+            <div key={d} style={{ height: ROW }}>
               <DetectorTag value={d} />
-              <span className="num muted">{fmtInt(totals.get(d) ?? 0)}</span>
+              <span className="num">{fmtInt(totals.get(d) ?? 0)}</span>
             </div>
           ))}
         </div>
         <div
           ref={plotRef}
-          className="strip-plot"
+          className="ts-plot"
           tabIndex={0}
           role="group"
           aria-label={`Alerts over time, ${fmtInt(ticks.length)} alerts in ${fmtDuration(span)}. Left and right arrows move, Shift extends a range, Enter filters the alert table, Escape clears.`}
@@ -192,12 +192,12 @@ export function TimeStrip({ ticks, t0, t1, selection, onSelect }: Props) {
         </div>
         <div />
         <div>
-          <div className="strip-axis mono num">
+          <div className="ts-axis mono num">
             <span>{isoUtc(t0 * 1000)}</span>
             <span>{fmtDuration(span)}</span>
             <span>{isoUtc(t1 * 1000)}</span>
           </div>
-          <div className="strip-note">
+          <div className="ts-note">
             <span>
               Bar height: alerts per column, log scale, max {fmtInt(binned.max)}. 1 column ={' '}
               {binSeconds >= 1 ? fmtDuration(binSeconds) : `${binSeconds.toFixed(2)} s`}. UTC.
@@ -213,7 +213,7 @@ export function TimeStrip({ ticks, t0, t1, selection, onSelect }: Props) {
               </>
             )}
           </div>
-          <div className="mono num faint" style={{ minHeight: 16 }} aria-live="polite">
+          <div className={`ts-cursor num${cursorText ? ' mono' : ''}`} aria-live="polite">
             {cursorText ?? (selection ? '' : 'Drag, or use the arrow keys with Shift, to filter the alert table by time.')}
           </div>
         </div>

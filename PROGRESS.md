@@ -3,7 +3,7 @@
 Read this first every session; update it in every commit that changes project state.
 Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
 
-**Last update:** 2026-11-13, branch `phase3/pilot-gate`.
+**Last update:** 2026-11-15, branch `phase3/wave-h-premium`.
 
 ## Pilot gate (2026-11-13): FAIL, held-out blocked
 - Dev pilot finished 12/12 runs (336 case runs). Gate review in `results/PILOT_GATE.md`.
@@ -23,6 +23,15 @@ Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
   No protocol freeze, no held-out ingest until then.
 
 ## Done
+- Premium console (`phase3/wave-h-premium`, 2026-11-14/15, user's go; pilot untouched): restraint
+  pass (no grain / glass / glow / pulse / tilt / count-up), ink accent, Geist type, base components on
+  every screen, grouped rail, Ctrl+K command palette, About as a product page, phone layouts, style
+  guard test. Frontend 78 tests, tsc clean, build ok; 12 screens x (dark, light, 390 px): 0 console
+  errors, no horizontal scroll. Screenshots `docs/ui/wave-h/`. DESIGN.md rewritten.
+  2026-11-15 finish: two read-only reviews (visual, a11y), concrete defects fixed (Audit phone rows and
+  chart unit, KPI truncation, unit wrapping, report timestamps, dialog / chat / tour focus); list of
+  what was not fixed in `docs/session-notes.md`. Open: phone layouts of Users / Alerts / Approvals,
+  screen-reader check, frame time on the 11,208-alert incident.
 - Palette (`phase3/wave-g-palette`, 2026-11-13, user's go; pilot untouched): blue replaced by "warm
   graphite + phosphor lime" (tokens.css only; lime on logo, active nav, primary button, focus, chat
   button, links), warm grain instead of the blue grid, glows only on High and the chat button, PDF

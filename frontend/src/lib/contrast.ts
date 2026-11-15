@@ -1,5 +1,5 @@
 // WCAG 2 relative luminance and contrast ratio, plus a reader for the token blocks in tokens.css.
-// Used by contrast.test.ts so every colour pairing in DESIGN.md is measured, not asserted.
+// Used by charts.test.ts and palette.test.ts so every colour pairing in DESIGN.md is measured, not asserted.
 
 export function luminance(hex: string): number {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
@@ -78,6 +78,12 @@ export function cvdDistance(a: string, b: string, kind: keyof typeof CVD): numbe
   const pa = oklab(simulate(hexToLinear(a), kind));
   const pb = oklab(simulate(hexToLinear(b), kind));
   return Math.hypot(pa[0] - pb[0], pa[1] - pb[1], pa[2] - pb[2]);
+}
+
+/** OKLab chroma of a #rrggbb colour: 0 for a pure grey, about 0.1 and up for a clear hue. */
+export function chroma(hex: string): number {
+  const [, a, b] = oklab(hexToLinear(hex));
+  return Math.hypot(a, b);
 }
 
 /** HSL of an sRGB colour given as 0..255 channels: hue in degrees, saturation and lightness 0..1. */

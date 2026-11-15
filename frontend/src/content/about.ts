@@ -1,4 +1,4 @@
-// Text of the About page, the guided tour and the help chat's suggested questions (2026-11-13).
+// Text of the About page, the guided tour and the help chat's suggested questions (2026-11-13; feature grid 2026-11-14).
 // Plain words; component names are the real module names in backend/app. The only numbers here are
 // documented facts of the dev scenarios (docs/session-notes.md), never results.
 
@@ -103,16 +103,59 @@ export const SUGGESTED: Record<string, string[]> = {
   '/ask': ['What is the copilot?', 'What is an unsupported claim?', 'What is a citation?'],
 };
 
-// ---- wave F: About story (2026-11-13) ------------------------------------------------------
+// ---- About product page (wave H, 2026-11-14) ------------------------------------------------
 
-/** The hero pipeline: six stages as the user's brief names them, with real module names. */
-export const HERO_STAGES: ReadonlyArray<{ name: string; sub: string }> = [
-  { name: 'Ingest', sub: 'replay collector' },
-  { name: 'Normalize', sub: 'alert normalizer' },
-  { name: 'Detect', sub: 'Sigma · ATT&CK · triage' },
-  { name: 'Investigate', sub: 'agent · LangGraph' },
-  { name: 'Report', sub: 'JSON · CSV · PDF' },
-  { name: 'Review', sub: 'four-eyes approvals' },
+export interface Feature {
+  path: string;
+  screen: string;
+  text: string;
+  /** permission the role needs before the link is shown (api.ts PERMISSIONS) */
+  permission?: string;
+}
+
+/** The feature grid: only features that exist, each linked to its screen (App.tsx nav, DESIGN.md 5). */
+export const FEATURES: ReadonlyArray<{ id: string; name: string; summary: string; items: readonly Feature[] }> = [
+  {
+    id: 'detect',
+    name: 'Detect',
+    summary: 'Three detectors replayed, mapped and grouped.',
+    items: [
+      { path: '/overview', screen: 'Overview', text: 'Headline numbers, alerts over time by detector and the incidents to look at first.' },
+      { path: '/overview', screen: 'ATT&CK by tactic', text: 'Alerts mapped to ATT&CK techniques from native Wazuh ids and a fixed rule table, never guessed.' },
+      { path: '/incidents', screen: 'Triage', text: 'Related alerts grouped into ranked incidents (gap 300 s, a first-match severity table).' },
+    ],
+  },
+  {
+    id: 'investigate',
+    name: 'Investigate',
+    summary: 'One incident at a time, evidence first.',
+    items: [
+      { path: '/incidents', screen: 'Incidents', text: 'A plain "What happened" line, the detector time strip, ATT&CK lanes, the entity graph and the evidence.' },
+      { path: '/alerts', screen: 'Alerts', text: 'Every stored alert with facets, saved filters, folded repeats and CSV export.' },
+      { path: '/ask', screen: 'Ask', text: 'Questions to the local model about one incident; its citations pass the verifier.', permission: 'copilot.ask' },
+    ],
+  },
+  {
+    id: 'respond',
+    name: 'Respond',
+    summary: 'A second person decides; nothing runs on its own.',
+    items: [
+      { path: '/approvals', screen: 'Approvals', text: 'Four-eyes rule: the requester cannot decide, a reason is required, execution is simulated and happens once.' },
+      { path: '/reports', screen: 'Reports', text: 'Incident reports with timeline, entity graph, techniques and playbook actions, as JSON, CSV and PDF.' },
+      { path: '/executive', screen: 'Executive', text: 'One printable page: severity trend, top risks and time to review.' },
+    ],
+  },
+  {
+    id: 'govern',
+    name: 'Govern',
+    summary: 'Who did what, and what the study says.',
+    items: [
+      { path: '/audit', screen: 'Audit', text: 'Every write and every denied request, with an activity chart.', permission: 'audit.read' },
+      { path: '/users', screen: 'Users', text: 'Accounts and roles; passwords come from the environment, never typed for someone else.', permission: 'user.manage' },
+      { path: '/study', screen: 'Study', text: 'Pilot and final results read from the run files; empty until a real run exists.', permission: 'read.raw' },
+      { path: '/settings', screen: 'Settings', text: 'Theme, row density, time format and the default data source.' },
+    ],
+  },
 ];
 
 export interface SourceOption {

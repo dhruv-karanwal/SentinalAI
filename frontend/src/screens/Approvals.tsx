@@ -7,10 +7,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { api, ApiError, can, type Approval } from '../api.ts';
 import { DataTable, type Column } from '../components/DataTable.tsx';
 import { SplitPane } from '../components/SplitPane.tsx';
-import { Button, describeError, EmptyState, ErrorNotice, ErrorState, Id, SeverityCell, SkeletonLines, StatusTag, Time } from '../components/ui.tsx';
+import { Button, DefGrid, describeError, EmptyState, ErrorNotice, ErrorState, Id, PageHeader, SeverityCell, SkeletonLines, StatusTag, Time } from '../components/ui.tsx';
 import { Icon } from '../icons.tsx';
 import { fmtInt } from '../lib/format.ts';
 import { useApp, useLoad, type Route } from '../hooks.ts';
+import { fitColumns, useNarrow } from '../components/narrow.ts';
 
 const stateOf = (a: Approval): string => (a.executed_utc ? 'executed' : a.status);
 const ORDER = ['pending', 'approved', 'executed', 'rejected'];
@@ -47,25 +48,20 @@ export function ApprovalsScreen({ route }: Props) {
     [],
   );
 
+  const narrow = useNarrow();
+  const cols = useMemo(() => fitColumns(columns, narrow, ['by', 'at']), [columns, narrow]);
   const count = (s: string) => all.filter((a) => stateOf(a) === s).length;
 
   const list = (
     <>
-      <div className="pane-head">
-        <h1>Approvals</h1>
-        <span className="spacer" />
-        <Button icon="refresh" onClick={reload} disabled={loading}>
-          Reload
-        </Button>
-      </div>
-      <div className="filters">
-        <div className="group" role="group" aria-label="Status filter">
+      <div className="toolbar">
+        <div className="segmented" role="group" aria-label="Status filter">
           <Button aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>
-            All <span className="num faint">{all.length}</span>
+            All <span className="seg-count num">{fmtInt(all.length)}</span>
           </Button>
           {ORDER.map((s) => (
             <Button key={s} aria-pressed={filter === s} onClick={() => setFilter(filter === s ? 'all' : s)}>
-              {s} <span className="num faint">{count(s)}</span>
+              {s.charAt(0).toUpperCase() + s.slice(1)} <span className="seg-count num">{fmtInt(count(s))}</span>
             </Button>
           ))}
         </div>
@@ -79,7 +75,7 @@ export function ApprovalsScreen({ route }: Props) {
           unit="requests"
           primary
           rows={rows}
-          columns={columns}
+          columns={cols}
           rowKey={(a) => String(a.id)}
           selectedKey={selectedId}
           onSelect={(a) => route.setParams({ id: String(a.id) })}
@@ -90,13 +86,11 @@ export function ApprovalsScreen({ route }: Props) {
             filter !== 'all' ? (
               <EmptyState title={`No ${filter} requests.`}>
                 <button type="button" className="linklike" onClick={() => setFilter('all')}>
-                  Show all
+                  Clear filters
                 </button>
               </EmptyState>
             ) : (
-              <EmptyState title="No approval requests.">
-                Requests are made from an incident: Incidents, Response, Request approval on a recommended action.
-              </EmptyState>
+              <EmptyState title="No approval requests.">Requests are made from an incident: Incidents, Response, Request approval on a recommended action.</EmptyState>
             )
           }
         />
@@ -106,11 +100,27 @@ export function ApprovalsScreen({ route }: Props) {
 
   const detail = selected ? (
     <ApprovalDetail key={`${selected.id}-${stateOf(selected)}`} approval={selected} me={session.username} onChanged={reload} />
+  ) : loading && !data ? (
+    <SkeletonLines lines={5} />
   ) : (
-    <EmptyState title="No request selected." />
+    <EmptyState title="No request selected.">Select a request to read it and decide it.</EmptyState>
   );
 
-  return <SplitPane id="approvals" left={list} right={detail} initial={52} />;
+  return (
+    <div className="work">
+      <PageHeader
+        bar
+        title="Approvals"
+        purpose="What is waiting for a second person?"
+        actions={
+          <Button icon="refresh" onClick={reload} disabled={loading}>
+            Reload
+          </Button>
+        }
+      />
+      <SplitPane id="approvals" left={list} right={detail} initial={52} />
+    </div>
+  );
 }
 
 function ApprovalDetail({ approval: a, me, onChanged }: { approval: Approval; me: string; onChanged: () => void }) {
@@ -158,91 +168,74 @@ function ApprovalDetail({ approval: a, me, onChanged }: { approval: Approval; me
 
   return (
     <>
-      <div className="pane-head">
+      <div className="pane-bar">
         <h2 id="approval-detail-title" tabIndex={-1}>
           Request <span className="mono num">{a.id}</span>
         </h2>
         <StatusTag value={stateOf(a)} />
       </div>
       <div className="detail-scroll">
-        <div className="section">
-          <dl className="kv">
-            <dt>Action</dt>
-            <dd className="mono">{a.action.action_type}</dd>
-            <dt>Target</dt>
-            <dd>{a.action.target ? <Id value={a.action.target} label="Copy target" /> : <span className="faint">no specific target</span>}</dd>
-            <dt>Note</dt>
-            <dd>{a.action.note ?? <span className="faint">-</span>}</dd>
-            <dt>Incident</dt>
-            <dd>
-              <a className="mono" href={`#/incidents?id=${encodeURIComponent(a.incident_id)}`}>
-                {a.incident_id}
-              </a>{' '}
-              <span className="faint">open the evidence behind this request</span>
-            </dd>
-            <dt>Requested</dt>
-            <dd>
-              {a.requested_by}, <Time ts={a.created_utc} />
-            </dd>
-            <dt>Decision</dt>
-            <dd>
-              {a.decided_utc ? (
-                <>
-                  {a.status} by {a.reviewer}, <Time ts={a.decided_utc} />
-                </>
-              ) : (
-                <span className="faint">not decided</span>
-              )}
-            </dd>
-            {a.reason && (
-              <>
-                <dt>Reason</dt>
-                <dd>{a.reason}</dd>
-              </>
-            )}
-            <dt>Execution</dt>
-            <dd>
-              {a.executed_utc ? (
-                <>
-                  simulated, by {a.executed_by}, <Time ts={a.executed_utc} />
-                </>
-              ) : (
-                <span className="faint">not executed</span>
-              )}
-            </dd>
-          </dl>
-        </div>
-
-        <div className="section">
-          <h3>
-            Rules for this request (<Term id="four-eyes">four-eyes approval</Term>)
-          </h3>
-          <ul className="rules">
-            <li data-hit={own || undefined}>
-              <Icon name={own ? 'warning' : 'check'} /> Four-eyes: the requester cannot decide.{' '}
-              {own ? <strong>You requested this, so you cannot approve or reject it.</strong> : `Requested by ${a.requested_by}.`}
-            </li>
-            <li>
-              <Icon name="check" /> A decision needs a written reason; it is stored with the request and in the audit log.
-            </li>
-            <li>
-              <Icon name="check" /> An approved action runs once, by a manager or admin, and is simulated (no connector is called).
-            </li>
-          </ul>
-        </div>
+        <section className="block ap-facts" aria-label="Request">
+          <DefGrid
+            items={[
+              { label: 'Action', value: <span className="mono">{a.action.action_type}</span> },
+              { label: 'Target', value: a.action.target ? <Id value={a.action.target} label="Copy target" /> : <span className="faint">no specific target</span> },
+              {
+                label: 'Requested',
+                value: (
+                  <>
+                    {a.requested_by}, <Time ts={a.created_utc} />
+                  </>
+                ),
+              },
+              {
+                label: 'Incident',
+                value: (
+                  <a className="mono" href={`#/incidents?id=${encodeURIComponent(a.incident_id)}`}>
+                    {a.incident_id}
+                  </a>
+                ),
+              },
+              {
+                label: 'Decision',
+                value: a.decided_utc ? (
+                  <>
+                    {a.status} by {a.reviewer}, <Time ts={a.decided_utc} />
+                  </>
+                ) : (
+                  <span className="faint">not decided</span>
+                ),
+              },
+              {
+                label: 'Execution',
+                value: a.executed_utc ? (
+                  <>
+                    simulated, by {a.executed_by}, <Time ts={a.executed_utc} />
+                  </>
+                ) : (
+                  <span className="faint">not executed</span>
+                ),
+              },
+              { label: 'Note', value: a.action.note ?? <span className="faint">-</span> },
+              ...(a.reason ? [{ label: 'Reason', value: a.reason }] : []),
+            ]}
+          />
+        </section>
 
         <EvidenceSummary incidentId={a.incident_id} />
-        <Trail approval={a} />
 
         {a.status === 'pending' && (
-          <div className="section">
-            <h3>Decision</h3>
+          <section className="block" aria-labelledby="ap-decision-t">
+            <h3 className="block-title" id="ap-decision-t">
+              Decision
+            </h3>
+            <RulesNotice own={own} requestedBy={a.requested_by} />
             {!canDecide ? (
               <p className="muted">Your role ({session.role}) cannot decide requests. A manager or admin decides.</p>
             ) : own ? (
               <p className="muted">You made this request. Another manager or admin must decide it (four-eyes rule).</p>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 520 }}>
+              <div className="decision-form">
                 <div className="field">
                   <label htmlFor="ap-reason">Reason (required, {reason.trim().length} / 2000)</label>
                   <textarea
@@ -261,7 +254,7 @@ function ApprovalDetail({ approval: a, me, onChanged }: { approval: Approval; me
                     </span>
                   )}
                 </div>
-                <div style={{ display: 'flex', gap: 8 }}>
+                <div className="btn-row">
                   <Button kind="primary" onClick={() => void decide(true)} disabled={busy}>
                     Approve
                   </Button>
@@ -271,21 +264,21 @@ function ApprovalDetail({ approval: a, me, onChanged }: { approval: Approval; me
                 </div>
               </div>
             )}
-          </div>
+          </section>
         )}
 
         {a.status === 'approved' && !a.executed_utc && (
-          <div className="section">
-            <h3>
+          <section className="block" aria-labelledby="ap-exec-t">
+            <h3 className="block-title" id="ap-exec-t">
               <Term id="simulated">Execution</Term>
             </h3>
+            <RulesNotice own={own} requestedBy={a.requested_by} />
             {can(session.role, 'action.execute') ? (
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <div className="btn-row">
                 {confirmExecute ? (
                   <>
                     <span>
-                      Execute <span className="mono">{a.action.action_type}</span> on <span className="mono">{a.action.target ?? 'no target'}</span>? It can run
-                      once.
+                      Execute <span className="mono">{a.action.action_type}</span> on <span className="mono">{a.action.target ?? 'no target'}</span>? It can run once.
                     </span>
                     <Button kind="primary" onClick={() => void execute()} disabled={busy}>
                       Confirm execute
@@ -301,21 +294,49 @@ function ApprovalDetail({ approval: a, me, onChanged }: { approval: Approval; me
             ) : (
               <p className="muted">Your role ({session.role}) cannot execute actions.</p>
             )}
-            <p className="faint" style={{ marginTop: 4 }}>
-              Simulated: no connector is called and nothing outside SentinelAI changes.
-            </p>
-          </div>
+          </section>
+        )}
+
+        {a.status !== 'pending' && !(a.status === 'approved' && !a.executed_utc) && (
+          <section className="block" aria-label="Rules">
+            <RulesNotice own={own} requestedBy={a.requested_by} />
+          </section>
         )}
 
         {error && (
-          <div className="section">
+          <section className="block">
             <p className="field-error" role="alert">
               {error}
             </p>
-          </div>
+          </section>
         )}
+
+        <Trail approval={a} />
       </div>
     </>
+  );
+}
+
+/** The rules, stated before the controls they govern. */
+function RulesNotice({ own, requestedBy }: { own: boolean; requestedBy: string }) {
+  return (
+    <ul className="rule-notice" aria-label="Rules for this request">
+      <li data-hit={own || undefined}>
+        <Icon name={own ? 'warning' : 'check'} />
+        <span>
+          <Term id="four-eyes">Four-eyes</Term>: the requester cannot decide.{' '}
+          {own ? <strong>You requested this, so you cannot approve or reject it.</strong> : `Requested by ${requestedBy}.`}
+        </span>
+      </li>
+      <li>
+        <Icon name="check" />
+        <span>A decision needs a written reason; it is stored with the request and in the audit log.</span>
+      </li>
+      <li>
+        <Icon name="check" />
+        <span>An approved action runs once, by a manager or admin, and is simulated: no connector is called and nothing outside SentinelAI changes.</span>
+      </li>
+    </ul>
   );
 }
 
@@ -323,39 +344,53 @@ function ApprovalDetail({ approval: a, me, onChanged }: { approval: Approval; me
 function EvidenceSummary({ incidentId }: { incidentId: string }) {
   const { data, error } = useLoad((signal) => api.analysis(incidentId, signal), [incidentId]);
   return (
-    <div className="section">
-      <h3>
+    <section className="block ap-facts" aria-labelledby="ap-ev-t">
+      <h3 className="block-title" id="ap-ev-t">
         <Term id="evidence">Evidence</Term>
+        <a className="meta" href={`#/incidents?id=${encodeURIComponent(incidentId)}`}>
+          Open the incident with its alerts
+        </a>
       </h3>
       {error && <p className="field-error">The incident could not be loaded: {describeError(error)}</p>}
       {!data && !error && <SkeletonLines lines={2} />}
       {data && (
-        <dl className="kv">
-          <dt>Incident</dt>
-          <dd>
-            <SeverityCell value={data.summary.severity} /> <span className="mono">{incidentId}</span>
-          </dd>
-          <dt>Why</dt>
-          <dd>{data.summary.rule ? `${data.summary.rule.severity} because ${data.summary.rule.rule} (rule ${data.summary.rule.row})` : 'no triage rule recorded'}</dd>
-          <dt>Alerts</dt>
-          <dd className="num">
-            {fmtInt(data.summary.alerts)} from {data.summary.detectors_agreeing} detector{data.summary.detectors_agreeing === 1 ? '' : 's'},{' '}
-            <Time ts={data.summary.first_ts} /> to <Time ts={data.summary.last_ts} kind="data" />
-          </dd>
-          <dt>Entities</dt>
-          <dd className="mono">
-            {data.graph.nodes
-              .slice(0, 6)
-              .map((n) => n.value)
-              .join(', ')}
-            {data.graph.nodes_total > 6 ? ` +${data.graph.nodes_total - 6}` : ''}
-          </dd>
-          <dt>ATT&amp;CK</dt>
-          <dd>{data.kill_chain.filter((k) => k.alerts > 0).map((k) => k.name).join(', ') || 'no mapped alert'}</dd>
-        </dl>
+        <DefGrid
+          items={[
+            { label: 'Severity', value: <SeverityCell value={data.summary.severity} /> },
+            {
+              label: 'Alerts',
+              value: (
+                <span className="num">
+                  {fmtInt(data.summary.alerts)} from {data.summary.detectors_agreeing} detector{data.summary.detectors_agreeing === 1 ? '' : 's'}
+                </span>
+              ),
+            },
+            {
+              label: 'Time (UTC, data date)',
+              value: (
+                <>
+                  <Time ts={data.summary.first_ts} /> to <Time ts={data.summary.last_ts} />
+                </>
+              ),
+            },
+            { label: 'Why', value: data.summary.rule ? `${data.summary.rule.severity} because ${data.summary.rule.rule} (rule ${data.summary.rule.row})` : 'no triage rule recorded' },
+            {
+              label: 'Entities',
+              value: (
+                <span className="mono">
+                  {data.graph.nodes
+                    .slice(0, 6)
+                    .map((n) => n.value)
+                    .join(', ')}
+                  {data.graph.nodes_total > 6 ? ` +${data.graph.nodes_total - 6}` : ''}
+                </span>
+              ),
+            },
+            { label: 'ATT&CK', value: data.kill_chain.filter((k) => k.alerts > 0).map((k) => k.name).join(', ') || 'no mapped alert' },
+          ]}
+        />
       )}
-      <a href={`#/incidents?id=${encodeURIComponent(incidentId)}`}>Open the incident with its alerts and evidence</a>
-    </div>
+    </section>
   );
 }
 
@@ -366,51 +401,36 @@ function Trail({ approval: a }: { approval: Approval }) {
   const audit = useLoad((signal) => (mayAudit ? api.audit(signal) : Promise.resolve(null)), [mayAudit, a.id, a.status, a.executed_utc]);
   const entries = (audit.data?.entries ?? []).filter((e) => e.target === `approval:${a.id}`).sort((x, y) => (x.ts < y.ts ? -1 : 1));
   const steps: Array<[string, string | null, string]> = [
-    ['requested', a.created_utc, `by ${a.requested_by}`],
-    [a.status === 'pending' ? 'decision pending' : a.status, a.decided_utc, a.reviewer ? `by ${a.reviewer}: ${a.reason ?? ''}` : 'waiting for a manager or admin'],
+    ['Requested', a.created_utc, `by ${a.requested_by}`],
+    [a.status === 'pending' ? 'Decision pending' : a.status.charAt(0).toUpperCase() + a.status.slice(1), a.decided_utc, a.reviewer ? `by ${a.reviewer}: ${a.reason ?? ''}` : 'waiting for a manager or admin'],
   ];
-  if (a.status === 'approved') steps.push([a.executed_utc ? 'executed (simulated)' : 'not executed yet', a.executed_utc, a.executed_by ? `by ${a.executed_by}` : '']);
+  if (a.status === 'approved') steps.push([a.executed_utc ? 'Executed (simulated)' : 'Not executed yet', a.executed_utc, a.executed_by ? `by ${a.executed_by}` : '']);
   return (
-    <div className="section">
-      <h3>Audit trail</h3>
-      <ol className="trail">
+    <section className="block" aria-labelledby="ap-trail-t">
+      <h3 className="block-title" id="ap-trail-t">
+        Audit trail
+      </h3>
+      <ol className="trail-list">
         {steps.map(([what, ts, who]) => (
           <li key={what} data-done={ts ? true : undefined}>
-            <span className="trail-what">{what}</span> {ts ? <Time ts={ts} /> : <span className="faint">-</span>} <span className="muted">{who}</span>
+            <span className="what">{what}</span>
+            {ts ? <Time ts={ts} /> : <span className="faint">-</span>}
+            <span className="muted">{who}</span>
           </li>
         ))}
+        {mayAudit &&
+          entries.map((e) => (
+            <li key={e.id} data-done>
+              <span className="what mono">{e.action}</span>
+              <Time ts={e.ts} />
+              <span className="muted">
+                {e.username} ({e.role}), audit log entry {e.id}
+              </span>
+            </li>
+          ))}
       </ol>
-      {mayAudit ? (
-        entries.length > 0 && (
-          <table className="data-table" style={{ marginTop: 'var(--sp-8)' }}>
-            <caption className="visually-hidden">Audit log entries for this request</caption>
-            <thead>
-              <tr>
-                <th>Time (UTC)</th>
-                <th>User</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {entries.map((e) => (
-                <tr key={e.id}>
-                  <td>
-                    <Time ts={e.ts} />
-                  </td>
-                  <td>
-                    {e.username} <span className="faint">({e.role})</span>
-                  </td>
-                  <td className="mono">{e.action}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )
-      ) : (
-        <p className="faint" style={{ fontSize: 'var(--fs-12)' }}>
-          The full audit log is visible to managers and admins.
-        </p>
-      )}
-    </div>
+      {mayAudit && audit.error && <p className="field-error">The audit log could not be loaded: {describeError(audit.error)}</p>}
+      {!mayAudit && <p className="quiet-note">The full audit log is visible to managers and admins.</p>}
+    </section>
   );
 }

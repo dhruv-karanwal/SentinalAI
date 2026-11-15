@@ -1,27 +1,32 @@
-// Study page: matched-budget pilot results rendered from the result files (GET /study/results).
-// Only numbers that are in scores.json are drawn: no interpolation, no invented intervals.
-// Runs made with FakeClient are excluded by the API and only counted here.
+// Study page: "What do the finished runs say so far?" Matched-budget results rendered from the
+// result files (GET /study/results), by study part in tabs. Only numbers that are in scores.json
+// are drawn: no interpolation, no invented intervals. FakeClient runs are excluded by the API and
+// only counted here.
 
 import { useMemo, useState } from 'react';
 
 import { api, type ScoreRow, type StudyRun } from '../api.ts';
 import { DotPairs, HBars } from '../charts/Bars.tsx';
 import { ChartFrame, type LegendItem } from '../charts/ChartFrame.tsx';
-import { EmptyState, ErrorState, SkeletonLines } from '../components/ui.tsx';
+import { Disclosure, ErrorState, Page, PageHeader, Tabs } from '../components/ui.tsx';
 import { useLoad, useScreenContext } from '../hooks.ts';
-import { Explain, Term } from '../components/Term.tsx';
+import { Term } from '../components/Term.tsx';
 import { Icon } from '../icons.tsx';
 import { fmtDuration, fmtInt } from '../lib/format.ts';
 import { fmtPct, heatStep } from '../lib/scale.ts';
 import { coverageOf, noiseRunFor, precisionOf, refsFor } from '../lib/study.ts';
+import { DashSkeleton } from './Overview.tsx';
 
 const ARMS = ['single', 'single+verifier', 'graph', 'graph+verifier'];
 const LABEL = 'dev scenarios, pilot numbers, not paper results';
-const PART_ORDER = ['pilot', 'held-out', 'adhoc'];
+const PURPOSE = 'What do the finished runs say so far?';
+type Part = 'pilot' | 'held-out' | 'adhoc';
+const PART_ORDER: readonly Part[] = ['pilot', 'held-out', 'adhoc'];
+const PART_NAME: Record<Part, string> = { pilot: 'Pilot', 'held-out': 'Final (held-out)', adhoc: 'Ad hoc' };
 const PART_TEXT: Record<string, string> = {
-  pilot: 'The matched-budget pilot on the dev scenarios (run-pilot)',
-  'held-out': 'Final runs on the held-out scenarios, after the protocol freeze',
-  adhoc: 'Single runs made by hand (run-matched), e.g. smoke tests; not part of the pilot',
+  pilot: 'The matched-budget pilot on the dev scenarios (run-pilot).',
+  'held-out': 'Final runs on the held-out scenarios, after the protocol freeze.',
+  adhoc: 'Single runs made by hand (run-matched), e.g. smoke tests; not part of the pilot.',
 };
 /** scores.json says which part of the study a run belongs to; older files without it are dev pilot material. */
 const partOfRun = (r: StudyRun): string => r.study_part ?? (r.split === 'held-out' ? 'held-out' : 'pilot');
@@ -31,17 +36,17 @@ const prec = (r: ScoreRow | undefined): number | null => precisionOf(r);
 
 export function StudyScreen() {
   const { data, error, reload } = useLoad((signal) => api.study(signal), []);
-  const truncations = useMemo(() => [...new Set((data?.runs ?? []).map((r) => r.truncation ?? 'unknown'))].sort(), [data]);
+  const allRuns = useMemo(() => data?.runs ?? [], [data]);
+  const truncations = useMemo(() => [...new Set(allRuns.map((r) => r.truncation ?? 'unknown'))].sort(), [allRuns]);
   const [trunc, setTrunc] = useState<string | null>(null);
   const t = trunc ?? truncations[0] ?? null;
-  const [partPick, setPartPick] = useState<string | null>(null);
-  const allParts = useMemo(() => [...new Set((data?.runs ?? []).map(partOfRun))].sort((a, b) => PART_ORDER.indexOf(a) - PART_ORDER.indexOf(b)), [data]);
-  const part = partPick ?? allParts[0] ?? null;
-  const runs = useMemo(() => (data?.runs ?? []).filter((r) => (r.truncation ?? 'unknown') === t && partOfRun(r) === part), [data, t, part]);
+  const counts = useMemo(() => Object.fromEntries(PART_ORDER.map((p) => [p, allRuns.filter((r) => partOfRun(r) === p).length])) as Record<Part, number>, [allRuns]);
+  const [partPick, setPartPick] = useState<Part | null>(null);
+  const part: Part = partPick ?? PART_ORDER.find((p) => counts[p] > 0) ?? 'pilot';
+  const runs = useMemo(() => allRuns.filter((r) => (r.truncation ?? 'unknown') === t && partOfRun(r) === part), [allRuns, t, part]);
   const main = runs.filter((r) => !(r.variant ?? '').startsWith('noise-'));
   const noiseFor = (r: StudyRun) => noiseRunFor(r, runs);
-  const partOf = partOfRun;
-  const parts = [...new Set((data?.runs ?? []).map(partOf))];
+  const parts = [...new Set(allRuns.map(partOfRun))];
   useScreenContext(
     'study',
     data
@@ -50,80 +55,96 @@ export function StudyScreen() {
   );
 
   if (error && !data) return <ErrorState what="study results" error={error} onRetry={reload} />;
-  if (!data) return <SkeletonLines lines={6} />;
+  if (!data) return <DashSkeleton title="Study" purpose={PURPOSE} />;
   return (
-    <div className="page">
-      <div className="page-head">
-        <h1>Study</h1>
-        <span className="muted">Matched-budget pilot: single agent vs multi-agent graph, before and after the evidence verifier</span>
-        <span className="spacer" />
-        {allParts.length > 1 && (
-          <span className="seg-toggle" role="group" aria-label="Which runs">
-            {allParts.map((x) => (
-              <button key={x} type="button" className="btn" aria-pressed={x === part} onClick={() => setPartPick(x)} title={PART_TEXT[x] ?? x}>
-                {x === 'held-out' ? 'final (held-out)' : x}
-              </button>
-            ))}
-          </span>
-        )}
-        {truncations.length > 1 && (
-          <span className="seg-toggle" role="group" aria-label="Truncation rule">
-            {truncations.map((x) => (
-              <button key={x} type="button" className="btn" aria-pressed={x === t} onClick={() => setTrunc(x)}>
-                {x}
-              </button>
-            ))}
-          </span>
-        )}
-      </div>
-      <div className="page-body" style={{ maxWidth: 1240 }}>
-        <div className="banner" role="note">
-          <Icon name="warning" />
-          <span>
-            <strong>{parts.includes('held-out') ? 'Contains final (held-out) runs; pilot runs are marked pilot.' : `${LABEL}.`}</strong> Headline: event_label coverage on alert-reachable phases, after the verifier. Held-out scenarios stay untouched until the protocol is frozen.
-          </span>
+    <Page>
+      <PageHeader
+        title="Study"
+        purpose={PURPOSE}
+        actions={
+          truncations.length > 1 ? (
+            <span className="segmented" role="group" aria-label="Truncation rule">
+              {truncations.map((x) => (
+                <button key={x} type="button" className="btn" aria-pressed={x === t} onClick={() => setTrunc(x)}>
+                  {x}
+                </button>
+              ))}
+            </span>
+          ) : undefined
+        }
+      />
+      <p className="study-notice" role="note">
+        <Icon name="warning" />
+        <span>
+          <strong>{parts.includes('held-out') ? 'Contains final (held-out) runs; pilot runs are marked pilot.' : `${LABEL.charAt(0).toUpperCase()}${LABEL.slice(1)}.`}</strong> Headline: event_label coverage on alert-reachable phases, after the verifier. Held-out scenarios stay untouched until the protocol is frozen.
+        </span>
+      </p>
+      <Disclosure summary="What this page shows">
+        <div className="study-explain">
+          <p>
+            The same <Term id="agent">investigation agent</Term> and <Term id="multi-agent">multi-agent graph</Term> run on the same cases with different alert sources (Wazuh, Suricata, AMiner, all fused, and the <Term id="oracle">oracle</Term> and{' '}
+            <Term id="noise">noise</Term> controls), under a <Term id="matched-budget">matched budget</Term>. Each arm is scored before and after the <Term id="verifier">evidence verifier</Term>, next to simple <Term id="baseline">baselines</Term>.
+          </p>
+          <p>
+            It answers the research question: how much does the alert source change how many attack steps are found (<Term id="coverage">coverage</Term> of <Term id="reachable-phase">reachable phases</Term>) and how often the AI claims things the evidence does not support (<Term id="unsupported-claim">unsupported claims</Term>)?
+          </p>
+          <p className="faint">Every number is read from the run files (scores.json). Nothing is typed in, estimated or interpolated; the files carry no confidence intervals, so none are drawn.</p>
         </div>
-        <section className="chart" aria-labelledby="st-what">
-          <h3 className="chart-title" id="st-what">
-            What this page shows
-          </h3>
-          <Explain
-            what={
-              <>
-                The same <Term id="agent">investigation agent</Term> and <Term id="multi-agent">multi-agent graph</Term> run on the same cases with different alert sources (Wazuh, Suricata, AMiner, all fused, and the <Term id="oracle">oracle</Term> and{' '}
-                <Term id="noise">noise</Term> controls), under a <Term id="matched-budget">matched budget</Term>. Each arm is scored before and after the <Term id="verifier">evidence verifier</Term>, next to simple <Term id="baseline">baselines</Term>.
-              </>
-            }
-            why={
-              <>
-                It answers the research question: how much does the alert source change how many attack steps are found (<Term id="coverage">coverage</Term> of <Term id="reachable-phase">reachable phases</Term>) and how often the AI claims things the evidence does not support (<Term id="unsupported-claim">unsupported claims</Term>)?
-              </>
-            }
-          />
-          <p className="chart-note">Every number is read from the run files (scores.json). Nothing is typed in, estimated or interpolated; the files carry no confidence intervals, so none are drawn.</p>
-        </section>
-        {data.runs.length === 0 ? (
-          <EmptyState title="No results yet: this page is empty on purpose">
-            No matched run with a real model has finished. Results appear here when <span className="mono">run-pilot</span> (or <span className="mono">run-matched</span>) writes{' '}
-            <span className="mono">scores.json</span> under data/processed/runs/. Then this page draws, per alert source and arm: coverage of the reachable attack phases, citation precision, the unsupported-claim rate before and after the verifier, and the tokens used. {data.excluded_fake_runs > 0 && `${data.excluded_fake_runs} FakeClient run${data.excluded_fake_runs === 1 ? ' was' : 's were'} excluded (plumbing checks, never results).`}{' '}
-            {data.incomplete_runs > 0 && `${data.incomplete_runs} run${data.incomplete_runs === 1 ? ' is' : 's are'} incomplete (no scores.json yet).`}
-          </EmptyState>
-        ) : (
-          <>
-            <p className="faint" style={{ margin: 0, fontSize: 'var(--fs-12)' }}>
-              {fmtInt(data.runs.length)} run{data.runs.length === 1 ? '' : 's'} ({parts.map((x) => `${fmtInt(data.runs.filter((r) => partOf(r) === x).length)} ${x}`).join(', ')}) · truncation {t} · {data.excluded_fake_runs} FakeClient run{data.excluded_fake_runs === 1 ? '' : 's'} excluded · {data.incomplete_runs} incomplete
+      </Disclosure>
+      {data.runs.length === 0 ? (
+        <section className="card study-empty" aria-labelledby="st-empty-t">
+          <h2 id="st-empty-t">No results yet: this page is empty on purpose</h2>
+          <p>
+            No matched run with a real model has finished. Results appear when <span className="mono">run-pilot</span> (or <span className="mono">run-matched</span>) writes <span className="mono">scores.json</span> under data/processed/runs/. Then this page shows, per alert source and arm:
+          </p>
+          <ul>
+            <li>coverage of the reachable attack phases, next to the cite-all ceiling, matched top-k and the noise control</li>
+            <li>citation precision</li>
+            <li>the unsupported-claim rate before and after the verifier</li>
+            <li>tokens and latency per arm, and coverage by detector variant and arm</li>
+          </ul>
+          {(data.excluded_fake_runs > 0 || data.incomplete_runs > 0) && (
+            <p className="faint">
+              {data.excluded_fake_runs > 0 && `${data.excluded_fake_runs} FakeClient run${data.excluded_fake_runs === 1 ? ' was' : 's were'} excluded (plumbing checks, never results). `}
+              {data.incomplete_runs > 0 && `${data.incomplete_runs} run${data.incomplete_runs === 1 ? ' is' : 's are'} incomplete (no scores.json yet).`}
             </p>
-            <CoverageChart runs={main} noiseFor={noiseFor} metric={cov} title="Coverage: event_label, alert-reachable phases" question="Does an arm cover more attack phases than citing by detector order, and how close does it get to citing everything?" />
-            <CoverageChart runs={main} noiseFor={noiseFor} metric={prec} title="Citation precision (event_label)" question="Of the alerts an arm cites, what share are attack-labelled?" />
-            <div className="grid-2">
-              <ClaimsChart runs={main} />
-              <CostChart runs={main} />
-            </div>
-            <HeatTable runs={runs} />
-          </>
-        )}
-      </div>
-    </div>
+          )}
+        </section>
+      ) : (
+        <section className="sec" aria-label="Runs by study part">
+          <Tabs tabs={PART_ORDER.map((p) => ({ id: p, label: PART_NAME[p], count: fmtInt(counts[p]) }))} value={part} onChange={setPartPick} label="Study part" idBase="st" inset />
+          <div className="tab-panel tab-enter" key={`${part}:${t}`} role="tabpanel" id={`st-panel-${part}`} aria-labelledby={`st-tab-${part}`}>
+            <p className="study-meta">
+              {PART_TEXT[part]} {fmtInt(runs.length)} run{runs.length === 1 ? '' : 's'} · truncation {t} · {data.excluded_fake_runs} FakeClient run{data.excluded_fake_runs === 1 ? '' : 's'} excluded · {data.incomplete_runs} incomplete
+            </p>
+            {runs.length === 0 ? (
+              <div className="card study-empty">
+                <h2>No {PART_NAME[part].toLowerCase()} runs{truncations.length > 1 ? ` with truncation ${t}` : ''} yet</h2>
+                <p>The charts for this part appear when one of its runs writes scores.json.</p>
+              </div>
+            ) : (
+              <div className="grid-12">
+                <div className="col-12">
+                  <CoverageChart runs={main} noiseFor={noiseFor} metric={cov} title="Coverage: event_label, alert-reachable phases" question="Does an arm cover more attack phases than citing by detector order, and how close does it get to citing everything?" />
+                </div>
+                <div className="col-12">
+                  <CoverageChart runs={main} noiseFor={noiseFor} metric={prec} title="Citation precision (event_label)" question="Of the alerts an arm cites, what share are attack-labelled?" />
+                </div>
+                <div className="col-6">
+                  <ClaimsChart runs={main} />
+                </div>
+                <div className="col-6">
+                  <CostChart runs={main} />
+                </div>
+                <div className="col-12">
+                  <HeatTable runs={runs} />
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+    </Page>
   );
 }
 
@@ -232,6 +253,7 @@ function HeatTable({ runs }: { runs: StudyRun[] }) {
       table={{ columns: ['scenario / variant', ...ARMS], rows: keys.map((k) => [k, ...ARMS.map((a) => fmtPct(cov(byVariant.get(k)!.arms[a])))]) }}
       note={`${LABEL}. The value is printed in every cell; shade only repeats it.`}
     >
+      <div className="table-scroll">
       <table className="data-table">
         <thead>
           <tr>
@@ -259,6 +281,7 @@ function HeatTable({ runs }: { runs: StudyRun[] }) {
           ))}
         </tbody>
       </table>
+      </div>
     </ChartFrame>
   );
 }

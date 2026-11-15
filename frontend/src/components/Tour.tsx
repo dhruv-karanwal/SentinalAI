@@ -27,9 +27,10 @@ export function TourPanel({ step, onStep, onClose }: { step: number; onStep: (n:
   if (!stop) return null;
   const last = step === TOUR.length - 1;
   return (
-    <div className="tour" ref={ref} role="region" aria-label="Guided tour" aria-live="polite">
+    <div className="tour no-print" ref={ref} role="region" aria-label="Guided tour" aria-live="polite">
       <h2 tabIndex={-1}>{stop.title}</h2>
       <p>{stop.text}</p>
+      <span className="visually-hidden">Stop {step + 1} of {TOUR.length}</span>
       <div className="tour-progress" aria-hidden="true">
         {TOUR.map((s, i) => (
           <span key={s.path} data-on={i <= step || undefined} />

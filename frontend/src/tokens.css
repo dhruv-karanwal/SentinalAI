@@ -1,52 +1,88 @@
-/* Design tokens (frontend/DESIGN.md section 3). The only file with raw colour values.
-   Contrast was measured for every text-like token on bg, surface, raised and selected. */
+/* Design tokens (frontend/DESIGN.md section 3). The only file with raw colour values and raw sizes.
+   Contrast is asserted for every text-like token on bg, surface, raised and selected (lib tests). */
 
 :root {
-  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-mono: ui-monospace, Consolas, Menlo, monospace;
+  /* type: one UI family, one mono family, both self-hosted (@fontsource-variable, imported in main.tsx) */
+  --font-sans: "Geist Variable", system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, Consolas, monospace;
 
-  --fs-11: 11px;
-  --fs-12: 12px;
-  --fs-13: 13px;
-  --fs-14: 14px;
-  --fs-16: 16px;
+  /* the whole type scale: six sizes, each with its line height */
+  --fs-micro: 11px; /* column headers, units, kickers */
+  --fs-small: 12px; /* dense rows, tags, meta */
+  --fs-body: 13px; /* body, comfortable rows, controls */
+  --fs-title: 15px; /* section and pane titles */
+  --fs-heading: 20px; /* page title, KPI value */
+  --fs-display: 32px; /* About hero only */
+  --lh-micro: 16px;
+  --lh-small: 16px;
+  --lh-body: 20px;
+  --lh-title: 24px;
+  --lh-heading: 28px;
+  --lh-display: 40px;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --track-tight: -0.02em; /* title, heading, display */
+  --track-label: 0.04em; /* micro labels */
 
+  /* spacing: 4 / 8 scale (2 only for optical gaps inside a control) */
   --sp-2: 2px;
   --sp-4: 4px;
   --sp-8: 8px;
   --sp-12: 12px;
   --sp-16: 16px;
   --sp-24: 24px;
+  --sp-32: 32px;
+  --sp-48: 48px;
+  --sp-64: 64px;
 
-  --radius-s: 2px;
-  --radius-m: 4px;
+  /* one radius scale */
+  --radius-s: 4px; /* tags, inputs, buttons */
+  --radius-m: 6px; /* cards, panes */
+  --radius-l: 10px; /* overlays: dialog, palette, chat */
+  --radius-full: 999px; /* dots, the chat button */
 
-  --dur: 100ms;
-  /* wave F motion tokens (DESIGN.md 13.2): one easing set, four durations */
-  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
-  --ease-in: cubic-bezier(0.55, 0, 1, 0.45);
-  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
-  --dur-fast: 140ms;
-  --dur-mid: 240ms;
-  --dur-slow: 420ms;
-  --dur-draw: 900ms;
+  /* controls and rows */
+  --control-h: 28px;
+  --control-h-lg: 36px;
+  --row-h: 28px;
+  --row-fs: var(--fs-small);
+  --icon: 16px;
+  --hairline: 1px;
+  --focus-w: 2px;
 
-  --rail-w: 176px;
-  --topbar-h: 36px;
+  /* layout */
+  --rail-w: 224px;
+  --rail-w-collapsed: 52px;
+  --topbar-h: 48px;
+  --content-max: 1280px;
+  --gutter: 24px;
+  --grid-gap: 16px; /* 12-column grid gap */
+  --measure: 68ch; /* longest line of running text */
 
-  --row-h: 24px;
-  --row-fs: var(--fs-12);
+  /* motion: one curve, three durations, nothing loops */
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --dur-fast: 150ms; /* hover, press, focus */
+  --dur-mid: 200ms; /* tabs, accordions, panels, page enter */
+  --dur-slow: 250ms; /* overlays, reveals, chart draw-in (once) */
+  --stagger: 30ms;
+
+  --z-sticky: 10;
+  --z-rail: 20;
+  --z-overlay: 60;
+  --z-chat: 70;
+  --z-palette: 80;
+  --z-toast: 90;
 }
 
 :root[data-density="comfortable"] {
-  --row-h: 32px;
-  --row-fs: var(--fs-13);
+  --row-h: 36px;
+  --row-fs: var(--fs-body);
 }
 
-/* Wave G palette (DESIGN.md 3 + 14): warm graphite + phosphor lime. No blue anywhere.
-   The lime is for the logo, active nav mark, primary action, focus ring, chat button and links only.
-   Detector hues are spread across lightness as well as hue, so they stay apart under
-   deuteranopia, protanopia and tritanopia (tests in lib/charts.test.ts). */
+/* Colour. Warm neutral surfaces in three elevation levels (bg < surface < raised) plus `selected`.
+   The accent is ink: the highest-contrast neutral. It marks the primary action, focus and the
+   active state, so severity and detector identity are the only hues on screen. No blue anywhere. */
 :root,
 :root[data-theme="dark"] {
   color-scheme: dark;
@@ -54,40 +90,31 @@
   --surface: #1d1a17;
   --raised: #26221e;
   --selected: #322d26;
-  --border: #3a352f;
+  --border: #332f2a;
   --border-strong: #7d766b;
   --text: #ece8df;
   --text-muted: #a39d91;
   --text-faint: #9a9488;
-  --accent: #c8f03c;
+  --accent: #f4f1ea;
   --on-accent: #151311;
   --sev-high: #ff6b57;
   --sev-medium: #e8a33a;
   --sev-low: #a39a8c;
   --verified: #46c46a;
+  --online: #46c46a;
   --det-wazuh: #f08a4b;
   --det-suricata: #f7b3d6;
   --det-aminer: #2fa89f;
   --det-sigma: #a39d91;
   --grid: #2c2823;
-  --heat-1: #2a2a1c;
-  --heat-2: #34391d;
-  --heat-3: #3f4a1f;
-  --heat-4: #4b5b21;
+  --heat-1: #2b2723;
+  --heat-2: #39342e;
+  --heat-3: #49433b;
+  --heat-4: #5a5248;
   --ref: #d6d0c4;
   --mark: #4a3d0c;
-  --float-shadow: 0 1px 2px rgb(0 0 0 / 0.35);
-  /* non-text, decorative or state marks (DESIGN.md 13.1, 14) */
-  --online: #46c46a;
-  --glass: rgb(29 26 23 / 0.86);
-  --glass-edge: rgb(236 232 223 / 0.09);
-  --grain: rgb(236 232 223 / 0.022);
-  --fine-line: rgb(236 232 223 / 0.018);
-  --glow-accent: rgb(200 240 60 / 0.28);
-  --glow-high: rgb(255 107 87 / 0.4);
-  --sheen: rgb(236 232 223 / 0.05);
-  --shimmer: rgb(236 232 223 / 0.05);
-  --lift-shadow: 0 8px 24px rgb(0 0 0 / 0.45);
+  --scrim: rgb(0 0 0 / 0.5);
+  --shadow-overlay: 0 12px 32px rgb(0 0 0 / 0.5);
 }
 
 :root[data-theme="light"] {
@@ -96,47 +123,38 @@
   --surface: #fbf9f4;
   --raised: #ece8de;
   --selected: #e7e1d1;
-  --border: #d9d3c6;
+  --border: #ddd7ca;
   --border-strong: #7a7266;
   --text: #1b1815;
   --text-muted: #514b43;
   --text-faint: #625b52;
-  --accent: #5f6400;
-  --on-accent: #ffffff;
+  --accent: #1b1815;
+  --on-accent: #fbf9f4;
   --sev-high: #9b1036;
   --sev-medium: #8a5a00;
   --sev-low: #5e574e;
   --verified: #0b6a4a;
+  --online: #0b6a4a;
   --det-wazuh: #a3440a;
   --det-suricata: #6b1d49;
   --det-aminer: #04687a;
   --det-sigma: #625b52;
   --grid: #e4dfd3;
-  --heat-1: #ebead4;
-  --heat-2: #dde2b4;
-  --heat-3: #cbd58f;
-  --heat-4: #b8c76c;
+  --heat-1: #e6e1d5;
+  --heat-2: #d8d1c1;
+  --heat-3: #c7beab;
+  --heat-4: #b3a893;
   --ref: #3d3832;
   --mark: #ffe58a;
-  --float-shadow: 0 1px 2px rgb(40 30 20 / 0.2);
-  --online: #0b6a4a;
-  --glass: rgb(251 249 244 / 0.9);
-  --glass-edge: rgb(27 24 21 / 0.08);
-  --grain: rgb(27 24 21 / 0.028);
-  --fine-line: rgb(27 24 21 / 0.02);
-  --glow-accent: rgb(95 100 0 / 0.2);
-  --glow-high: rgb(155 16 54 / 0.24);
-  --sheen: rgb(255 255 255 / 0.5);
-  --shimmer: rgb(27 24 21 / 0.05);
-  --lift-shadow: 0 8px 24px rgb(40 30 20 / 0.14);
+  --scrim: rgb(27 24 21 / 0.3);
+  --shadow-overlay: 0 12px 32px rgb(40 30 20 / 0.16);
 }
 
 @media (prefers-reduced-motion: reduce) {
   :root {
-    --dur: 0ms;
     --dur-fast: 0ms;
     --dur-mid: 0ms;
     --dur-slow: 0ms;
-    --dur-draw: 0ms;
+    --stagger: 0ms;
   }
 }
