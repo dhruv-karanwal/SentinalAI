@@ -1097,3 +1097,6 @@ button.cite:hover {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.block-line {
+  display: block;
+}

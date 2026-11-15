@@ -208,6 +208,31 @@ class Repository:
     def set_incident_status(self, incident_id: str, status: str) -> None:
         self.db.execute("UPDATE incidents SET status = ? WHERE incident_id = ?", (status, incident_id))
 
+    # --- ML scores (C4) ---------------------------------------------------------------------
+    def put_ml_scores(self, model_version: str, rows: Sequence[dict[str, Any]]) -> int:
+        with self.db.transaction():
+            for r in rows:  # re-scoring with the same version replaces the row
+                self.db.execute("DELETE FROM ml_scores WHERE alert_id = ? AND model_version = ? AND model = ?",
+                                (r["alert_id"], model_version, r["model"]))
+                self.db.execute("INSERT INTO ml_scores (alert_id, model_version, model, score, flag, "
+                                "in_sample, explanation, scored_utc) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                                (r["alert_id"], model_version, r["model"], float(r["score"]),
+                                 int(bool(r["flag"])), int(bool(r["in_sample"])),
+                                 encode_json(r["explanation"]), r["scored_utc"]))
+        return len(rows)
+
+    def ml_scores(self, alert_ids: Sequence[str], chunk: int = 500) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        ids = list(alert_ids)
+        for i in range(0, len(ids), chunk):
+            part = ids[i:i + chunk]
+            rows = self.db.query("SELECT * FROM ml_scores WHERE alert_id IN (" + ",".join("?" * len(part))
+                                 + ") ORDER BY model_version, model, alert_id", part)
+            out.extend({**r, "flag": bool(r["flag"]), "in_sample": bool(r["in_sample"]),
+                        "explanation": decode_json(r["explanation"]), "scored_utc": str(r["scored_utc"])}
+                       for r in rows)
+        return out
+
     # --- investigations (C2) -------------------------------------------------------------
     def start_investigation(self, incident_id: str, workflow: str, requested_by: str,
                             model_id: str | None) -> str:

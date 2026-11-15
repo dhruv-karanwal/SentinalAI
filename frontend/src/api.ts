@@ -285,6 +285,15 @@ export interface InvestigationResult {
   note: string;
 }
 
+export interface IncidentMl {
+  incident_id: string;
+  influences_severity: boolean;
+  note: string;
+  models: { model_version: string; model: string; kind: string; alerts: number; scored: number; flagged: number;
+    max_score: number; in_sample: boolean;
+    top: { alert_id: string; score: number; flag: boolean; explanation: Record<string, unknown> }[] }[];
+}
+
 export interface Investigation extends InvestigationRow {
   result: InvestigationResult | null;
 }
@@ -635,6 +644,8 @@ export const api = {
   startInvestigation: (incident_id: string, workflow: 'single' | 'graph') =>
     request<{ investigation_id: string; status: string; workflow: string }>(
       'POST', `/incidents/${encodeURIComponent(incident_id)}/investigations`, { workflow }),
+  incidentMl: (incident_id: string, signal?: AbortSignal) =>
+    request<IncidentMl>('GET', `/incidents/${encodeURIComponent(incident_id)}/ml`, undefined, signal),
   investigations: (incident_id: string, signal?: AbortSignal) =>
     request<{ investigations: InvestigationRow[] }>(
       'GET', `/incidents/${encodeURIComponent(incident_id)}/investigations`, undefined, signal),

@@ -43,3 +43,19 @@ One entry per milestone of the product-finalization plan. Details and command ou
 - Browser walk (headless, 1440 / 1366 / 390 px) against the real API with a scripted OpenAI-compatible
   stub (scratchpad, not committed; plumbing only): graph and single runs completed and rendered, 0
   console errors. Not done: a run against the real model (Windows + Ollama).
+
+## 2026-11-15 — Milestone 4: detection (C5 Sigma coverage, C4 ML in the platform)
+
+- Sigma: `CompiledRule.fields`; `detection/sigma_coverage.py` (`rule_coverage`: per-rule status
+  matched / evaluated_no_match / no_events_of_log_type / skipped with reason, required vs available
+  fields, events evaluated, matches; funnel). `sigma_report.rule_usefulness` (labels, dev only).
+  The `sigma` CLI prints the funnel and per-rule usefulness. No rule or mapping changed.
+- ML: `ml_baselines` comparison (`COMPARISON_MODELS`, `COMPARISON_FEATURE_SETS` with `no_host_counts`),
+  extra metrics in the per-label dicts (accuracy, fpr, pr_auc, roc_auc) and timing; default output
+  unchanged. `train_bundle` + `detection/ml_model.py` + CLI `ml-train` / `ml-score`, migration
+  `0005_ml_scores.sql`, `Repository.put_ml_scores` / `ml_scores`, `GET /incidents/{id}/ml`, console
+  line "ML detection (not used for severity)".
+- Tests: `test_sigma_coverage.py` (2), 3 new in `test_ml_baselines.py`, `test_ml_model.py` (4),
+  frontend `mlLine` test. pytest 553 passed / 12 skipped; mypy clean (95 files); frontend 87/87.
+- Not run here (no real data): `sigma` on the real rules and dev scenarios (funnel numbers),
+  `ml-baselines` comparison numbers, `ml-train` on russellmitchell + shaw. Commands in CLAUDE.md.

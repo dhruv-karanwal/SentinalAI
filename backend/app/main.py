@@ -47,6 +47,7 @@ DEFAULT_LABELS = Path(__file__).resolve().parents[2] / "data" / "raw" / "ait_ads
 
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parents[2] / "data" / "processed"
 DEFAULT_PLATFORM_DIR = Path(__file__).resolve().parents[2] / "data" / "platform"
+DEFAULT_MODEL_DIR = Path(__file__).resolve().parents[2] / "data" / "models" / "ml"
 DEFAULT_SIGMA_RULES = Path(__file__).resolve().parents[2] / "data" / "raw" / "sigma" / "repo"
 
 _OFFSET_RE = re.compile(r"([+-])(\d{2}):?(\d{2})")
@@ -221,6 +222,22 @@ def build_parser() -> argparse.ArgumentParser:
     mlb.add_argument("--study-config", type=Path, default=DEFAULT_STUDY_CONFIG)
     mlb.add_argument("--data-dir", type=Path, default=DEFAULT_PLATFORM_DIR,
                      help="platform stores; labels come from their truth area")
+
+    mlt = sub.add_parser("ml-train", help="C4: train the operational ML bundle (HistGB + IsolationForest) "
+                                         "on dev scenarios and save it, versioned")
+    mlt.add_argument("--scenarios", nargs="+", default=["russellmitchell", "shaw"])
+    mlt.add_argument("--processed-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    mlt.add_argument("--study-config", type=Path, default=DEFAULT_STUDY_CONFIG)
+    mlt.add_argument("--data-dir", type=Path, default=DEFAULT_PLATFORM_DIR)
+    mlt.add_argument("--model-dir", type=Path, default=DEFAULT_MODEL_DIR)
+
+    mls = sub.add_parser("ml-score", help="C4: attach ML scores of a saved bundle to a scenario's "
+                                         "stored alerts (label-free; never changes severity)")
+    mls.add_argument("--scenario", required=True)
+    mls.add_argument("--study-config", type=Path, default=DEFAULT_STUDY_CONFIG)
+    mls.add_argument("--data-dir", type=Path, default=DEFAULT_PLATFORM_DIR)
+    mls.add_argument("--model-dir", type=Path, default=DEFAULT_MODEL_DIR)
+    mls.add_argument("--bundle", type=Path, default=None, help="bundle folder (default: the newest)")
 
     fbr = sub.add_parser("feedback-report", help="Wave D: offline summary of analyst feedback "
                                                  "(no retraining)")
@@ -527,7 +544,7 @@ def _platform_ingest(args: argparse.Namespace) -> int:
 
 def _sigma(args: argparse.Namespace) -> int:
     from app.detection.labels import MissingTruthError, dev_labels
-    from app.detection.sigma_report import run_sigma_scenario, sigma_dev_baseline
+    from app.detection.sigma_report import rule_usefulness, run_sigma_scenario, sigma_dev_baseline
     from app.platform.bootstrap import open_stores
 
     try:
@@ -549,6 +566,10 @@ def _sigma(args: argparse.Namespace) -> int:
     print(f"sigma alerts: {stats['sigma_alerts']} from {report['rules_with_hits']} rules; "
           f"runtime load {report['runtime_seconds']['load_rules']} s, "
           f"evaluate {report['runtime_seconds']['evaluate']} s")
+    f = report["coverage"]["funnel"]
+    print(f"coverage funnel: {f['rules']} rules -> {f['compiled']} compiled -> {f['applicable']} "
+          f"applicable (log type in the evidence) -> {f['evaluated']} evaluated -> {f['matched']} matched "
+          f"({f['skipped']} skipped); per-rule rows in the report's 'coverage'")
     for rid, info in report["per_rule"].items():
         if info["hits"]:
             print(f"  {info['hits']:>7d} hits / {info['events_evaluated']:>7d} events  "
@@ -569,6 +590,11 @@ def _sigma(args: argparse.Namespace) -> int:
         print(f"  {truth:11s} TP {s['tp']} FP {s['fp']} FN {s['fn']} TN {s['tn']} "
               f"prec {_fmt(s['precision'])} recall {_fmt(s['recall'])} F1 {_fmt(s['f1'])} "
               f"FNR {_fmt(s['fnr'])}")
+    base["per_rule_usefulness"] = rule_usefulness(report["_run"], labels)
+    print("per matched rule (hits on source alerts with an attack event_label / hits with an event label):")
+    for rid, u in sorted(base["per_rule_usefulness"].items(), key=lambda kv: -kv[1]["hits"]):
+        print(f"  {rid}: {u['attack_event_label']}/{u['event_labelled']} of {u['hits']} hits, "
+              f"precision {_fmt(u['precision_event'])}")
     if args.output_dir is not None:
         (Path(args.output_dir) / f"{args.scenario}.sigma.dev_baseline.json").write_text(
             json.dumps(base, indent=2) + "\n", encoding="utf-8")
@@ -678,10 +704,80 @@ def _ml_baselines(args: argparse.Namespace) -> int:
             ev = hgb.get("event_label")
             print(f"    {ph['phase']:28s} n {ph['n_test']:>6d} event attack {ph['event_attack']:>6d} "
                   f"HistGB recall {_fmt(ev['recall']) if ev else 'skipped'}")
+    print("\nMODEL COMPARISON (cross-scenario; event_label; uncalibrated scores; dev scenarios only)")
+    for name, split in report["comparison"]["splits"].items():
+        print(f"\n{name}")
+        for model, res in split["models"].items():
+            if "skipped" in res:
+                print(f"  {model:22s} skipped: {res['skipped']}")
+                continue
+            s, t = res["event_label"], split["timing"].get(model, {})
+            print(f"  {model:22s} P {_fmt(s['precision'])} R {_fmt(s['recall'])} F1 {_fmt(s['f1'])} "
+                  f"acc {_fmt(s['accuracy'])} FPR {_fmt(s['fpr'])} FNR {_fmt(s['fnr'])} "
+                  f"PR-AUC {_fmt(s['pr_auc'])} ROC-AUC {_fmt(s['roc_auc'])} "
+                  f"TP {s['tp']} FP {s['fp']} FN {s['fn']} TN {s['tn']} "
+                  f"fit {t.get('fit_seconds', 0):.2f} s predict {t.get('predict_seconds', 0):.2f} s")
     print(f"\nruntime {report['runtime_seconds']} s")
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
     (out / "ml_baselines.dev.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    return 0
+
+
+def _ml_train(args: argparse.Namespace) -> int:
+    from app.detection.labels import MissingTruthError
+    from app.detection.ml_baselines import train_bundle
+    from app.detection.ml_model import save_bundle
+    from app.platform.bootstrap import open_stores
+
+    try:
+        config = load_study_config(args.study_config)
+        for s in args.scenarios:
+            config.split.require_dev(s)
+        bundle = train_bundle(args.processed_dir, open_stores(args.data_dir).truth, config, args.scenarios)
+        path = save_bundle(bundle, args.model_dir)
+    except (HeldOutScenarioError, ValueError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except MissingTruthError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    m = bundle.metadata
+    print(f"ML BUNDLE {bundle.version} - {m['label']}")
+    print(f"trained on {', '.join(m['trained_on'])}: {m['rows']} alerts, {m['event_labelled_rows']} with an "
+          f"event label ({m['event_attack_rows']} attack); fit {m['fit_seconds']} s")
+    print(f"importance order (in-sample, global): {', '.join(m['importance_order'])}")
+    print(f"saved to {path}; scores on these scenarios are in-sample; evaluation: ml-baselines")
+    return 0
+
+
+def _ml_score(args: argparse.Namespace) -> int:
+    from app.detection.ml_model import BundleError, latest_bundle, load_bundle, score_alerts
+    from app.platform.bootstrap import open_stores
+
+    try:
+        config = load_study_config(args.study_config)
+        config.split.require_dev(args.scenario)  # the platform replays dev scenarios only
+        path = args.bundle or latest_bundle(args.model_dir)
+        if path is None:
+            raise BundleError(f"no model bundle under {args.model_dir} (run ml-train)")
+        bundle = load_bundle(path)
+        repo = open_stores(args.data_dir).repo
+        alerts = list(repo.iter_alert_models(args.scenario))
+        if not alerts:
+            raise ValueError(f"no stored alerts for {args.scenario} (run platform-ingest)")
+        rows = score_alerts(bundle, alerts, in_sample=args.scenario in bundle.metadata.get("trained_on", []))
+        n = repo.put_ml_scores(bundle.version, rows)
+    except (HeldOutScenarioError, ValueError, OSError, BundleError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    flagged = {m: sum(1 for r in rows if r["model"] == m and r["flag"])
+               for m in ("hist_gradient_boosting", "isolation_forest")}
+    print(f"ML SCORES {bundle.version} on {args.scenario}: {len(alerts)} alerts, {n} rows; flagged "
+          f"HistGB {flagged['hist_gradient_boosting']}, IsolationForest {flagged['isolation_forest']}"
+          + (" (IN-SAMPLE: this scenario was in the training data)" if rows and rows[0]["in_sample"] else ""))
+    print("scores do not change triage severity; HistGB scores are uncalibrated, IsolationForest "
+          "flags anomalies, not attacks")
     return 0
 
 
@@ -754,6 +850,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _triage(args)
     if args.command == "ml-baselines":
         return _ml_baselines(args)
+    if args.command == "ml-train":
+        return _ml_train(args)
+    if args.command == "ml-score":
+        return _ml_score(args)
     if args.command == "feedback-report":
         return _feedback_report(args)
     from app.cli_wave_c import COMMANDS as WAVE_C_COMMANDS

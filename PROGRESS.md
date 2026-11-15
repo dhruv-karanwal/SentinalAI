@@ -10,6 +10,14 @@ Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
   answered by the local model in 1.7 s, report PDF 29 KB. Study shows pilot rows of the latest prompt
   revision, labelled "not final results".
 
+## C4 / C5 detection (2026-11-15, code; real-data numbers pending on Windows)
+- Sigma: per-rule coverage funnel in the `sigma` report and CLI; per-rule usefulness (attack event_label
+  share of hits) in the dev baseline file.
+- ML: `ml-baselines` adds a four-model comparison (+ logistic regression, random forest; PR-AUC, ROC-AUC,
+  FPR, accuracy, timing) and a `no_host_counts` ablation; `ml-train` / `ml-score` put scores on stored
+  alerts (migration 0005), shown per incident, never used for severity.
+- pytest 553 passed, 12 skipped; mypy clean (95 files); frontend 87/87, build ok.
+
 ## C2 resolved: investigations in the product (2026-11-15)
 - Incidents > Investigate: start a single-agent or graph investigation; steps, supervisor route, ATT&CK
   retrieved, verifier, unverified hypotheses and playbook recommendations are stored (migration 0004)

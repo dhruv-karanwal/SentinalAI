@@ -61,6 +61,7 @@ multi-agent comparison, the verifier, statistics.
 | H-UI (premium console) | **Done 2026-11-15** (`phase3/wave-h-premium`, user's go; pilot untouched): restraint pass over the whole console. Grain, glass, glow, pulse, shimmer, tilt, count-up and gradients removed; lime accent replaced by ink (neutral); Geist + Geist Mono (`@fontsource-variable`, self-hosted); stylesheets split into `base`, `system`, `shell`, `dash`, `work`, `about`; base components `PageHeader`, `Page`, `Section`, `Tabs`, `Kpi`, `DefGrid`, `Disclosure` on every screen; grouped collapsible rail (`lib/nav.ts`), Ctrl+K command palette, About as a product page (`components/about/`, `lib/flow.ts`), phone-width columns (`components/narrow.ts`). Tests: `lib/guard.test.ts` (banned effects, non-token sizes / radii / durations), `nav`, `flow`. DESIGN.md rewritten (sections 1-12) |
 | Demo | **Ready 2026-11-15** (`phase3/demo-ready`): `DEMO.md` (start commands, accounts, 7-minute path); cold start walked end to end (chat online, PDF export, Study pilot labels). Study shows one prompt revision per study part (`prompt_revision` from the API, latest by default, like `study-stats`) |
 | C2 (product investigations) | **Done 2026-11-15**: `agent/investigation.py`, `api/investigations.py`, migration 0004, Incidents tab "Investigate" (`components/Investigation.tsx`, `lib/investigation.ts`); single agent or graph on a stored incident, steps / verifier / ATT&CK retrieved persisted and shown; copilot stays the one-question single agent below it. Checked in the browser against the real API with a scripted stub model (plumbing only) |
+| C4/C5 (detection) | **Done (code) 2026-11-15**: Sigma per-rule coverage funnel (`detection/sigma_coverage.py`: compiled -> applicable -> evaluated -> matched, skipped with reason; per-rule usefulness by event_label in the `sigma` CLI); ML model comparison in `ml-baselines` (`COMPARISON_MODELS` + logistic regression / random forest, accuracy, FPR, PR-AUC, ROC-AUC, timing, `no_host_counts` ablation); operational bundle `ml-train` / `ml-score` (`detection/ml_model.py`, sha256-checked joblib, migration 0005 `ml_scores`, `GET /incidents/{id}/ml`, incident header line; never changes severity). Real-data numbers pending (Windows) |
 | E | The user's go came 2026-11-12 (see F) |
 | F (final runs) | **Tooling done 2026-11-12** (branch `phase3/final-runs`): `study/stats.py` (paired bootstrap, Holm; family in `experiments/config/statistics.json`), `study/freeze.py` (`protocol-freeze`, `--allow-held-out` only with a matching freeze, logged), `study/final_runs.py` (plan `experiments/config/final_study.json`: phases i spread r1, ii spread r2-3, iii earliest r1; per-scenario checkpoints), `study/paper_assets.py` (`export-paper-assets` -> `results/`); the user's go of 2026-11-12 covers pilot, freeze and held-out. Model: `sentinel-qwen2.5-7b-32k` (qwen2.5:7b-instruct + num_ctx 32768) on Ollama 0.40.15; smoke test done, single prompt m5-v2 (revision 1) |
 
@@ -120,6 +121,9 @@ S=../data/samples/synthetic_ait_ads
 ../.venv/Scripts/python.exe -m app.main triage --scenario russellmitchell --gap-seconds 300
 # B4: ML detection baselines (dev scenarios; labels from the truth area; writes data/processed/ml/)
 ../.venv/Scripts/python.exe -m app.main ml-baselines --scenarios russellmitchell shaw
+# C4: operational ML bundle (labels via the truth area; saved under data/models/ml/<version>), then scores on stored alerts
+../.venv/Scripts/python.exe -m app.main ml-train --scenarios russellmitchell shaw
+../.venv/Scripts/python.exe -m app.main ml-score --scenario russellmitchell
 # Wave C: ATT&CK index (local bge-small, offline) + recall on the frozen relevance set
 ../.venv/Scripts/python.exe -m app.main rag-index
 ../.venv/Scripts/python.exe -m app.main rag-eval
@@ -228,6 +232,8 @@ backend/app/
                           per-host counts, strictly past), FeatureEncoder (train-only vocab, -1 unknown)
   detection/ml_baselines.py  FEATURE_SETS (all, no_detector_rule_id), feature_rows, fit_and_score
                           (importances), lopo_folds, lopo_scores, run_ml_baselines
+  detection/sigma_coverage.py  rule_coverage: per-rule funnel (compiled/applicable/evaluated/matched/skipped)
+  detection/ml_model.py   ModelBundle, save_bundle / load_bundle (sha256 before unpickling), score_alerts
   rag/chunks.py           attack_chunks(kb): id + name + tactics + description (+ detection if any)
   rag/embedding.py        FastEmbedEmbedder (bge-small, local_files_only, offline env), EmbeddingUnavailable
   rag/vector_store.py     VectorStore: SqliteVectorStore (data/platform/vectors.db) | PgVectorStore
@@ -599,6 +605,10 @@ experiments/config/study.json  frozen split; variant seed, shuffled/noise refere
   11,208 alerts in 222 s (one attacker IP, web host 10.143.2.4, Wazuh 31101 + AMiner),
   shaw 6,003 in 96 s. The span cap (3600 s) cannot split them and no count cap is applied
   (a cut by count is arbitrary); summarise them at the report/UI layer.
+- ML bundle (C4): trained on everything it is given, so scores on its training scenarios are in-sample
+  (`in_sample` per row, shown in the console). HistGB scores are uncalibrated and never called a probability;
+  IsolationForest flags are anomalies, not attacks. `INFLUENCES_SEVERITY = False`: triage severity ignores ML.
+  `load_bundle` refuses a joblib file whose sha256 differs from its metadata. Evaluation stays in `ml-baselines`.
 - Leave-one-phase-out tests only alerts inside the held-out phase (alerts outside every
   phase only train), so its pooled scores say nothing about quiet-period false positives.
 - Wave D: nothing executes without an approved approval row; the executor is simulated (no

@@ -34,6 +34,7 @@ import {
 import { Term } from '../components/Term.tsx';
 import { useApp, useLoad, useScreenContext, type Route } from '../hooks.ts';
 import { incidentLabel, mainFromNodes, whatHappened } from '../lib/explain.ts';
+import { mlLine } from '../lib/investigation.ts';
 import { Icon } from '../icons.tsx';
 import { compareQueue, epochSeconds, fmtDuration, fmtInt, parseEntity } from '../lib/format.ts';
 import { fitColumns, useNarrow } from '../components/narrow.ts';
@@ -975,6 +976,10 @@ function IncidentHeader({
               ),
             },
             {
+              label: 'ML detection (not used for severity)',
+              value: <MlSummary incidentId={incident.incident_id} />,
+            },
+            {
               label: 'Entities',
               value: (
                 <span className="def-span entity-list">
@@ -1000,5 +1005,21 @@ function IncidentHeader({
         />
       </div>
     </header>
+  );
+}
+
+function MlSummary({ incidentId }: { incidentId: string }) {
+  const ml = useLoad((signal) => api.incidentMl(incidentId, signal), [incidentId]);
+  if (ml.loading && !ml.data) return <span className="faint">loading...</span>;
+  if (ml.error) return <span className="faint">not available ({ml.error.status || 'no answer'})</span>;
+  if (!ml.data || ml.data.models.length === 0) return <span className="faint">no scores (run ml-train, then ml-score for this scenario)</span>;
+  return (
+    <span className="def-span">
+      {ml.data.models.map((m) => (
+        <span key={`${m.model_version}-${m.model}`} className="block-line">
+          {mlLine(m)} <span className="faint">{m.model_version}</span>
+        </span>
+      ))}
+    </span>
   );
 }

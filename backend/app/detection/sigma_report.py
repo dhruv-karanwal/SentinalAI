@@ -26,7 +26,8 @@ from typing import Any
 
 from app.alert_pipeline import iter_alert_file
 from app.detection.labels import TruthLabels
-from app.detection.sigma_engine import RuleSet, SigmaEngine, load_rules
+from app.detection.sigma_coverage import rule_coverage
+from app.detection.sigma_engine import RuleSet, SigmaEngine, SigmaRun, load_rules
 from app.evaluation.metrics import triage_scores
 from app.schemas.alert import INVESTIGATION_SELECTION, Alert
 from app.study.config import StudyConfig
@@ -66,6 +67,7 @@ def run_sigma_scenario(processed_dir: str | Path, scenario: str, config: StudyCo
         "rules_with_hits": sum(1 for v in run.per_rule.values() if v["hits"]),
         "per_rule": dict(sorted(run.per_rule.items(), key=lambda kv: (-kv[1]["hits"], kv[0]))),
         "skipped_rules": rules.skipped_rules,
+        "coverage": rule_coverage(rules, run),
         "runtime_seconds": {"load_rules": round(t_rules, 2), "evaluate": round(t_eval, 2)},
     }
     if output_dir is not None:
@@ -77,6 +79,7 @@ def run_sigma_scenario(processed_dir: str | Path, scenario: str, config: StudyCo
         (out / f"{scenario}.sigma.report.json").write_text(
             json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     report["_pool_ids"] = pool_ids
+    report["_run"] = run  # in memory only (not written): the CLI scores per-rule usefulness with labels
     report["_flagged_source_ids"] = sorted({str(a.evidence.source_alert_id) for a in run.alerts})
     return report
 
@@ -86,6 +89,26 @@ def _count(items: Any) -> dict[str, int]:
     for i in items:
         out[i] = out.get(i, 0) + 1
     return dict(sorted(out.items()))
+
+
+def rule_usefulness(run: SigmaRun, labels: dict[str, TruthLabels]) -> dict[str, dict[str, Any]]:
+    """Per matched rule: how many hits sit on source alerts with an attack event_label (dev only).
+
+    Precision is over hits whose source alert has a verified event label; None when none has.
+    A dev-scenario detection baseline number, never a detector comparison (Sigma re-detects).
+    """
+    out: dict[str, dict[str, Any]] = {}
+    for hit in run.alerts:
+        row = out.setdefault(str(hit.rule_id), {"hits": 0, "event_labelled": 0, "attack_event_label": 0})
+        row["hits"] += 1
+        lab = labels.get(str(hit.evidence.source_alert_id))
+        if lab is not None and lab.event_attack is not None:
+            row["event_labelled"] += 1
+            row["attack_event_label"] += int(bool(lab.event_attack))
+    for row in out.values():
+        row["precision_event"] = (round(row["attack_event_label"] / row["event_labelled"], 4)
+                                  if row["event_labelled"] else None)
+    return out
 
 
 def sigma_dev_baseline(pool_ids: list[str], flagged: set[str],

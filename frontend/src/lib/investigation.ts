@@ -104,3 +104,11 @@ export function scenarioKind(name: string | null | undefined): string {
   if (name.startsWith('synthetic')) return 'synthetic sample, not real telemetry';
   return 'replayed scenario';
 }
+
+/** One sentence per ML model for the incident header; says plainly that severity ignores it. */
+export function mlLine(m: { model: string; scored: number; alerts: number; flagged: number; max_score: number; in_sample: boolean }): string {
+  const name = m.model === 'hist_gradient_boosting' ? 'HistGB score' : m.model === 'isolation_forest' ? 'Isolation forest' : m.model;
+  const what = m.model === 'isolation_forest' ? 'unusual (anomaly, not an attack verdict)' : 'attack-like (uncalibrated)';
+  const sample = m.in_sample ? '; in-sample: this scenario was in the training data' : '';
+  return `${name}: ${m.flagged} of ${m.scored} scored alerts ${what}, max ${m.max_score.toFixed(2)}${m.scored < m.alerts ? ` (${m.alerts - m.scored} not scored)` : ''}${sample}.`;
+}

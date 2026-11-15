@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { isTerminal, nodeLabel, pollDelay, realId, scenarioKind, statusLine, summarizeStep } from './investigation.ts';
+import { isTerminal, mlLine, nodeLabel, pollDelay, realId, scenarioKind, statusLine, summarizeStep } from './investigation.ts';
 
 test('poll cadence backs off and only running is non-terminal', () => {
   assert.equal(pollDelay(0), 1000);
@@ -50,4 +50,11 @@ test('data-source labels never call a synthetic sample a dev scenario', () => {
   assert.equal(scenarioKind('synthetic'), 'synthetic sample, not real telemetry');
   assert.equal(scenarioKind('fox'), 'replayed scenario');
   assert.equal(scenarioKind(null), 'no data source');
+});
+
+test('ML lines name the model, never call a score a probability, and flag in-sample scores', () => {
+  const hgb = mlLine({ model: 'hist_gradient_boosting', scored: 3, alerts: 4, flagged: 2, max_score: 0.9123, in_sample: true });
+  assert.equal(hgb, 'HistGB score: 2 of 3 scored alerts attack-like (uncalibrated), max 0.91 (1 not scored); in-sample: this scenario was in the training data.');
+  assert.doesNotMatch(hgb, /probab/i);
+  assert.match(mlLine({ model: 'isolation_forest', scored: 1, alerts: 1, flagged: 0, max_score: 0.4, in_sample: false }), /not an attack verdict/);
 });

@@ -89,6 +89,32 @@ def add_investigation_routes(app: FastAPI, services: Any, need: Callable[..., An
             raise HTTPException(500, "could not start the investigation") from exc
         return {"investigation_id": inv_id, "status": "running", "workflow": body.workflow}
 
+    @app.get("/incidents/{incident_id}/ml")
+    def incident_ml(incident_id: str, _: Annotated[Any, Depends(need("read"))]) -> dict[str, Any]:
+        """C4: ML scores of the incident's alerts, per model version and model. Never severity."""
+        inc = repo.get_incident(incident_id)
+        if inc is None:
+            raise HTTPException(404, "no such incident")
+        rows = repo.ml_scores(inc["alert_ids"])
+        groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        for r in rows:
+            groups.setdefault((r["model_version"], r["model"]), []).append(r)
+        models = []
+        for (version, model), rs in sorted(groups.items()):
+            top = sorted(rs, key=lambda r: -r["score"])[:10]
+            models.append({
+                "model_version": version, "model": model,
+                "kind": ("supervised score (uncalibrated, not a probability)"
+                         if model == "hist_gradient_boosting" else "anomaly score (not an attack verdict)"),
+                "alerts": len(inc["alert_ids"]), "scored": len(rs),
+                "flagged": sum(1 for r in rs if r["flag"]),
+                "max_score": max(r["score"] for r in rs), "in_sample": any(r["in_sample"] for r in rs),
+                "top": [{"alert_id": r["alert_id"], "score": r["score"], "flag": r["flag"],
+                         "explanation": r["explanation"]} for r in top]})
+        return {"incident_id": incident_id, "models": models, "influences_severity": False,
+                "note": ("ML scores sit next to the rule-based triage and do not change severity. "
+                         "In-sample means the scenario was in the model's training data.")}
+
     @app.get("/incidents/{incident_id}/investigations")
     def list_investigations(incident_id: str,
                             _: Annotated[Any, Depends(need("read.raw"))]) -> dict[str, Any]:

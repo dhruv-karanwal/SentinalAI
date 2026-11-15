@@ -14,5 +14,5 @@ files = ["app"]
 
 [[tool.mypy.overrides]]
 # scikit-learn and reportlab ship no type information; everything else stays strict.
-module = ["sklearn", "sklearn.*", "reportlab", "reportlab.*"]
+module = ["sklearn", "sklearn.*", "reportlab", "reportlab.*", "joblib", "joblib.*"]
 ignore_missing_imports = true
