@@ -47,3 +47,17 @@ export function refsFor<S extends ScoreLike>(run: RunLike<S>, noise: RunLike<S> 
 export function noiseRunFor<R extends RunLike>(run: R, runs: readonly R[]): R | undefined {
   return runs.find((x) => x.variant === `noise-${run.variant}` && x.scenario === run.scenario);
 }
+
+/** Sort key of a prompt revision "<single>+<graph>": the -vN number of each part; "unknown" sorts
+ * first. Same rule as backend app/study/revisions.py, so the page and study-stats agree on "latest". */
+export function revisionKey(revision: string): string {
+  if (revision === 'unknown') return '';
+  return revision
+    .split('+')
+    .map((part) => String(Number(/v(\d+)$/.exec(part)?.[1] ?? 0)).padStart(6, '0'))
+    .join('.');
+}
+
+export function latestRevision(revisions: readonly string[]): string | null {
+  return revisions.length === 0 ? null : [...revisions].sort((a, b) => (revisionKey(a) < revisionKey(b) ? -1 : revisionKey(a) > revisionKey(b) ? 1 : 0)).at(-1)!;
+}

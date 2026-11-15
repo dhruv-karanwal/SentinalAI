@@ -188,7 +188,7 @@ Screens (each answers one question, stated in its header):
 | Screen | Question | Structure |
 |---|---|---|
 | About | What is this system and how far has the study got? | product page (section 7) |
-| Study | What do the finished runs say so far? | status, then runs by study part in tabs |
+| Study | What do the finished runs say so far? | status, then runs by study part in tabs; one prompt revision at a time (latest by default, switch, hidden count); pilot / ad hoc panels say "not final results" |
 | Overview | What needs attention right now? | KPI row; one primary chart (alerts over time); "Incidents to look at first" as a list; the rest in tabs (ATT&CK, entities, detectors, kill chain, alerts) |
 | Executive | Is the situation under control? | KPI row, trend, top risks, print layout |
 | Incidents | Which incident do I open, and what happened in it? | master-detail: list left; detail = header (severity, what happened, definition grid of key facts), time strip, tabs (alerts and evidence, ATT&CK, graph, findings, response) |

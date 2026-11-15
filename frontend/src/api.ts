@@ -493,6 +493,8 @@ export interface StudyRun {
   note: string | null;
   /** pilot | held-out | adhoc, from scores.json (older files have none) */
   study_part?: string | null;
+  /** "<single>+<graph>" prompt versions from the run manifest, or "unknown" */
+  prompt_revision?: string;
 }
 
 export interface StudyResults {

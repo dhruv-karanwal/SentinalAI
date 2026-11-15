@@ -2445,3 +2445,25 @@ Real pilot runs (read-only): the default warns "m5-v2+wave-c-v1 (12 runs), m5-v3
 using the latest" and reproduces the hand-made v2 view of the gate review (H1 -0.43, p_holm 0.002;
 H8 0.50, p_holm 0.002). `--prompt-version m5-v2` gives the v1 numbers (H1 -0.43, p_holm 0.123).
 pytest 532 passed, 4 skipped; mypy clean (90 files).
+
+## Demo readiness, 2026-11-15 (`phase3/demo-ready`)
+
+- `DEMO.md` (repo root): start commands (Ollama check + pre-warm with `--keepalive 60m`,
+  `.claude\serve-api.ps1`, `npm --prefix frontend run dev`), accounts (password from `.env.ui-dev`,
+  never printed), loaded scenarios (UI-dev copy: russellmitchell 45,544, shaw 70,782), a 7-minute path.
+- Study page: the API adds `prompt_revision` per run (`app/study/revisions.run_revision`); the page
+  shows one revision per study part, the latest by default (same order as `study-stats`), says how many
+  runs of another revision are hidden, and switches on click. Pilot and ad hoc panels carry "Pilot runs
+  on the dev scenarios: not final results". Tests first: `test_study_results_skip_fake_runs` (field),
+  `frontend/src/lib/study.test.ts` (order).
+- Cold start from this branch following DEMO.md exactly (preview servers stopped first, ports 8000 /
+  5173 free): `ollama list` ok; pre-warm "OK" in 10.5 s (cold load); API and Vite answered within 1 s.
+  Headless walk as ui-admin: About (7 sections), Overview KPIs (High 4, Medium 12, Low 827; 45,544
+  alerts), Incidents top row High 140 alerts 2022-01-24T10:21:50Z, chat "Local model online", "what is
+  rule H2?" answered by the local model in 1.7 s (grounded: three or more detectors agree -> High),
+  Approvals (one executed `lock_account`, full four-eyes trail), Reports of the 140-alert incident: PDF
+  blob `application/pdf`, 29,006 bytes, starts `%PDF-`, Study (pilot banner + flag, revision
+  m5-v3+wave-c-v2, 12 earlier-revision runs hidden). 0 console errors. Fixed in DEMO.md: the only
+  approval is executed, not just approved.
+- Not checked: a human clicking through in a headed browser on the demo machine's screen size, the
+  downloaded PDF opened in a viewer, projector contrast, the shaw data source during the demo.
