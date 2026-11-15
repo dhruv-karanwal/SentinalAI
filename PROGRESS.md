@@ -10,6 +10,14 @@ Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
   answered by the local model in 1.7 s, report PDF 29 KB. Study shows pilot rows of the latest prompt
   revision, labelled "not final results".
 
+## Finalization status (2026-11-15) — read this first
+- Product chain works end to end on synthetic data (automated test + browser walk); details in
+  `docs/PRODUCT_READINESS_REPORT.md`. pytest 567 passed, 12 skipped; mypy clean; frontend 87/87.
+- **Next, on Windows (`docs/windows-guide.md`):** pytest with data; `triage` / `sigma` / `ml-baselines` /
+  `ml-train` / `ml-score` / `rag-eval` for real numbers; `pilot-preflight --smoke`; m5-v5 dev re-pilot;
+  gate with `--prompt-version m5-v5`. Freeze and held-out only after a PASS and the user's go.
+- Branch `claude/amazing-edison-ns3q8m` is not merged (no PR, per the user's instruction).
+
 ## RAG evaluation + security controls (2026-11-15)
 - `rag-eval`: per-query outcomes, MRR, latency. Failed-login limit (429). Security tests for SQL and log
   injection. pytest 565 passed, 12 skipped.

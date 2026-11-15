@@ -1,5 +1,7 @@
 # Product readiness audit (Milestone 1)
 
+> Baseline record, kept as written. Current status after the fixes: `docs/PRODUCT_READINESS_REPORT.md`.
+
 **Date:** 2026-11-15. **Commit audited:** `090a780` (main, after PR #23, prompt fix 3 / m5-v4).
 **Where:** the Linux cloud container of this session. It has the code and the committed synthetic
 samples only: **no real AIT-ADS files, no ATT&CK bundle, no SigmaHQ rules, no bge-small cache, no

@@ -88,3 +88,9 @@ One entry per milestone of the product-finalization plan. Details and command ou
   report with the investigation, approval four eyes, execute once, audit), with id consistency checks;
   and a failed investigation refused as report input. The model is a scripted FakeClient (plumbing).
 - `POST /reports` `investigation_id`; console "Write report with this investigation".
+
+## 2026-11-15 — Documentation and final status
+
+- New: `docs/PRODUCT_READINESS_REPORT.md`, `docs/windows-guide.md`, `docs/final-report-draft.md`
+  (PENDING sections where runs are missing; no invented references). Updated: `docs/architecture.md`
+  (phase 3 product chain), `docs/research-methodology.md`, `docs/security-notes.md`, session notes.
