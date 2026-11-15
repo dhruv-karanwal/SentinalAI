@@ -110,6 +110,20 @@ export interface IncidentDetail {
   segment?: [number, number];
   severity_row?: string;
   timeline?: TimelineEntry[];
+  /** C6 (2026-11-15); absent on incidents built before it: rebuild to see it */
+  correlation?: {
+    strength: 'strong' | 'moderate' | 'weak' | 'single alert';
+    reason: string;
+    links: number;
+    linked_by: Record<string, number>;
+    shared_indicators: { entity: string; alerts: number }[];
+    source_ips: string[];
+    max_link_gap_seconds: number | null;
+    gap_limit_seconds: number;
+    cross_detector_links: number;
+    method: string;
+    confidence_note: string;
+  };
 }
 
 export interface Incident {

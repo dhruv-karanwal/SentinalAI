@@ -59,3 +59,15 @@ One entry per milestone of the product-finalization plan. Details and command ou
   frontend `mlLine` test. pytest 553 passed / 12 skipped; mypy clean (95 files); frontend 87/87.
 - Not run here (no real data): `sigma` on the real rules and dev scenarios (funnel numbers),
   `ml-baselines` comparison numbers, `ml-train` on russellmitchell + shaw. Commands in CLAUDE.md.
+
+## 2026-11-15 — Milestone 5: explainable correlation (C6)
+
+- `detection/triage.py`: `correlation(members, config, segment)` re-derives the grouping links inside
+  each incident; `detail.correlation` (reason sentence, links by kind, shared indicators, source IPs,
+  max link gap, cross-detector links, strength label, method, confidence note). Grouping unchanged.
+- Console: incident header "Why these alerts are together" (strength tag + reason + shared entities).
+- Tests: `tests/test_correlation.py` (8: single, strong, weak host-only with two sources, moderate without
+  source IP, unrelated / missing fields, time boundary, cross-detector, span segments). pytest 561 / 12
+  skipped; mypy clean; frontend 87/87.
+- Real-data check pending: re-run `triage` on russellmitchell / shaw (Windows) and read the strength
+  distribution.

@@ -10,6 +10,10 @@ Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
   answered by the local model in 1.7 s, report PDF 29 KB. Study shows pilot rows of the latest prompt
   revision, labelled "not final results".
 
+## C6 correlation reasons (2026-11-15)
+- Every newly built incident carries `detail.correlation` (why grouped, shared indicators, gaps, strength
+  label); shown in the incident header. Rebuild incidents (`triage`) to add it to stored ones.
+
 ## C4 / C5 detection (2026-11-15, code; real-data numbers pending on Windows)
 - Sigma: per-rule coverage funnel in the `sigma` report and CLI; per-rule usefulness (attack event_label
   share of hits) in the dev baseline file.

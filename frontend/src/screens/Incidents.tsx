@@ -976,6 +976,25 @@ function IncidentHeader({
               ),
             },
             {
+              label: 'Why these alerts are together',
+              value: d.correlation ? (
+                <span className="def-span">
+                  <span className="tag" data-tone={d.correlation.strength === 'weak' ? 'dropped' : d.correlation.strength === 'strong' ? 'approved' : 'pending'}>
+                    {d.correlation.strength}
+                  </span>{' '}
+                  {d.correlation.reason}
+                  {d.correlation.shared_indicators.length > 0 && (
+                    <span className="faint block-line">
+                      Shared: {d.correlation.shared_indicators.slice(0, 4).map((x) => `${x.entity} (${fmtInt(x.alerts)} alerts)`).join(', ')}
+                      {d.correlation.shared_indicators.length > 4 ? `, +${d.correlation.shared_indicators.length - 4} more` : ''}. Strength is a rule, not a probability.
+                    </span>
+                  )}
+                </span>
+              ) : (
+                <span className="faint">not recorded: this incident was built before correlation reasons existed; Build incidents again to add them.</span>
+              ),
+            },
+            {
               label: 'ML detection (not used for severity)',
               value: <MlSummary incidentId={incident.incident_id} />,
             },
