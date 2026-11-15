@@ -124,7 +124,7 @@ def test_prompt_v2_shows_the_tool_call_form_and_the_repair_repeats_it() -> None:
     import json as _json
 
     from app.agent.protocol import PROMPT_VERSION, REPAIR_MESSAGE, SYSTEM_PROMPT, parse_reply
-    assert PROMPT_VERSION in ("m5-v2", "m5-v3")  # m5-v3 keeps both
+    assert PROMPT_VERSION in ("m5-v2", "m5-v3", "m5-v4")  # later revisions keep both
     example = '{"action": "call_tool", "tool": "list_alerts", "arguments": {"detector": "wazuh"}}'
     assert example in SYSTEM_PROMPT
     assert 'never the tool name' in SYSTEM_PROMPT

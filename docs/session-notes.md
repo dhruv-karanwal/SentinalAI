@@ -2467,3 +2467,37 @@ pytest 532 passed, 4 skipped; mypy clean (90 files).
   approval is executed, not just approved.
 - Not checked: a human clicking through in a headed browser on the demo machine's screen size, the
   downloaded PDF opened in a viewer, projector contrast, the shaw data source during the demo.
+
+## Prompt fix 3, 2026-11-15 (`claude/amazing-edison-ns3q8m`)
+
+- User's go for fix 3 from the re-pilot gate (rm wazuh single 3/14 = 21.4 %, all three a claim `kind`
+  set to a field name). Tests first (red on m5-v3, green after): `test_prompt_fix_3_kind_line_in_the_single_prompt_only`
+  (line present once in `SYSTEM_PROMPT`, `PROMPT_VERSION == "m5-v4"`, `GRAPH_PROMPT_VERSION == "wave-c-v2"`,
+  line absent from every graph prompt, `PROMPTS_SHA256` = the wave-c-v2 value 09669530...360b9), and the
+  version pin in `test_output_cap_in_both_final_answer_prompts`.
+- Change: `KIND_RULE` in `app/agent/protocol.py`, placed directly under the final-answer form of the
+  single-agent prompt. Nothing else changed (no scoring, metrics, baselines, verifier, case builder,
+  budgets, repair message or graph prompt). The gate text suggested the line also for "the report form";
+  the graph's `report_generation` form is a graph prompt and the task kept graph prompts at wave-c-v2, so
+  it is not added there (the failing cell was single-arm only).
+- pytest 525 passed, 12 skipped; mypy clean (90 files). Run in the cloud container, which has no real
+  data (8 extra skips: real AIT-ADS, ATT&CK bundle, bge-small, Sigma rules).
+- **Re-pilot not started here:** this session ran in a cloud container with no Ollama, no model, no
+  `data/raw` / `data/processed` and no attached computer. Run it on the Windows machine, from `backend/`
+  after `git pull` of main (PowerShell, as before with `data/processed/downloads/run_pilot.ps1`):
+
+  ```powershell
+  $env:SENTINEL_LLM_BASE_URL = "http://127.0.0.1:11434/v1"
+  $env:SENTINEL_LLM_MODEL = "sentinel-qwen2.5-7b-32k"
+  $env:HF_HUB_OFFLINE = "1"; $env:TRANSFORMERS_OFFLINE = "1"
+  ollama ps                                   # nothing else may be using the model
+  ollama run sentinel-qwen2.5-7b-32k --keepalive 60m "Reply OK"   # pre-warm
+  ..\.venv\Scripts\python.exe -m pytest -q; ..\.venv\Scripts\python.exe -m mypy
+  ..\.venv\Scripts\python.exe -m app.main run-pilot --truncations spread --dry-run
+  # detached + resumable (same script as the last re-pilot; log runs/pilot-console.log, pilot-progress.jsonl)
+  powershell -File ..\data\processed\downloads\run_pilot.ps1
+  # resume after an interruption: the same command (run-pilot always resumes from the checkpoints)
+  ```
+
+  New run directories are expected (the config hash includes the prompt). Then re-gate on the m5-v4 runs
+  only: `results/pilot_gate/*.py data/processed/runs m5-v4` and `study-stats --part pilot --prompt-version m5-v4`.

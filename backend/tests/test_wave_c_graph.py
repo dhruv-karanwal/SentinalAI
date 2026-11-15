@@ -276,7 +276,22 @@ def test_output_cap_in_both_final_answer_prompts() -> None:
     # pilot: 8 of 11 single-arm parse failures were replies cut at max_tokens (100 cited ids)
     from app.agent.graph import GRAPH_PROMPT_VERSION
     from app.agent.protocol import MAX_CITED_ALERTS, MAX_CLAIMS, PROMPT_VERSION, SYSTEM_PROMPT
-    assert (PROMPT_VERSION, GRAPH_PROMPT_VERSION) == ("m5-v3", "wave-c-v2")
+    assert (PROMPT_VERSION, GRAPH_PROMPT_VERSION) == ("m5-v4", "wave-c-v2")
     cap = f"at most {MAX_CITED_ALERTS} alert ids and at most {MAX_CLAIMS} claims"
     assert cap in SYSTEM_PROMPT and cap in PROMPTS["report_generation"]
     assert all(cap not in PROMPTS[a] for a in ("supervisor", *AGENTS[:-1]))
+
+
+WAVE_C_V2_PROMPTS_SHA256 = "09669530d87bf84d7560a4c49aa6c7e2a16360cbbefa78f3232b28b5a3a360b9"
+KIND_LINE = 'kind is always "field_value" or "quote"; put the field name in field.'
+
+
+def test_prompt_fix_3_kind_line_in_the_single_prompt_only() -> None:
+    # re-pilot 2026-11-13: 3/14 rm wazuh single cases set a claim "kind" to a field name
+    # (m5-v3 -> m5-v4); the graph prompts stay wave-c-v2, byte for byte
+    from app.agent.graph import GRAPH_PROMPT_VERSION, PROMPTS_SHA256
+    from app.agent.protocol import PROMPT_VERSION, SYSTEM_PROMPT
+    assert PROMPT_VERSION == "m5-v4" and GRAPH_PROMPT_VERSION == "wave-c-v2"
+    assert SYSTEM_PROMPT.count(KIND_LINE) == 1
+    assert all(KIND_LINE not in text for text in PROMPTS.values())
+    assert PROMPTS_SHA256 == WAVE_C_V2_PROMPTS_SHA256

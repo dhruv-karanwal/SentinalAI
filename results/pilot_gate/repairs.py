@@ -8,7 +8,7 @@ for d in sorted(glob.glob(os.path.join(RUNS, "matched-*"))):
     if not os.path.exists(os.path.join(d, "manifest.json")):
         continue
     m = json.load(open(os.path.join(d, "manifest.json")))
-    if len(sys.argv) > 2 and m["prompt_versions"]["graph"] != sys.argv[2]:  # e.g. wave-c-v2
+    if len(sys.argv) > 2 and sys.argv[2] not in (m["prompt_versions"]["single"], m["prompt_versions"]["graph"], m["prompt_versions"]["single"] + "+" + m["prompt_versions"]["graph"]):  # e.g. m5-v4, wave-c-v2 or m5-v4+wave-c-v2
         continue
     if m.get("study_part") != "pilot" or "fake" in m["model"]["model_ids"].values():
         continue

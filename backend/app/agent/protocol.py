@@ -27,9 +27,12 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from app.agent.tools import TIME_MASK, TOOL_NAMES
 from app.evaluation.metrics import QUOTE_MIN_CHARS
 
-PROMPT_VERSION = "m5-v3"  # m5-v2 (2026-11-12): tool-call example + forms in the repair;
+PROMPT_VERSION = "m5-v4"  # m5-v2 (2026-11-12): tool-call example + forms in the repair;
 # m5-v3 (2026-11-13, pilot gate): output cap, 8 of 11 pilot parse failures were replies cut
 # at max_tokens while listing up to 100 cited ids
+# m5-v4 (2026-11-15, re-pilot gate): kind line under the final-answer form, 3/14 rm wazuh
+# single cases set a claim "kind" to a field name
+KIND_RULE = 'kind is always "field_value" or "quote"; put the field name in field.'
 MAX_CITED_ALERTS = 20
 MAX_CLAIMS = 10
 OUTPUT_CAP = (f"Keep the final answer short: at most {MAX_CITED_ALERTS} alert ids and at most "
@@ -55,6 +58,7 @@ For example: {{"action": "call_tool", "tool": "list_alerts", "arguments": {{"det
       {{"alert_id": "<alert_id>", "kind": "quote", "text": "<exact text copied from one log line>"}}
     ]}}
 ]}}
+{KIND_RULE}
 
 Tools ({", ".join(TOOL_NAMES)}):
 - list_alerts: arguments (all optional) detector, rule_id, min_severity, offset_min, offset_max, page. \
