@@ -71,6 +71,7 @@ def services_from_env() -> Services:
     else:
         objects = LocalObjectStore(data_dir / "objects")
     services = Services(Repository(db), index, objects, jwt_secret())
+    services.extras["retriever"], services.extras["retriever_status"] = _attack_retriever()
     if os.environ.get("SENTINEL_LLM_BASE_URL") and os.environ.get("SENTINEL_LLM_MODEL"):
         from app.agent.client import OpenAICompatibleClient
         from app.agent.config import api_key, load_agent_settings
@@ -92,6 +93,34 @@ def services_from_env() -> Services:
 
         services.extras["model_probe"] = _probe
     return services
+
+
+def _attack_retriever() -> tuple[Any, str]:
+    """ATT&CK search for product investigations: hybrid over an existing index only.
+
+    ``SENTINEL_RAG_DIR`` (default ``data/platform``) must already hold ``vectors.db`` from
+    ``rag-index``; this never creates or fills an index and never downloads a model. Any problem
+    leaves retrieval off, and the reason is shown on the System health status.
+    """
+    rag_dir = Path(os.environ.get("SENTINEL_RAG_DIR", REPO_ROOT / "data" / "platform"))
+    stix = REPO_ROOT / "data" / "raw" / "mitre" / "enterprise-attack.json"
+    if not os.environ.get("SENTINEL_DB_URL") and not (rag_dir / "vectors.db").exists():
+        return None, f"off: no ATT&CK index in {rag_dir.name}/ (run rag-index)"
+    if not stix.exists():
+        return None, "off: ATT&CK bundle not present in data/raw/mitre"
+    try:
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+        os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+        from app.intel.attack import AttackKB
+        from app.rag.embedding import DIM, FastEmbedEmbedder
+        from app.rag.retriever import AttackRetriever
+        from app.rag.vector_store import open_vector_store
+
+        retriever = AttackRetriever(open_vector_store(rag_dir, DIM), FastEmbedEmbedder(),
+                                    mode="hybrid", kb=AttackKB.from_stix(stix))
+        return retriever, "on: hybrid (BM25 + bge-small), local index"
+    except Exception as exc:  # missing embedding cache etc.: run without ATT&CK search
+        return None, f"off: {type(exc).__name__}: {str(exc)[:160]}"
 
 
 class LoginBody(BaseModel):
@@ -193,6 +222,9 @@ def create_app(services: Services, *, metrics: Any | None = None) -> FastAPI:
     from app.api.console import add_console_routes
 
     add_console_routes(app, repo, services.index, services.extras, need)
+    from app.api.investigations import add_investigation_routes
+
+    add_investigation_routes(app, services, need)
 
     @app.middleware("http")
     async def _timing(request: Request, call_next: Callable[..., Any]) -> Any:
@@ -460,13 +492,16 @@ def create_app(services: Services, *, metrics: Any | None = None) -> FastAPI:
         from app.api import explain as ex
 
         client = services.extras.get("copilot_client")
+        retrieval = services.extras.get("retriever_status") or (
+            "on" if services.extras.get("retriever") is not None else "off")
         if client is None:
-            return {"state": "offline", "model": None, "reason": "no model endpoint configured"}
+            return {"state": "offline", "model": None, "reason": "no model endpoint configured",
+                    "retrieval": retrieval}
         if ex.MODEL_LOCK.locked():
-            return {"state": "busy", "model": client.model_id}
+            return {"state": "busy", "model": client.model_id, "retrieval": retrieval}
         probe = services.extras.get("model_probe")
         ok = bool(probe()) if probe is not None else True
-        return {"state": "online" if ok else "offline", "model": client.model_id}
+        return {"state": "online" if ok else "offline", "model": client.model_id, "retrieval": retrieval}
 
     @app.post("/copilot/ask")
     def copilot_ask(body: CopilotBody,

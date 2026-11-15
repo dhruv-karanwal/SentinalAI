@@ -29,7 +29,7 @@ from tests.test_variants import processed  # noqa: F401  (fixture)
 
 
 TOOL_PATH_MODULES = ("tools.py", "agent.py", "protocol.py", "client.py", "graph.py",
-                     "multi_tools.py", "rag_tool.py", "verifier.py", "copilot.py")
+                     "multi_tools.py", "rag_tool.py", "verifier.py", "copilot.py", "investigation.py")
 
 
 @pytest.fixture()

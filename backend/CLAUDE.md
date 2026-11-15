@@ -32,6 +32,15 @@
 - Triage (`detection/triage.py`) is label-free and must stay so (it is in `LABEL_FREE`); the descriptive phase-overlap check lives in `triage_report.py` and runs only from the CLI after incidents are built. `Repository.iter_alert_models(scenario)` pages stored alerts (5000 per query).
 - Sigma alerts: detector `sigma`, id `sigma-` + sha256(rule id, source alert id)[:32], `severity=None` (Sigma levels are words; never mapped), level/tags in `raw_alert["sigma"]`. They are an extra source, never a study variable.
 - Python edit scripts on Windows: `Path.write_text` writes CRLF; the repo has `core.autocrlf=true`, so that is harmless, but never embed `\n` escapes in a bash heredoc that feeds Python (they turn into real newlines). Write the script with the Write tool.
+- Investigations (C2, 2026-11-15): `agent/investigation.py` (`run_investigation`: single agent or graph on an
+  incident's stored alerts, same budgets and verifier; result layers observed / detections / knowledge /
+  hypotheses / conclusion / recommendations, steps without system prompts), `api/investigations.py`
+  (`POST /incidents/{id}/investigations` 202, `GET /investigations/{id}`, `GET /incidents/{id}/investigations`;
+  permission `investigation.run`, reads need `read.raw`; one running per incident (409), `explain.MODEL_LOCK`
+  shared with the help chat (429); worker = `services.extras["investigation_executor"]`, default daemon thread;
+  leftover `running` rows become `interrupted` at API start), migration `0004_investigations.sql`.
+  `services_from_env` builds a hybrid ATT&CK retriever only over an existing `SENTINEL_RAG_DIR/vectors.db`
+  (`retriever_status` in `GET /copilot/status`). Tests: `tests/test_investigation.py` (FakeClient, inline executor).
 - Wave D: `app/outputs/` (reports, playbooks, approvals, feedback_report, jira) and `agent/copilot.py`
   (in `TOOL_PATH_MODULES`). Routes: `POST /reports`, `GET /reports/{id}/download?format=json|pdf|csv`,
   `POST /approvals`, `GET /approvals`, `POST /approvals/{id}/decision`, `POST /approvals/{id}/execute`,

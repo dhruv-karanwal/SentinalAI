@@ -10,6 +10,13 @@ Detailed evidence (command output, decisions) lives in `docs/session-notes.md`.
   answered by the local model in 1.7 s, report PDF 29 KB. Study shows pilot rows of the latest prompt
   revision, labelled "not final results".
 
+## C2 resolved: investigations in the product (2026-11-15)
+- Incidents > Investigate: start a single-agent or graph investigation; steps, supervisor route, ATT&CK
+  retrieved, verifier, unverified hypotheses and playbook recommendations are stored (migration 0004)
+  and shown. Copilot (one question) stays below it. Browser walk vs the real API + scripted stub model:
+  0 console errors, no horizontal scroll at 390 px, tabs fit at 1366 px.
+- pytest 544 passed, 12 skipped; mypy clean (93 files); frontend 86/86, typecheck + build ok.
+
 ## C1 resolved, m5-v5 (2026-11-15, user's option a)
 - Single agent now has `search_attack` (same tool and retriever as the graph); prompt m5-v5, m5-v4 text
   preserved. Shared notes stay graph-only (documented in `docs/research-methodology.md`).

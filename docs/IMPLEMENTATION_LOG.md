@@ -26,3 +26,20 @@ One entry per milestone of the product-finalization plan. Details and command ou
   12 skipped; mypy clean (91 files). `pilot-preflight` here: 3 checks fail as expected (no data,
   no ATT&CK bundle, no model).
 - Not done here: the m5-v5 dev re-pilot (Windows + Ollama).
+
+## 2026-11-15 — Milestone 3: multi-agent investigation in the product (C2)
+
+- Backend: `agent/investigation.py` (layered result: observed facts = verified claims, detections of
+  kept alerts, ATT&CK knowledge retrieved, hypotheses = unverified model text, conclusion after the
+  verifier, playbook recommendations only from verified evidence; steps without system prompts),
+  `api/investigations.py` (start 202 / poll / list; 404, 422, 503, 409, 429, 403), migration
+  `0004_investigations.sql`, `Repository` investigation methods, permission `investigation.run`,
+  ATT&CK retriever in `services_from_env` over an existing index only, `retrieval` in `/copilot/status`.
+- Frontend: Incidents tab "Investigate" (workspace + copilot below), `lib/investigation.ts` (+6 tests),
+  data-source label no longer calls the synthetic sample a dev scenario.
+- Tests: `tests/test_investigation.py` (9: single, graph, retrieval, malformed output, model
+  timeout + crash, errors / RBAC, one running + one model job, restart -> interrupted, injected
+  instructions cannot act). pytest 544 passed / 12 skipped; mypy clean (93 files); frontend 86/86.
+- Browser walk (headless, 1440 / 1366 / 390 px) against the real API with a scripted OpenAI-compatible
+  stub (scratchpad, not committed; plumbing only): graph and single runs completed and rendered, 0
+  console errors. Not done: a run against the real model (Windows + Ollama).

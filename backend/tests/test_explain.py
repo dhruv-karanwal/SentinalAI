@@ -190,7 +190,7 @@ def test_copilot_status_probes_without_generation(services: Services) -> None:  
     c = TestClient(create_app(services))
     r = c.get("/copilot/status", headers=token(c, Role.ANALYST))
     assert r.status_code == 200, r.text
-    assert r.json() == {"state": "online", "model": fake.model_id}
+    assert r.json() == {"state": "online", "model": fake.model_id, "retrieval": "off"}
     assert fake.calls == []  # the probe never sends a chat request
 
 
@@ -198,7 +198,8 @@ def test_copilot_status_offline_busy_and_unconfigured(services: Services) -> Non
     c = TestClient(create_app(services))
     h = token(c, Role.ANALYST)
     assert c.get("/copilot/status", headers=h).json() == {"state": "offline", "model": None,
-                                                          "reason": "no model endpoint configured"}
+                                                          "reason": "no model endpoint configured",
+                                                          "retrieval": "off"}
     services.extras["copilot_client"] = FakeClient([])
     services.extras["model_probe"] = lambda: False
     assert c.get("/copilot/status", headers=h).json()["state"] == "offline"

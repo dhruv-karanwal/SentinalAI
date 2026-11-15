@@ -16,6 +16,7 @@ import { AppContext, buildHash, isTypingTarget, sendNav, storageGet, storageSet,
 import { BrandMark, FAVICON_SVG, Icon } from './icons.tsx';
 import { fmtInt } from './lib/format.ts';
 import { groupNav, NAV, railMove, type NavItem } from './lib/nav.ts';
+import { scenarioKind } from './lib/investigation.ts';
 import { AlertsScreen } from './screens/Alerts.tsx';
 import { ApprovalsScreen } from './screens/Approvals.tsx';
 import { AskScreen } from './screens/Ask.tsx';
@@ -575,7 +576,7 @@ export function App() {
               </div>
               <div>
                 <dt>Data</dt>
-                <dd>AIT-ADS replay{scenario ? `, ${scenario}` : ''} (dev scenario)</dd>
+                <dd>AIT-ADS replay{scenario ? `, ${scenario}` : ''} ({scenarioKind(scenario)})</dd>
               </div>
               <div>
                 <dt>API</dt>

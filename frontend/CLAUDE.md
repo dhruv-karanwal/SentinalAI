@@ -46,7 +46,7 @@ src/content/            glossary.ts (the ONE glossary: Term tooltips, About, cha
                         (pipeline stages, study question, screen guide, limits, tour stops, suggested questions)
 src/charts/             SVG charts: ChartFrame (question, legend, tooltip, hidden table), TimeBars, Bars
                         (HBars, StackedHBars, DotPairs, MiniBar), Attack (HeatStrip, ChainStrip, Lanes), EntityGraph
-src/components/         DataTable, SplitPane, TimeStrip (canvas), EvidencePane, Findings, ui, AlertQueryTable,
+src/components/         DataTable, SplitPane, TimeStrip (canvas), EvidencePane, Findings, Investigation (C2 workspace), ui, AlertQueryTable,
                         AlertRunsTable (folded repeats), CommandPalette (Ctrl+K: search, navigation, actions),
                         GlobalSearch, Notifications, Term (+ Explain), Tour, HelpChat (floating button + panel),
                         motion (Reveal, useSeen, DrawOnView), narrow (phone-width columns), about/ (MiniView,
@@ -58,6 +58,10 @@ scripts/shots.mjs       DevTools-protocol screenshot runner (no dependency)
 ```
 
 ## Rules
+
+- **Investigations** (`components/Investigation.tsx`, `lib/investigation.ts`): every value comes from
+  `GET /investigations/{id}` (polled with `pollDelay` while running); agent replies, tool results and notes
+  are text nodes in `<pre>`; hypotheses are always labelled "not verified"; never show a simulated run as real.
 
 - **Charts** go through `ChartFrame` (question line, legend, tooltip, hidden table) and the scales in
   `lib/scale.ts`; colours only from `TONE_VAR` (tokens). A chart that cannot state the decision it
