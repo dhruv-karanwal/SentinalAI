@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
-import { contrast, readThemes } from './contrast.ts';
+import { contrast, luminance, readThemes } from './contrast.ts';
 import { coverageOf, noiseRunFor, refsFor } from './study.ts';
 import { fnv1a, layout, PAD } from './graph.ts';
 import { bandRange, bandScale, binByKey, compact, heatStep, fmtPct, linearScale, logScale, logTicks, niceMax, niceStep, niceTicks, stack, timeTicks } from './scale.ts';
@@ -137,25 +137,41 @@ test('layout reproduces the Python fixture exactly', () => {
 
 // ---- contrast of the tokens -----------------------------------------------------------------
 
-test('chart and text tokens meet WCAG contrast in both themes', () => {
+// Text 4.5:1 (WCAG 1.4.3); marks, focus ring and control boundaries 3:1 (WCAG 1.4.11).
+const TEXT = ['--text', '--text-muted', '--text-faint', '--accent', '--sev-high', '--sev-medium', '--sev-low', '--verified', '--det-wazuh', '--det-suricata', '--det-aminer', '--det-sigma'];
+const MARKS = ['--accent', '--online', '--ref'];
+const SURFACES = ['--bg', '--surface', '--raised', '--selected'];
+const HEAT = ['--heat-1', '--heat-2', '--heat-3', '--heat-4'];
+
+test('chart and text tokens meet WCAG contrast in both themes', (t) => {
   const themes = readThemes(readFileSync(new URL('../tokens.css', import.meta.url), 'utf-8'));
-  for (const [name, t] of Object.entries(themes)) {
-    for (const sk of ['--bg', '--surface', '--raised', '--selected']) {
-      const s = t[sk]!;
-      for (const k of ['--text', '--text-muted', '--text-faint', '--accent', '--sev-high', '--sev-medium', '--sev-low', '--verified', '--det-wazuh', '--det-suricata', '--det-aminer']) {
-        assert.ok(contrast(t[k]!, s) >= 4.5, `${name} ${k} on ${sk}: ${contrast(t[k]!, s).toFixed(2)}`);
-      }
-      assert.ok(contrast(t['--ref']!, s) >= 3, `${name} --ref on ${sk}: ${contrast(t['--ref']!, s).toFixed(2)}`);
+  const fails: string[] = [];
+  const min: Record<string, [number, string]> = {};
+  const check = (theme: string, group: string, fg: string, bg: string, need: number, c: Record<string, string>): void => {
+    assert.ok(c[fg] && c[bg], `${theme}: token ${!c[fg] ? fg : bg} missing from tokens.css`);
+    const r = contrast(c[fg], c[bg]);
+    if (r < need) fails.push(`${theme} ${fg} on ${bg}: ${r.toFixed(2)} < ${need}`);
+    const key = `${theme} ${group} (>= ${need})`;
+    if (!min[key] || r < min[key][0]) min[key] = [r, `${fg} on ${bg}`];
+  };
+  for (const [name, c] of Object.entries(themes)) {
+    for (const s of SURFACES) {
+      for (const k of TEXT) check(name, 'text', k, s, 4.5, c);
+      for (const k of MARKS) check(name, 'mark', k, s, 3, c);
     }
-    assert.ok(contrast(t['--on-accent']!, t['--accent']!) >= 4.5, `${name} --on-accent on --accent: ${contrast(t['--on-accent']!, t['--accent']!).toFixed(2)}`);
-    for (const sk of ['--bg', '--surface']) {
-      // control boundary (WCAG 1.4.11)
-      assert.ok(contrast(t['--border-strong']!, t[sk]!) >= 3, `${name} --border-strong on ${sk}: ${contrast(t['--border-strong']!, t[sk]!).toFixed(2)}`);
+    check(name, 'on-accent', '--on-accent', '--accent', 4.5, c);
+    for (const s of ['--bg', '--surface']) check(name, 'border-strong', '--border-strong', s, 3, c);
+    for (const h of HEAT) check(name, 'text on heat', '--text', h, 4.5, c);
+    // the heat ramp is ordered: dark theme gets lighter with load, light theme darker
+    const lum = HEAT.map((h) => luminance(c[h]!));
+    const dir = name === 'dark' ? 1 : -1;
+    for (let i = 1; i < lum.length; i++) {
+      if ((lum[i]! - lum[i - 1]!) * dir <= 0) fails.push(`${name} ${HEAT[i]} is not past ${HEAT[i - 1]} in luminance`);
     }
-    for (const k of ['--heat-1', '--heat-2', '--heat-3', '--heat-4']) {
-      assert.ok(contrast(t['--text']!, t[k]!) >= 4.5, `${name} text on ${k}: ${contrast(t['--text']!, t[k]!).toFixed(2)}`);
-    }
+    t.diagnostic(`${name} heat ratios vs --bg: ${HEAT.map((h) => contrast(c[h]!, c['--bg']!).toFixed(2)).join(' / ')}`);
   }
+  for (const [k, [r, pair]] of Object.entries(min)) t.diagnostic(`min ${k}: ${r.toFixed(2)} (${pair})`);
+  assert.deepEqual(fails, []);
 });
 
 test('study reference lines come only from values in the result file', () => {

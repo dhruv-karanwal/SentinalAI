@@ -1,4 +1,4 @@
-// Floating help chat (DESIGN.md 13.4): a round button fixed bottom right on every screen (above the
+// Floating help chat (DESIGN.md 8): a round button fixed bottom right on every screen (above the
 // tour and toasts) with a status dot (green: local model reachable; amber: busy; grey: glossary
 // only), and a floating panel (bottom sheet on phone widths).
 // - Model status: GET /copilot/status, a probe that lists models and never generates, so the dot is
@@ -21,6 +21,12 @@ import { prefersReducedMotion } from '../lib/motion.ts';
 type ModelState = 'unknown' | 'online' | 'offline' | 'busy' | 'not-allowed';
 
 const POLL_MS = 60_000;
+const OPEN_EVENT = 'sentinel:chat-open';
+
+/** Opens the help chat from anywhere (command palette). */
+export function openHelpChat(): void {
+  window.dispatchEvent(new Event(OPEN_EVENT));
+}
 const FOCUSABLE = 'button:not([disabled]), textarea:not([disabled]), input:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
 
 export function HelpChat({ path, screenName, incidentId }: { path: string; screenName: string; incidentId: string | null }) {
@@ -74,10 +80,15 @@ export function HelpChat({ path, screenName, incidentId }: { path: string; scree
     log.current?.scrollTo({ top: log.current.scrollHeight, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
   }, [state.msgs, busy]);
 
-  const open = () => {
+  const open = useCallback(() => {
     dispatch({ type: 'open' });
     void probe();
-  };
+  }, [probe]);
+  // the command palette's "Open help chat" action
+  useEffect(() => {
+    window.addEventListener(OPEN_EVENT, open);
+    return () => window.removeEventListener(OPEN_EVENT, open);
+  }, [open]);
   const close = () => {
     if (prefersReducedMotion()) return dispatch({ type: 'close' });
     setClosing(true);
@@ -171,7 +182,7 @@ export function HelpChat({ path, screenName, incidentId }: { path: string; scree
       <button
         ref={fab}
         type="button"
-        className="fab"
+        className="fab no-print"
         aria-expanded={state.open}
         aria-controls="help-chat"
         aria-label={`${state.open ? 'Close' : 'Open'} the help chat. ${status}${unread ? `. ${unread} new answer${unread === 1 ? '' : 's'}` : ''}`}
@@ -190,7 +201,7 @@ export function HelpChat({ path, screenName, incidentId }: { path: string; scree
         <div
           id="help-chat"
           ref={panel}
-          className="fab-panel"
+          className="fab-panel no-print"
           role="dialog"
           aria-modal="false"
           aria-labelledby="help-chat-t"
@@ -200,7 +211,7 @@ export function HelpChat({ path, screenName, incidentId }: { path: string; scree
           onKeyDown={onKey}
         >
           <div className="fab-head">
-            <div style={{ minWidth: 0, display: 'grid' }}>
+            <div className="fab-title">
               <h2 id="help-chat-t">Explain this screen</h2>
               <span className="fab-status" data-state={dot} role="status">
                 <i aria-hidden="true" />
@@ -208,16 +219,16 @@ export function HelpChat({ path, screenName, incidentId }: { path: string; scree
               </span>
             </div>
             <span className="spacer" />
-            <button type="button" className="icon-btn" onClick={() => dispatch({ type: 'clear' })} aria-label="Clear the conversation" title="Clear" disabled={state.msgs.length === 0}>
+            <button type="button" className="btn ghost icon-only" onClick={() => dispatch({ type: 'clear' })} aria-label="Clear the conversation" title="Clear" disabled={state.msgs.length === 0}>
               <Icon name="trash" />
             </button>
-            <button type="button" className="icon-btn" onClick={() => dispatch({ type: 'wide' })} aria-label={state.wide ? 'Make the panel smaller' : 'Make the panel larger'} aria-pressed={state.wide} title="Resize">
+            <button type="button" className="btn ghost icon-only" onClick={() => dispatch({ type: 'wide' })} aria-label={state.wide ? 'Make the panel smaller' : 'Make the panel larger'} aria-pressed={state.wide} title="Resize">
               <Icon name="expand" />
             </button>
-            <button type="button" className="icon-btn" onClick={() => dispatch({ type: 'minimise' })} aria-label={state.minimised ? 'Restore the panel' : 'Minimise the panel'} aria-pressed={state.minimised} title="Minimise">
+            <button type="button" className="btn ghost icon-only" onClick={() => dispatch({ type: 'minimise' })} aria-label={state.minimised ? 'Restore the panel' : 'Minimise the panel'} aria-pressed={state.minimised} title="Minimise">
               <Icon name="minimise" />
             </button>
-            <button type="button" className="icon-btn" onClick={close} aria-label="Close the help chat (Esc)" title="Close (Esc)">
+            <button type="button" className="btn ghost icon-only" onClick={close} aria-label="Close the help chat (Esc)" title="Close (Esc)">
               <Icon name="close" />
             </button>
           </div>
@@ -238,7 +249,7 @@ export function HelpChat({ path, screenName, incidentId }: { path: string; scree
                           {m.terms && m.terms.length > 0 && <> · {m.terms.join(', ')}</>}
                         </span>
                         <span className="spacer" />
-                        <button type="button" className="icon-btn" onClick={() => void copy(m)} aria-label="Copy this answer" title="Copy">
+                        <button type="button" className="btn ghost icon-only" onClick={() => void copy(m)} aria-label="Copy this answer" title="Copy">
                           <Icon name={copied === m.id ? 'check' : 'copy'} />
                         </button>
                       </div>
@@ -248,11 +259,7 @@ export function HelpChat({ path, screenName, incidentId }: { path: string; scree
                 ))}
                 {busy && (
                   <div className="fab-msg" data-who="help" aria-busy="true" aria-label="The local model is answering">
-                    <span className="fab-typing" aria-hidden="true">
-                      <i />
-                      <i />
-                      <i />
-                    </span>
+                    <span className="fab-typing">Answering...</span>
                   </div>
                 )}
               </div>

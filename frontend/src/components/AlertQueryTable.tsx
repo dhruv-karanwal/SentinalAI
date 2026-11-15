@@ -7,7 +7,8 @@ import { api, ApiError, type AlertFilter, type QueryRow } from '../api.ts';
 import { useLoad } from '../hooks.ts';
 import { fmtInt } from '../lib/format.ts';
 import { DataTable, type Column } from './DataTable.tsx';
-import { DetectorTag, ErrorNotice, ErrorState, Time, describeError } from './ui.tsx';
+import { DetectorTag, EmptyState, ErrorNotice, ErrorState, Time, describeError } from './ui.tsx';
+import { fitColumns, useNarrow } from './narrow.ts';
 
 const PAGE = 200;
 
@@ -30,12 +31,14 @@ interface Props {
   onSelect?: (row: QueryRow) => void;
   onOpen?: (row: QueryRow) => void;
   primary?: boolean;
+  /** shown as Clear filters in the empty state when a filter is set */
+  onClear?: () => void;
   onTotal?: (n: number) => void;
   /** narrow pane: drop source IP and ATT&CK columns, keep the rule */
   compact?: boolean;
 }
 
-export function AlertQueryTable({ scenario, filter, label, selectedId = null, onSelect, onOpen, primary = false, onTotal, compact = false }: Props) {
+export function AlertQueryTable({ scenario, filter, label, selectedId = null, onSelect, onOpen, primary = false, onTotal, compact = false, onClear }: Props) {
   const key = filterKey(filter);
   const first = useLoad((signal) => api.queryAlerts(scenario, filter, PAGE, 0, signal), [scenario, key]);
   const [more, setMore] = useState<QueryRow[]>([]);
@@ -63,6 +66,7 @@ export function AlertQueryTable({ scenario, filter, label, selectedId = null, on
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows.length, total, first.data, scenario, key]);
 
+  const narrow = useNarrow();
   const columns = useMemo<Column<QueryRow>[]>(() => {
     const cols: Column<QueryRow>[] = [
       { id: 'ts', header: 'Time (UTC, data date)', width: '146px', render: (a) => <Time ts={a.ts} /> },
@@ -77,8 +81,8 @@ export function AlertQueryTable({ scenario, filter, label, selectedId = null, on
       { id: 'src', header: 'Source IP', width: '112px', render: (a) => <span className="mono">{a.src_ip ?? '-'}</span> },
       { id: 'tech', header: 'ATT&CK', width: '84px', title: (a) => a.techniques.join(', ') || 'no ATT&CK technique', render: (a) => <span className="mono" title={a.techniques.join(', ')}>{a.techniques.join(', ') || '-'}</span> },
     ];
-    return compact ? cols.filter((c) => c.id !== 'src' && c.id !== 'tech') : cols;
-  }, [compact]);
+    return fitColumns(compact ? cols.filter((c) => c.id !== 'src' && c.id !== 'tech') : cols, narrow, ['sev', 'host', 'src', 'tech']);
+  }, [compact, narrow]);
 
   if (first.error && !first.data) return <ErrorState what="alerts" error={first.error} onRetry={first.reload} />;
   return (
@@ -98,7 +102,17 @@ export function AlertQueryTable({ scenario, filter, label, selectedId = null, on
         primary={primary}
         loading={first.loading && !first.data}
         onEndReached={loadMore}
-        empty={`No alerts match ${describeFilter(filter)} in ${scenario}.`}
+        empty={
+          <EmptyState title={`No alerts match ${describeFilter(filter)} in ${scenario}.`}>
+            {onClear ? (
+              <button type="button" className="linklike" onClick={onClear}>
+                Clear filters
+              </button>
+            ) : (
+              'Alerts appear here once the data source is ingested.'
+            )}
+          </EmptyState>
+        }
         footer={
           <span className="num">
             {fmtInt(rows.length)} of {fmtInt(total)} alerts · {describeFilter(filter)}

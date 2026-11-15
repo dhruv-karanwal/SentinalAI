@@ -2,7 +2,7 @@
 // horizontal bars with direct labels and optional reference lines, stacked horizontal bars,
 // paired before / after dots, and the tiny inline bar used in facet lists.
 
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 
 import { SeverityGlyph } from '../icons.tsx';
 import { fmtInt } from '../lib/format.ts';
@@ -96,6 +96,7 @@ export interface Segment {
 
 export function StackedHBars({ rows, unit }: { rows: Array<{ key: string; label: ReactNode; text: string; segments: Segment[]; onActivate?: () => void }>; unit: string }) {
   const tip = useTip();
+  const hatch = `h${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`; // useId may contain ':' which breaks url(#id)
   const top = niceMax(Math.max(0, ...rows.map((r) => r.segments.reduce((s, g) => s + g.value, 0))));
   return (
     <div className="hbars" role="list">
@@ -128,7 +129,19 @@ export function StackedHBars({ rows, unit }: { rows: Array<{ key: string; label:
                       className="hbar-seg"
                       data-pattern={g.pattern ?? 'solid'}
                       style={{ left: `${left}%`, width: `${(g.value / top) * 100}%`, ['--seg' as string]: TONE_VAR[g.tone] }}
-                    />
+                    >
+                      {g.pattern === 'hatch' && (
+                        // hatching as an SVG pattern (no CSS gradient), so the status reads without colour
+                        <svg width="100%" height="100%" focusable="false">
+                          <defs>
+                            <pattern id={`${hatch}-${r.key}-${g.key}`} width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                              <rect width="1.5" height="4" fill={TONE_VAR[g.tone]} />
+                            </pattern>
+                          </defs>
+                          <rect width="100%" height="100%" fill={`url(#${hatch}-${r.key}-${g.key})`} />
+                        </svg>
+                      )}
+                    </span>
                   );
                 })}
               </span>

@@ -40,8 +40,8 @@ export interface GraphData {
 export const GRAPH_STEP = 60;
 export const GRAPH_W = 480;
 export const GRAPH_H = 320;
-/** approximate advance of the 10 px monospace label font (.graph-label) */
-const LABEL_CHAR_W = 6.2;
+/** approximate advance of the 11 px (--fs-micro) Geist Mono label font (.graph-label) */
+const LABEL_CHAR_W = 6.7;
 
 export function mainDetector(by: Record<string, number>): string {
   let best = '';

@@ -123,7 +123,7 @@ const setInput = (id, value) => `(() => {
 })()`;
 
 async function signIn(user) {
-  const out = await evaluate(`(() => { const b = [...document.querySelectorAll('button')].find(x => x.textContent.trim() === 'Sign out'); if (b) b.click(); return !!b; })()`);
+  const out = await evaluate(`(async () => { document.querySelector('.user-btn')?.click(); await new Promise((r) => setTimeout(r, 100)); const b = [...document.querySelectorAll('button')].find(x => x.textContent.trim() === 'Sign out'); if (b) b.click(); return !!b; })()`);
   if (out) await sleep(200);
   if (!(await evaluate(setInput('si-user', user)))) throw new Error('sign-in form not found');
   await evaluate(setInput('si-pass', password));
@@ -167,7 +167,7 @@ async function run() {
       await evaluate(`window.location.hash = ${JSON.stringify(step.goto)}`);
       await sleep(step.wait ?? 600);
     } else if (step.signout) {
-      await evaluate(`(() => { const b = [...document.querySelectorAll('button')].find(x => x.textContent.trim() === 'Sign out'); if (b) b.click(); })()`);
+      await evaluate(`(async () => { document.querySelector('.user-btn')?.click(); await new Promise((r) => setTimeout(r, 100)); const b = [...document.querySelectorAll('button')].find(x => x.textContent.trim() === 'Sign out'); if (b) b.click(); })()`);
       await sleep(step.wait ?? 400);
     } else if (step.signin) {
       await signIn(step.signin);

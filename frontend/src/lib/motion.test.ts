@@ -1,32 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { countAt, easeOutCubic, activeSection, packetT } from './motion.ts';
+import { activeSection } from './motion.ts';
 import { chatReducer, errorNote, initialChat, loadChat, nextFocus, saveChat, suggestionsFor, CHAT_LIMIT } from './chat.ts';
 import { readFileSync } from 'node:fs';
-
-test('easeOutCubic is 0 at 0, 1 at 1, clamped and monotone', () => {
-  assert.equal(easeOutCubic(0), 0);
-  assert.equal(easeOutCubic(1), 1);
-  assert.equal(easeOutCubic(-1), 0);
-  assert.equal(easeOutCubic(2), 1);
-  let prev = 0;
-  for (let i = 1; i <= 10; i++) {
-    const v = easeOutCubic(i / 10);
-    assert.ok(v >= prev);
-    prev = v;
-  }
-});
-
-test('countAt reaches the exact value and stays an integer', () => {
-  assert.equal(countAt(11208, 0, 900), 0);
-  assert.equal(countAt(11208, 900, 900), 11208);
-  assert.equal(countAt(11208, 5000, 900), 11208);
-  const mid = countAt(11208, 450, 900);
-  assert.ok(Number.isInteger(mid) && mid > 0 && mid < 11208);
-  assert.equal(countAt(0, 100, 900), 0);
-  assert.equal(countAt(7, 10, 0), 7); // zero duration (reduced motion) = final value
-});
 
 test('activeSection picks the last section whose top passed the line', () => {
   assert.equal(activeSection([], 100), -1);
@@ -34,13 +11,6 @@ test('activeSection picks the last section whose top passed the line', () => {
   assert.equal(activeSection([50, 900, 1500], 100), 0);
   assert.equal(activeSection([-800, 80, 1500], 100), 1);
   assert.equal(activeSection([-2000, -900, -10], 100), 2);
-});
-
-test('packetT wraps phase into [0, 1)', () => {
-  assert.equal(packetT(0, 6000, 0), 0);
-  assert.equal(packetT(3000, 6000, 0), 0.5);
-  assert.equal(packetT(6000, 6000, 0), 0);
-  assert.equal(packetT(0, 6000, 0.25), 0.25);
 });
 
 // ---------------------------------------------------------------- floating chat

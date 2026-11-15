@@ -6,7 +6,7 @@ before changing anything visual, and change it in the same commit as a token or 
 ## Commands (from `frontend/`)
 
 ```bash
-npm install            # react, react-dom, vite, @vitejs/plugin-react, typescript (nothing else)
+npm install            # react, react-dom, vite, @vitejs/plugin-react, typescript, @fontsource-variable/geist(-mono)
 npm run dev            # http://127.0.0.1:5173, proxies /api to the API on 127.0.0.1:8000
 npm run typecheck      # tsc --noEmit, strict + noUncheckedIndexedAccess
 npm test               # node --test over src/lib/*.test.ts (Node >= 22.18 strips the types)
@@ -28,24 +28,29 @@ the git-ignored `.env.ui-dev`; never print or commit them.
 ```
 index.html              sets data-theme / data-density before first paint
 src/tokens.css          the ONLY file with raw colour values (DESIGN.md section 3)
-src/app.css             component styles, tokens only
+src/base.css            reset, type, buttons, forms, tags, states, Term (tokens only, like every sheet below)
+src/system.css          wave H base components: card, PageHeader, Page, Section, Tabs, Kpi, DefGrid, Disclosure
+src/shell.css           rail (grouped, collapsible, drawer on phones), top bar, command palette, menus, chat
+src/dash.css            Overview, Executive, Study, charts
+src/work.css            Incidents, Alerts, Approvals, Reports, Ask, Audit, Users, Settings, split panes
+src/about.css           About product page and its components
 src/icons.tsx           the whole icon set (16 px, 1.5 px stroke, currentColor) + SeverityGlyph
 src/api.ts              typed client, in-memory token, PERMISSIONS mirror of backend auth.py
 src/hooks.ts            AppContext, hash routing (#/screen?id=..&ev=..), useLoad, nav events
 src/lib/                pure logic with tests: format, virtual (windowing), bins (strip), highlight,
                         scale (scales, ticks, bins), graph (force layout + graph.fixture.json + placeLabels),
                         contrast (WCAG + CVD simulation + OKLab), study, explain (glossary search, whatHappened, incident labels, folded runs),
-                        motion (easing, counters, stepper), chat (reducer, focus trap, error notes, storage)
+                        motion (easing, stepper), chat (reducer, focus trap, error notes, storage),
+                        nav (rail groups, palette ranking), flow (About pipeline marks); guard.test.ts = style guard
 src/content/            glossary.ts (the ONE glossary: Term tooltips, About, chat fallback) and about.ts
                         (pipeline stages, study question, screen guide, limits, tour stops, suggested questions)
 src/charts/             SVG charts: ChartFrame (question, legend, tooltip, hidden table), TimeBars, Bars
                         (HBars, StackedHBars, DotPairs, MiniBar), Attack (HeatStrip, ChainStrip, Lanes), EntityGraph
 src/components/         DataTable, SplitPane, TimeStrip (canvas), EvidencePane, Findings, ui, AlertQueryTable,
-                        AlertRunsTable (folded repeats), GlobalSearch, Notifications, Term (+ Explain), Tour, HelpChat
-                        (floating button + panel), motion (Reveal, Count, useSeen, DrawOnView, tiltHandlers)
-src/v2.css              v2 styles (charts, sign-in, shell, facets, print); tokens only
-src/explain.css         explainable-console styles (DESIGN.md section 12); tokens only
-src/motion.css          wave F mission-control layer, motion system, floating chat (DESIGN.md 13); tokens only
+                        AlertRunsTable (folded repeats), CommandPalette (Ctrl+K: search, navigation, actions),
+                        GlobalSearch, Notifications, Term (+ Explain), Tour, HelpChat (floating button + panel),
+                        motion (Reveal, useSeen, DrawOnView), narrow (phone-width columns), about/ (MiniView,
+                        PipelineFlow, StudyDiagram, VerifierDemo)
 src/screens/            About, Overview, Incidents, Alerts, Approvals, Reports, Ask, Executive, Study, Audit, Users,
                         Entity, Settings (+ SecurityNotes), ErrorPage, SignIn
 src/App.tsx             shell (top bar, rail), global shortcuts, toasts, ScreenBoundary
@@ -67,9 +72,9 @@ scripts/shots.mjs       DevTools-protocol screenshot runner (no dependency)
   measurement (4.5:1 text, 3:1 control) on bg, surface, raised and selected, in both themes,
   recorded in DESIGN.md.
 - **Never colour alone:** severity = glyph + word, detector = mark + name, verifier status = tag
-  + text. Severity and detector identity are the only saturated colours; the accent is for
-  focus, links and the primary action (palette, DESIGN.md 14: the lime goes only on the logo, active nav mark,
-  primary button, focus ring, chat button and links; never a data colour in a chart).
+  + text. Severity and detector identity are the only saturated colours; the accent is ink
+  (a neutral, DESIGN.md 3; `palette.test.ts` checks its chroma) for focus, links and the primary action,
+  never a data colour in a chart.
 - **Tables:** every list goes through `DataTable` (fixed row height from the density setting,
   windowed). Column tracks must fit the pane at 1366 px: fixed px tracks plus `minmax(0, 1fr)`;
   a `minmax(96px, ...)` track overflows the row. Check `scrollWidth > clientWidth` on `.dt-row`.
@@ -84,10 +89,15 @@ scripts/shots.mjs       DevTools-protocol screenshot runner (no dependency)
   shows platform outputs only: no labels. The Study page is the one exception for study numbers: it
   renders run-level aggregates from `scores.json` (never per-case or per-alert labels), with the
   "dev scenarios, pilot numbers, not paper results" banner.
-- **Motion** (DESIGN.md 13): only the tokens `--ease-*` / `--dur-fast|mid|slow|draw`, only `transform` and
-  `opacity`, nothing on table rows beyond hover, no animation in Incidents / Alerts detail; every animation
-  is off under `prefers-reduced-motion` (last block of `motion.css`). Use `Reveal`, `Count`, `useSeen` from
-  `components/motion.tsx`; chart draw-in only on pages with the `draw-charts` class. No animation library.
+- **Restraint** (DESIGN.md 2; `lib/guard.test.ts` checks every stylesheet and inline style): no grain,
+  glass / `backdrop-filter`, glow, pulse, gradient, tilt, count-up or `infinite` animation; the only shadow
+  is `var(--shadow-overlay)` on floating layers; font sizes, radii, durations and easing only from tokens.
+  Motion is 150-250 ms, `transform` / `opacity`, each animation once, nothing in Incidents / Alerts beyond
+  hover, tab change and panel enter, off under `prefers-reduced-motion`. Use `Reveal`, `useSeen`,
+  `DrawOnView` from `components/motion.tsx`. No animation library.
+- **Page pattern** (DESIGN.md 4): every screen starts with `PageHeader` (title, the one question it
+  answers, actions right); secondary detail goes behind `Tabs` or `Disclosure`, never stacked; one card
+  style, never a card in a card; one primary button per view.
 - The session token is kept in memory (a reload signs out). Theme, density, time format, split
   position, the chosen and default data source, the overview log toggle and saved alert filters are
   the only things in `localStorage`.
@@ -106,8 +116,8 @@ scripts/shots.mjs       DevTools-protocol screenshot runner (no dependency)
   output tokens, 429 when busy). Never test it against the real model while a pilot runs; screenshots
   of the online state use a fetch mock labelled MOCK FOR SCREENSHOT.
 - The chat's open state, size and last 40 messages are in `sessionStorage` (`sentinel.chat`).
-- Demo mode (`sentinel.demo`, on unless set to 0), the collapsed "More detail" (`sentinel.overview.more`)
-  are also in `localStorage`.
+- Demo mode (`sentinel.demo`, on unless set to 0), the Overview detail tab (`sentinel.overview.tab`) and
+  the collapsed rail (`sentinel.rail`) are also in `localStorage`.
 
 ## Gotchas
 
@@ -124,7 +134,12 @@ scripts/shots.mjs       DevTools-protocol screenshot runner (no dependency)
 - Vite serves an intermediate file state if two writes to one module land within its watcher
   debounce; if a screen breaks after a scripted edit, reload once before debugging.
 - The facet sidebar styles every `button` as a full-width grid row; a `<Term>` "?" inside a facet or
-  legend needs the reset in `explain.css` (`.facet .term-q`).
+  legend needs the reset in `base.css` (`.facet .term-q`).
+- Sign out sits in the user menu (`.user-btn`): `shots.mjs` opens the menu and waits a render before
+  clicking it.
+- Below 700 px (`useNarrow`) list and detail stack and tables drop secondary columns; on Alerts the
+  table scrolls inside its pane under the facets. Users is admin-only (`user.manage`): a manager
+  sees "No such page".
 - `element.focus()` from a script does not open a `<Term>` tooltip in headless Chrome (no focus
   event without a focused window); test it with a real Tab key press (`shots.mjs` `key` step).
 - The in-app Browser pane scales a 1366 px viewport down to its own width, so its screenshots

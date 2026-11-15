@@ -120,7 +120,6 @@ h3 {
   top: var(--sp-4);
 }
 
-
 /* ---- controls --------------------------------------------------------------------------- */
 
 .field {
@@ -275,33 +274,15 @@ h3 {
   margin: 0 -2px;
   z-index: 2;
   cursor: col-resize;
-  background: linear-gradient(to right, transparent 2px, var(--border) 2px, var(--border) 3px, transparent 3px);
+  background: var(--border);
+  background-clip: content-box;
+  padding: 0 var(--sp-2);
+  transition: background-color var(--dur-fast) var(--ease);
 }
 
 .split > .divider:hover,
 .split > .divider:focus-visible {
-  background: linear-gradient(to right, transparent 1px, var(--border-strong) 1px, var(--border-strong) 4px, transparent 4px);
-}
-
-.pane-head {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-8);
-  min-height: 32px;
-  padding: var(--sp-4) var(--sp-12);
-  border-bottom: 1px solid var(--border);
-  flex-wrap: wrap;
-}
-
-.pane-head h1,
-.pane-head h2 {
-  font-size: var(--fs-title);
-  line-height: 20px;
-  font-weight: 600;
-}
-
-.pane-head .spacer {
-  flex: 1;
+  background-color: var(--border-strong);
 }
 
 .filters {
@@ -457,7 +438,7 @@ h3 {
 
 .dt-row[aria-selected="true"] {
   background: var(--selected);
-  box-shadow: inset 2px 0 0 var(--border-strong);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .dt-row > [role="gridcell"] {
@@ -539,7 +520,6 @@ h3 {
 .notice[data-kind="error"] {
   color: var(--sev-high);
 }
-
 
 /* ---- time strip -------------------------------------------------------------------------- */
 
@@ -667,7 +647,10 @@ mark {
   padding: 0;
   border: 0;
   background: none;
-  color: var(--accent);
+  color: var(--text);
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 3px;
   cursor: pointer;
   font: inherit;
   text-align: left;
@@ -722,22 +705,12 @@ details > summary {
   text-decoration-color: var(--sev-high);
 }
 
-.ask-form {
-  display: flex;
-  gap: var(--sp-8);
-  align-items: flex-end;
-}
-
-.ask-form .field {
-  flex: 1;
-}
-
 /* ---- dialog, toast ----------------------------------------------------------------------- */
 
 dialog.dialog {
   padding: 0;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-m);
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-l);
   background: var(--surface);
   color: var(--text);
   width: min(520px, calc(100vw - 32px));
@@ -745,7 +718,7 @@ dialog.dialog {
 }
 
 dialog.dialog::backdrop {
-  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  background: var(--scrim);
 }
 
 .dialog-head {
@@ -809,7 +782,6 @@ dialog.dialog::backdrop {
   font-size: var(--fs-small);
 }
 
-
 /* ---- narrow windows: the detail pane takes the full width --------------------------------- */
 
 @media (max-width: 1023px) {
@@ -817,8 +789,7 @@ dialog.dialog::backdrop {
     grid-template-columns: 56px minmax(0, 1fr);
   }
 
-  .rail a span,
-  .rail .kbd-hint {
+  .rail a span {
     display: none;
   }
 
@@ -833,87 +804,6 @@ dialog.dialog::backdrop {
   height: 100%;
   overflow: auto;
 }
-.page-head {
-  display: flex;
-  align-items: baseline;
-  gap: var(--sp-12);
-  padding: var(--sp-12) var(--sp-16) var(--sp-8);
-  flex-wrap: wrap;
-}
-.page-head h1 {
-  margin: 0;
-  font-size: var(--fs-heading);
-  line-height: 24px;
-  font-weight: 600;
-}
-.page-head .spacer {
-  flex: 1;
-}
-.page-body {
-  padding: 0 var(--sp-16) var(--sp-16);
-  display: grid;
-  gap: var(--sp-12);
-}
-.grid-2 {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: var(--sp-12);
-}
-.grid-3 {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--sp-12);
-}
-@media (max-width: 1180px) {
-  .grid-2,
-  .grid-3 {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-.statusrow {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  border: 1px solid var(--border);
-  border-radius: var(--radius-m);
-  background: var(--surface);
-}
-.status-cell {
-  padding: var(--sp-8) var(--sp-12);
-  border-right: 1px solid var(--border);
-  min-width: 0;
-}
-.status-cell:last-child {
-  border-right: 0;
-}
-.status-cell .k {
-  font-size: var(--fs-micro);
-  color: var(--text-muted);
-  line-height: 16px;
-}
-.status-cell .v {
-  font-size: var(--fs-heading);
-  line-height: 24px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  display: flex;
-  gap: var(--sp-12);
-  align-items: baseline;
-  flex-wrap: wrap;
-}
-.status-cell .v .sev {
-  font-size: var(--fs-body);
-  font-weight: 600;
-}
-.status-cell .s {
-  font-size: var(--fs-micro);
-  color: var(--text-faint);
-  line-height: 16px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 
 /* ---- Term ------------------------------------------------------------------------------ */
 
@@ -924,15 +814,15 @@ dialog.dialog::backdrop {
 .term-q {
   display: inline-grid;
   place-items: center;
-  width: 14px;
-  height: 14px;
-  margin-left: 3px;
+  width: var(--icon);
+  height: var(--icon);
+  margin-left: var(--sp-4);
   padding: 0;
   border: 1px solid var(--border-strong);
   border-radius: 50%;
   background: transparent;
   color: var(--text-muted);
-  font: 600 9px/1 var(--font-sans);
+  font: var(--fw-semibold) var(--fs-micro) / 1 var(--font-sans);
   vertical-align: 1px;
   cursor: help;
 }
@@ -988,107 +878,10 @@ dialog.dialog::backdrop {
   font-weight: 600;
 }
 
-
 /* ---- shared icon button (the floating chat itself lives in motion.css) ----------------- */
 
-.icon-btn {
-  display: inline-grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: var(--radius-s);
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-.icon-btn:hover {
-  border-color: var(--border-strong);
-  color: var(--text);
-}
 /* ---- What happened, folded rows, Overview layers ---------------------------------------- */
 
-.what-happened {
-  margin: 0;
-  padding: var(--sp-8) var(--sp-12);
-  border-left: 2px solid var(--border-strong);
-  background: var(--raised);
-  font-size: var(--fs-body);
-  line-height: 20px;
-}
-.what-happened .k {
-  display: block;
-  font-size: var(--fs-micro);
-  font-weight: 600;
-  color: var(--text-muted);
-}
-.fold-count {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-4);
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-}
-.fold-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 0 var(--sp-4);
-  height: 18px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-s);
-  background: transparent;
-  color: var(--text);
-  font: 600 var(--fs-micro) / 1 var(--font-sans);
-  cursor: pointer;
-}
-.fold-child {
-  color: var(--text-muted);
-}
-.more-detail {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-m);
-  background: var(--surface);
-}
-.more-detail > summary {
-  padding: var(--sp-8) var(--sp-12);
-  font-weight: 600;
-  font-size: var(--fs-title);
-  cursor: pointer;
-}
-.more-detail > summary .faint {
-  font-weight: 400;
-  font-size: var(--fs-small);
-}
-.more-detail[open] > summary {
-  border-bottom: 1px solid var(--border);
-}
-.more-detail > .page-body {
-  padding-top: var(--sp-12);
-}
-.look-first {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-}
-.look-first li {
-  display: grid;
-  grid-template-columns: 84px minmax(0, 1fr) 90px 110px;
-  gap: var(--sp-12);
-  align-items: center;
-  padding: var(--sp-4) 0;
-  border-top: 1px solid var(--border);
-  font-size: var(--fs-body);
-  min-width: 0;
-}
-.look-first .lf-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .date-kind {
   font-size: var(--fs-micro);
   color: var(--text-faint);
@@ -1097,9 +890,9 @@ dialog.dialog::backdrop {
 
 @media print {
   .fab,
-  .fab-panel,
-  .tour,
-  .term-q {
+.fab-panel,
+.tour,
+.term-q {
     display: none !important;
   }
 }
@@ -1115,13 +908,6 @@ dialog.dialog::backdrop {
   padding: 0;
   border: 1px solid var(--border-strong);
   border-radius: 50%;
-}
-.fold-indent {
-  display: inline-block;
-  width: 12px;
-  border-left: 1px solid var(--border-strong);
-  height: 10px;
-  margin-right: var(--sp-4);
 }
 
 /* incident labels ("host 172.19.130.4 · 2022-01-24 10:05 UTC") must stay readable in full */

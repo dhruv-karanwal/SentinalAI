@@ -1,12 +1,13 @@
-// The evidence for one alert: its fields and the raw log lines it carries, with the matched
-// span marked. Everything here is untrusted text and is rendered as text nodes only.
+// The evidence for one alert: its raw log lines first (the matched span marked), then its fields,
+// then the stored JSON behind a disclosure. Everything here is untrusted text and is rendered as
+// text nodes only.
 
 import { useEffect, useRef } from 'react';
 
 import { api, can } from '../api.ts';
 import { useApp, useLoad } from '../hooks.ts';
 import { Icon } from '../icons.tsx';
-import { CopyButton, DetectorTag, ErrorState, Id, SkeletonLines, Time, TruncatedText } from './ui.tsx';
+import { CopyButton, DetectorTag, Disclosure, ErrorState, Id, SkeletonLines, Time, TruncatedText } from './ui.tsx';
 
 const SEVERITY_SCALE: Record<string, string> = {
   wazuh: 'Wazuh rule level, 0-15, higher is more severe',
@@ -39,8 +40,8 @@ export function EvidencePane({
   const hits = needles.length > 0 ? lines.filter((l) => needles.some((n) => l.toLowerCase().includes(n.toLowerCase()))).length : 0;
 
   return (
-    <div className="evidence" role="region" aria-label={`Evidence for alert ${alertId}`}>
-      <div className="pane-head">
+    <div className="ev" role="region" aria-label={`Evidence for alert ${alertId}`}>
+      <div className="pane-bar ev-head">
         <h2 ref={headRef} tabIndex={-1}>
           Evidence
         </h2>
@@ -68,33 +69,33 @@ export function EvidencePane({
           <SkeletonLines lines={6} />
         ) : data ? (
           <>
-            <div className="section">
-              <h3>
-                Log lines ({lines.length})
+            <section className="block" aria-labelledby={`ev-lines-${alertId}`}>
+              <h3 className="block-title" id={`ev-lines-${alertId}`}>
+                Log lines <span className="meta num">{lines.length}</span>
                 {needles.length > 0 && (
-                  <span className="faint" style={{ fontWeight: 400 }}>
-                    {hits > 0 ? `match in ${hits} of ${lines.length}` : 'no match for the highlighted text in these lines'}
-                  </span>
+                  <span className="meta">{hits > 0 ? `match in ${hits} of ${lines.length}` : 'no match for the highlighted text in these lines'}</span>
                 )}
               </h3>
               {lines.length === 0 ? (
                 <p className="muted">
-                  This alert carries no log line{data.kind === 'aggregate' ? ' (aggregate alerts summarise a window)' : ''}. The raw alert
-                  is below.
+                  This alert carries no log line{data.kind === 'aggregate' ? ' (aggregate alerts summarise a window)' : ''}. The raw alert is
+                  below.
                 </p>
               ) : (
-                lines.map((line, i) => (
-                  <div className="logline" key={i}>
-                    <span className="n">{i + 1}</span>
-                    <span className="text">
-                      <TruncatedText text={line} needles={needles} />
-                    </span>
-                    <CopyButton text={line} label={`Copy log line ${i + 1}`} />
-                  </div>
-                ))
+                <div className="ev-lines">
+                  {lines.map((line, i) => (
+                    <div className="ev-line" key={i}>
+                      <span className="n">{i + 1}</span>
+                      <span className="text">
+                        <TruncatedText text={line} needles={needles} />
+                      </span>
+                      <CopyButton text={line} label={`Copy log line ${i + 1}`} />
+                    </div>
+                  ))}
+                </div>
               )}
-            </div>
-            <div className="section">
+            </section>
+            <section className="block" aria-label="Alert fields">
               <dl className="kv">
                 <dt>Time (UTC)</dt>
                 <dd>
@@ -102,7 +103,10 @@ export function EvidencePane({
                 </dd>
                 <dt>Detector</dt>
                 <dd>
-                  <DetectorTag value={data.detector} /> <span className="faint">{data.detector_type.replace('_', '-')}, {data.kind}</span>
+                  <DetectorTag value={data.detector} />{' '}
+                  <span className="faint">
+                    {data.detector_type.replace('_', '-')}, {data.kind}
+                  </span>
                 </dd>
                 <dt>Rule</dt>
                 <dd>
@@ -124,13 +128,12 @@ export function EvidencePane({
                 <dt>Log file</dt>
                 <dd className="mono">{paths.length ? paths.join(', ') : <span className="faint">-</span>}</dd>
               </dl>
-            </div>
-            <div className="section">
-              <details>
-                <summary>Raw alert (JSON as stored)</summary>
-                <pre className="raw">{JSON.stringify(rec?.raw_alert ?? rec ?? {}, null, 2)}</pre>
-              </details>
-            </div>
+            </section>
+            <section className="block" aria-label="Raw alert">
+              <Disclosure summary="Raw alert (JSON as stored)">
+                <pre className="ev-raw">{JSON.stringify(rec?.raw_alert ?? rec ?? {}, null, 2)}</pre>
+              </Disclosure>
+            </section>
           </>
         ) : null}
       </div>

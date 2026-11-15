@@ -8,8 +8,10 @@ import { DataTable, type Column } from '../components/DataTable.tsx';
 import { EvidencePane } from '../components/EvidencePane.tsx';
 import { AskForm, Finding, type AskEntry, type AskStore } from '../components/Findings.tsx';
 import { SplitPane } from '../components/SplitPane.tsx';
-import { EmptyState, ModelOffline, Time } from '../components/ui.tsx';
+import { EmptyState, ModelOffline, PageHeader, Time } from '../components/ui.tsx';
 import { useApp, type Route } from '../hooks.ts';
+import { Icon } from '../icons.tsx';
+import { fitColumns, useNarrow } from '../components/narrow.ts';
 
 interface Props {
   route: Route & { setParams: (patch: Record<string, string | null>, replace?: boolean) => void };
@@ -35,7 +37,7 @@ export function AskScreen({ route, askStore }: Props) {
       { id: 'status', header: 'Run', width: '64px', sortKey: (e) => e.answer.status, render: (e) => e.answer.status },
       {
         id: 'cites',
-        header: 'Cited / dropped',
+        header: 'Kept / dropped',
         width: '96px',
         align: 'right',
         render: (e) => `${e.answer.verification.citations_kept} / ${e.answer.verification.citations_dropped}`,
@@ -45,62 +47,56 @@ export function AskScreen({ route, askStore }: Props) {
     [],
   );
 
+  const narrow = useNarrow();
+  const cols = useMemo(() => fitColumns(columns, narrow, ['status']), [columns, narrow]);
   const allowed = can(session.role, 'copilot.ask');
 
-  const list = (
-    <>
-      <div className="pane-head">
-        <h1>Ask</h1>
+  const list = !allowed ? (
+    <div className="state" data-kind="error" role="alert">
+      <div className="state-title">
+        <Icon name="warning" />
+        Not permitted
       </div>
-      {!allowed ? (
-        <EmptyState title="Not permitted.">Your role ({session.role}) cannot ask the copilot.</EmptyState>
-      ) : (
-        <>
-          <div className="section">
-            <div className="field" style={{ marginBottom: 8 }}>
-              <label htmlFor="ask-incident">Incident id (copy it from Incidents with c)</label>
-              <input
-                id="ask-incident"
-                className="input mono"
-                value={incidentId}
-                onChange={(e) => setIncidentId(e.target.value.trim())}
-                placeholder="inc-..."
-                spellCheck={false}
-              />
-            </div>
-            {incidentId ? <AskForm incidentId={incidentId} store={askStore} /> : askStore.modelOffline ? <ModelOffline /> : <p className="muted">Enter an incident id to ask about it.</p>}
-          </div>
-          <DataTable
-            label="Questions asked in this session"
-            unit="questions"
-            primary
-            rows={entries}
-            columns={columns}
-            rowKey={(e) => e.id}
-            selectedKey={selectedId}
-            onSelect={(e) => route.setParams({ id: e.id, ev: null })}
-            footer={<span>Kept for this session only</span>}
-            empty={
-              <EmptyState title="No questions asked in this session.">
-                Answers use the incident's alerts only. Every citation and claim is checked against the alert records.
-              </EmptyState>
-            }
-          />
-        </>
-      )}
+      <p>Your role ({session.role}) cannot ask the copilot.</p>
+    </div>
+  ) : (
+    <>
+      <section className="block" aria-label="Ask a question">
+        <div className="field">
+          <label htmlFor="ask-incident">Incident id (copy it from Incidents with c)</label>
+          <input id="ask-incident" className="input mono" value={incidentId} onChange={(e) => setIncidentId(e.target.value.trim())} placeholder="inc-..." spellCheck={false} />
+        </div>
+        {incidentId ? <AskForm incidentId={incidentId} store={askStore} /> : askStore.modelOffline ? <ModelOffline /> : <p className="quiet-note">Enter an incident id to ask about it.</p>}
+      </section>
+      <DataTable
+        label="Questions asked in this session"
+        unit="questions"
+        primary
+        rows={entries}
+        columns={cols}
+        rowKey={(e) => e.id}
+        selectedKey={selectedId}
+        onSelect={(e) => route.setParams({ id: e.id, ev: null })}
+        footer={<span>Kept for this session only</span>}
+        empty={
+          <EmptyState title="No questions asked in this session.">
+            Answers use the incident's alerts only. Every citation and claim is checked against the alert records.
+          </EmptyState>
+        }
+      />
     </>
   );
 
   const detail = selected ? (
     <>
-      <div className="pane-head">
+      <div className="pane-bar">
         <h2>Answer</h2>
         <a className="mono" href={`#/incidents?id=${encodeURIComponent(selected.incidentId)}`}>
           {selected.incidentId}
         </a>
       </div>
       <div className="detail-scroll">
-        <div className="section">
+        <div className="block">
           <Finding
             entry={selected}
             onOpenEvidence={(id, hl) => {
@@ -111,14 +107,21 @@ export function AskScreen({ route, askStore }: Props) {
         </div>
       </div>
       {ev && (
-        <div className="overlay">
+        <div className="ev-overlay">
           <EvidencePane alertId={ev} needles={needles} focusKey={ev} onClose={() => route.setParams({ ev: null })} />
         </div>
       )}
     </>
+  ) : askStore.modelOffline && allowed ? (
+    <ModelOffline />
   ) : (
-    <EmptyState title="No answer selected." />
+    <EmptyState title="No answer selected.">Ask a question on the left; its answer, citations and verifier marks appear here.</EmptyState>
   );
 
-  return <SplitPane id="ask" left={list} right={detail} initial={44} />;
+  return (
+    <div className="work">
+      <PageHeader bar title="Ask" purpose="What does the model say, and what did the verifier keep?" />
+      <SplitPane id="ask" left={list} right={detail} initial={44} />
+    </div>
+  );
 }

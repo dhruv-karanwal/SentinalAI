@@ -12,7 +12,8 @@ import { Icon } from '../icons.tsx';
 import { fmtInt } from '../lib/format.ts';
 import { describeFilter, filterKey } from './AlertQueryTable.tsx';
 import { DataTable, type Column } from './DataTable.tsx';
-import { DetectorTag, ErrorNotice, ErrorState, Time, describeError } from './ui.tsx';
+import { DetectorTag, EmptyState, ErrorNotice, ErrorState, Time, describeError } from './ui.tsx';
+import { fitColumns, useNarrow } from './narrow.ts';
 
 const PAGE = 200;
 const CHILDREN = 50;
@@ -27,13 +28,15 @@ interface Props {
   onSelect: (alertId: string) => void;
   onFilter: (patch: Partial<AlertFilter>) => void;
   primary?: boolean;
+  /** shown as Clear filters in the empty state when a filter is set */
+  onClear?: () => void;
 }
 
 function untilAfter(ts: string): string {
   return new Date(Date.parse(ts) + 1).toISOString();
 }
 
-export function AlertRunsTable({ scenario, filter, label, selectedId, onSelect, onFilter, primary = false }: Props) {
+export function AlertRunsTable({ scenario, filter, label, selectedId, onSelect, onFilter, primary = false, onClear }: Props) {
   const key = filterKey(filter);
   const first = useLoad((signal) => api.alertRuns(scenario, filter, PAGE, 0, signal), [scenario, key]);
   const [more, setMore] = useState<AlertRun[]>([]);
@@ -137,18 +140,17 @@ export function AlertRunsTable({ scenario, filter, label, selectedId, onSelect, 
         render: (r) => {
           if (r.kind === 'alert')
             return (
-              <span className="fold-child">
-                <span className="fold-indent" aria-hidden="true" />
+              <span className="run-child">
                 <span className="mono faint">{r.alert.rule_id ?? '-'}</span> {r.alert.rule_name}
               </span>
             );
           const st = open[r.run.first_alert_id];
           return (
             <span>
-              {r.run.count > 1 && (
+              {r.run.count > 1 ? (
                 <button
                   type="button"
-                  className="fold-btn"
+                  className="run-toggle"
                   aria-expanded={!!st}
                   aria-label={`${st ? 'Collapse' : 'Expand'} ${fmtInt(r.run.count)} repeated alerts`}
                   onClick={(e) => {
@@ -156,11 +158,13 @@ export function AlertRunsTable({ scenario, filter, label, selectedId, onSelect, 
                     toggle(r.run);
                   }}
                 >
-                  <Icon name={st ? 'chevronDown' : 'chevronRight'} />×{fmtInt(r.run.count)}
+                  <Icon name={st ? 'chevronDown' : 'chevronRight'} />
                 </button>
-              )}{' '}
+              ) : (
+                <span className="run-pad" aria-hidden="true" />
+              )}
               <span className="mono faint">{r.run.rule_id ?? '-'}</span> {r.run.rule_name}
-              {r.run.count > 1 && <span className="faint"> · same rule, same host</span>}
+              {r.run.count > 1 && <span className="run-count num"> · {fmtInt(r.run.count)} in a row, same host</span>}
             </span>
           );
         },
@@ -169,6 +173,9 @@ export function AlertRunsTable({ scenario, filter, label, selectedId, onSelect, 
     ],
     [open, toggle],
   );
+
+  const narrow = useNarrow();
+  const cols = useMemo(() => fitColumns(columns, narrow, ['sev', 'host']), [columns, narrow]);
 
   if (first.error && !first.data) return <ErrorState what="alerts" error={first.error} onRetry={first.reload} />;
   const pick = (r: Row) => onSelect(r.kind === 'run' ? r.run.first_alert_id : r.alert.alert_id);
@@ -184,7 +191,7 @@ export function AlertRunsTable({ scenario, filter, label, selectedId, onSelect, 
         label={label}
         unit="rows"
         rows={rows}
-        columns={columns}
+        columns={cols}
         rowKey={(r) => r.key}
         selectedKey={selectedKey}
         onSelect={pick}
@@ -193,7 +200,17 @@ export function AlertRunsTable({ scenario, filter, label, selectedId, onSelect, 
         primary={primary}
         loading={first.loading && !first.data}
         onEndReached={loadMore}
-        empty={`No alerts match ${describeFilter(filter)} in ${scenario}.`}
+        empty={
+          <EmptyState title={`No alerts match ${describeFilter(filter)} in ${scenario}.`}>
+            {onClear ? (
+              <button type="button" className="linklike" onClick={onClear}>
+                Clear filters
+              </button>
+            ) : (
+              'Alerts appear here once the data source is ingested.'
+            )}
+          </EmptyState>
+        }
         footer={
           <span className="num">
             {fmtInt(runs.length)} of {fmtInt(totalRuns)} rows = {fmtInt(totalAlerts)} alerts with repeats folded · {describeFilter(filter)}

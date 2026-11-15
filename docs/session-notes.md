@@ -2334,3 +2334,26 @@ errors, scrollWidth = clientWidth everywhere, focus ring 2 px lime (dark) / oliv
 Not checked: the generated PDF opened and viewed (constants changed, tests pass), hover states, a
 dropped-claim row on screen (none in the UI-dev data), the signed-out page in light theme (the theme
 step does not toggle there), Safari / Firefox, a real colour-blind viewer.
+
+## Wave H premium console, 2026-11-14 / 15 (`phase3/wave-h-premium`)
+
+User's go; pilot, study code, experiments and data untouched (frontend only, plus docs).
+DESIGN.md was rewritten first (audit of the wave G console in section 1, principles, tokens, base
+components, information architecture); the foundation commit `0b20ea6` landed the tokens, Geist
+type, ink accent and base components. The second step applied them to every screen: PageHeader on
+every screen, grouped collapsible rail (`lib/nav.ts`), Ctrl+K command palette, Overview as KPI row +
+one chart + tabs, Incidents header as a definition grid, About as a product page
+(`components/about/`, `lib/flow.ts`), phone-width columns (`components/narrow.ts`), and the style
+guard `lib/guard.test.ts` (banned effects and non-token values in every stylesheet and inline style).
+
+Checks (2026-11-15): frontend 78 tests pass, tsc clean, build ok (JS 517 kB, Vite's 500 kB chunk
+warning; no code split added). Screenshot loop with `scripts/shots.mjs` as ui-manager, 12 screens at
+1366x768 dark + light and 390x844 dark: 0 console errors, no horizontal scroll anywhere. Users is
+admin-only, so the manager run shows "No such page" there (expected; not captured). Copies in
+`docs/ui/wave-h/`.
+
+Fixed while checking: `shots.mjs` opened the new user menu and looked for "Sign out" in the same tick,
+before React rendered the menu, so every `signin` step after the first failed; it now waits 100 ms.
+
+Not checked: Users as admin, keyboard tab walk and the command palette by key, reduced motion, the
+help chat online state, Safari / Firefox, the 11,208-alert incident frame time (DESIGN.md 6 asks for it).

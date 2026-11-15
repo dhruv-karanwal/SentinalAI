@@ -1,19 +1,21 @@
-// Shell (DESIGN.md 11.1): left rail, top bar (brand, data source, environment badge, global
-// search, notifications, user), footer, the current screen, global shortcuts, toasts, help.
+// Shell (DESIGN.md 5): grouped, collapsible rail (an off-canvas drawer on phones), top bar
+// (brand, data source, command palette, tour, help, notifications, user menu), the current
+// screen, global shortcuts, toasts, help dialog. The footer facts live at the bottom of the rail.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { api, can, setToken, setUnauthorizedHandler, type Session } from './api.ts';
 import type { AskEntry, AskStore } from './components/Findings.tsx';
-import { GlobalSearch } from './components/GlobalSearch.tsx';
-import { HelpChat } from './components/HelpChat.tsx';
+import { CommandPalette, type PaletteAction } from './components/CommandPalette.tsx';
+import { HelpChat, openHelpChat } from './components/HelpChat.tsx';
 import { TourPanel } from './components/Tour.tsx';
 import { AboutScreen } from './screens/About.tsx';
 import { Notifications } from './components/Notifications.tsx';
 import { Button, Dialog, ScreenBoundary } from './components/ui.tsx';
 import { AppContext, buildHash, isTypingTarget, sendNav, storageGet, storageSet, useLoad, useRoute, type AppState, type TimeFormat } from './hooks.ts';
-import { BrandMark, FAVICON_SVG, Icon, type IconName } from './icons.tsx';
+import { BrandMark, FAVICON_SVG, Icon } from './icons.tsx';
 import { fmtInt } from './lib/format.ts';
+import { groupNav, NAV, railMove, type NavItem } from './lib/nav.ts';
 import { AlertsScreen } from './screens/Alerts.tsx';
 import { ApprovalsScreen } from './screens/Approvals.tsx';
 import { AskScreen } from './screens/Ask.tsx';
@@ -31,43 +33,15 @@ import { UsersScreen } from './screens/Users.tsx';
 
 export const VERSION = '0.2.0';
 
-interface NavItem {
-  path: string;
-  label: string;
-  icon: IconName;
-  key?: string;
-  permission?: string;
-  roles?: Session['role'][];
-  hidden?: boolean;
-  about: string;
-}
-
-const NAV: NavItem[] = [
-  { path: '/about', label: 'About', icon: 'about', key: 'h', about: 'How SentinelAI works: the problem, the pipeline, the study question, what each screen shows, limits and the glossary.' },
-  { path: '/overview', label: 'Overview', icon: 'overview', key: 'o', about: 'Charts over the stored alerts and incidents; each chart filters the alert table under it.' },
-  { path: '/incidents', label: 'Incidents', icon: 'incidents', key: 'i', about: 'The triage queue: incident table, detail with the detector strip, ATT&CK lanes, entity graph, evidence and findings.' },
-  { path: '/alerts', label: 'Alerts', icon: 'alerts', key: 'a', about: 'Every stored alert with facet counts, saved filters and CSV export.' },
-  { path: '/approvals', label: 'Approvals', icon: 'approvals', key: 'p', about: 'Requested response actions; managers decide with a reason (four-eyes) and execute once (simulated).' },
-  { path: '/reports', label: 'Reports', icon: 'reports', key: 'r', about: 'Incident reports with their charts; JSON, CSV and PDF downloads; printable summary.' },
-  { path: '/ask', label: 'Ask', icon: 'ask', key: 'k', permission: 'copilot.ask', about: 'Questions to the copilot about an incident, with verified citations (needs a model endpoint).' },
-  { path: '/executive', label: 'Executive', icon: 'executive', key: 'e', about: 'One printable page: severity trend, top risks, ATT&CK coverage, time to review, open approvals.' },
-  { path: '/study', label: 'Study', icon: 'study', key: 's', permission: 'read.raw', about: 'Matched-budget pilot results rendered from the result files (dev scenarios, pilot numbers).' },
-  { path: '/audit', label: 'Audit', icon: 'audit', key: 'u', permission: 'audit.read', about: 'Every write and every denied request, with an activity chart.' },
-  { path: '/users', label: 'Users', icon: 'users', permission: 'user.manage', about: 'Accounts and roles (admin): create, deactivate, reset with the environment-supplied password.' },
-  { path: '/security', label: 'Security notes', icon: 'help', hidden: true, about: 'docs/security-notes.md as plain text.' },
-  { path: '/entity', label: 'Entity', icon: 'entity', hidden: true, about: 'One host or source IP: activity, rules and the incidents that contain it.' },
-];
-
-const BOTTOM: NavItem[] = [{ path: '/settings', label: 'Settings', icon: 'settings', about: 'Theme, row density, time format, default data source.' }];
-
 const SHORTCUTS: Array<[string, string]> = [
+  ['Ctrl+K, s', 'Command palette: screens, search (alert id, IP, rule id, incident id) and actions'],
   ['j / k, arrow keys', 'Move the row selection'],
   ['Enter', 'Open the selected row (focus moves to the detail)'],
   ['Esc', 'Close the evidence pane, a dialog, a popover or a search field'],
-  ['/', 'Focus the screen filter'],
-  ['Ctrl+K', 'Global search (alert id, IP, rule id, incident id)'],
+  ['/', 'Focus the screen filter (the command palette where a screen has none)'],
   ['c', 'Copy the selected id'],
-  ['g then h / o / i / a / p / r / e / s / u', 'About / Overview / Incidents / Alerts / Approvals / Reports / Executive / Study / Audit'],
+  ['g then h / s / o / e / i / a / k / p / r / u', 'About / Study / Overview / Executive / Incidents / Alerts / Ask / Approvals / Reports / Audit'],
+  ['Up / Down in the navigation', 'Move between screens'],
   ['Left / Right on a chart', 'Read the bins; Shift selects a range, Enter filters, Esc clears'],
   ['d', 'Compact or comfortable rows'],
   ['t', 'Dark or light theme'],
@@ -126,19 +100,45 @@ export function App() {
   const [modelOffline, setModelOffline] = useState(false);
   const [demo, setDemoState] = useState(() => storageGet('sentinel.demo') !== '0');
   const [tour, setTour] = useState<number | null>(null);
+  const [collapsed, setCollapsedState] = useState(() => storageGet('sentinel.rail') === 'collapsed');
+  const [drawer, setDrawer] = useState(false);
+  const [palette, setPalette] = useState(false);
+  const [userMenu, setUserMenu] = useState(false);
   const railRef = useRef<HTMLElement | null>(null);
-  // the rail indicator slides to the current item (transform only; DESIGN.md 13.2)
+  const menuBtn = useRef<HTMLButtonElement | null>(null);
+  const userBtn = useRef<HTMLButtonElement | null>(null);
+  const userBox = useRef<HTMLDivElement | null>(null);
+  const setCollapsed = useCallback((on: boolean) => {
+    storageSet('sentinel.rail', on ? 'collapsed' : 'expanded');
+    setCollapsedState(on);
+  }, []);
+  // the drawer closes on navigation; the user menu on an outside click
   useEffect(() => {
-    const nav = railRef.current;
-    const cur = nav?.querySelector<HTMLElement>('a[aria-current="page"]');
-    nav?.style.setProperty('--ind-y', cur ? `${cur.offsetTop}px` : '-100px');
-  });
+    const onHash = () => setDrawer(false);
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+  useEffect(() => {
+    if (!userMenu) return;
+    const onDoc = (e: MouseEvent) => {
+      if (userBox.current && !userBox.current.contains(e.target as Node)) setUserMenu(false);
+    };
+    const onEsc = (e: KeyboardEvent) => e.key === 'Escape' && setUserMenu(false);
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onEsc);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onEsc);
+    };
+  }, [userMenu]);
+  useEffect(() => {
+    if (drawer) (railRef.current?.querySelector<HTMLElement>('a[aria-current="page"]') ?? railRef.current?.querySelector<HTMLElement>('a.rail-link'))?.focus();
+  }, [drawer]);
   const setDemo = useCallback((on: boolean) => {
     storageSet('sentinel.demo', on ? '1' : '0');
     setDemoState(on);
   }, []);
   const searchRef = useRef<HTMLInputElement | null>(null);
-  const globalRef = useRef<HTMLInputElement | null>(null);
   const pendingG = useRef(0);
   const returnTo = useRef<string | null>(null);
 
@@ -217,6 +217,8 @@ export function App() {
     setSession(null);
     setExpired(false);
     setAskEntries([]);
+    setUserMenu(false);
+    setPalette(false);
     returnTo.current = null;
   };
 
@@ -234,8 +236,7 @@ export function App() {
     if (!session) return;
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-        globalRef.current?.focus();
-        globalRef.current?.select();
+        if (!document.querySelector('dialog[open]')) setPalette(true);
         e.preventDefault();
         return;
       }
@@ -277,8 +278,13 @@ export function App() {
           sendNav({ type: 'copy' });
           break;
         case '/':
-          (searchRef.current ?? globalRef.current)?.focus();
-          (searchRef.current ?? globalRef.current)?.select();
+          if (searchRef.current) {
+            searchRef.current.focus();
+            searchRef.current.select();
+          } else setPalette(true);
+          break;
+        case 's':
+          setPalette(true);
           break;
         case '?':
           setHelp(true);
@@ -317,7 +323,7 @@ export function App() {
   );
 
   const items = session ? NAV.filter((n) => visible(n, session.role)) : [];
-  const current = [...items, ...BOTTOM].find((n) => n.path === route.path) ?? null;
+  const current = items.find((n) => n.path === route.path) ?? null;
 
   useEffect(() => {
     document.title = session ? `${current?.label ?? 'Not found'} · SentinelAI` : 'Sign in · SentinelAI';
@@ -374,70 +380,228 @@ export function App() {
       />
     );
 
-  const link = (n: NavItem) => (
-    <li key={n.path}>
-      <a href={`#${n.path}`} aria-current={route.path === n.path ? 'page' : undefined}>
-        <Icon name={n.icon} />
-        <span>{n.label}</span>
-      </a>
-    </li>
+  const groups = groupNav(items);
+  const screens = groups.flatMap((g) => g.items);
+  const apiText = health.data ? `ok, ${health.data.database}` : health.error ? `unreachable (${health.error.status || 'no answer'})` : 'checking';
+  const apiState = health.data ? 'ok' : health.error ? 'down' : 'checking';
+  const startTour = () => setTour(0);
+
+  const actions: PaletteAction[] = [
+    { id: 'theme', label: theme === 'dark' ? 'Switch to the light theme' : 'Switch to the dark theme', icon: theme === 'dark' ? 'sun' : 'moon', keywords: 'toggle theme dark light colour', hint: 't', run: toggleTheme },
+    { id: 'density', label: density === 'compact' ? 'Comfortable rows' : 'Compact rows', icon: 'density', keywords: 'toggle density rows compact comfortable', hint: 'd', run: toggleDensity },
+    { id: 'tour', label: 'Start the guided tour', icon: 'play', keywords: 'start here walkthrough tour', run: startTour },
+    { id: 'chat', label: 'Open the help chat', icon: 'chat', keywords: 'explain glossary question help chat', run: openHelpChat },
+    { id: 'help', label: 'Keyboard shortcuts and help', icon: 'keyboard', keywords: 'shortcuts keys help', hint: '?', run: () => setHelp(true) },
+    { id: 'demo', label: demo ? 'Turn professor demo mode off' : 'Turn professor demo mode on', icon: 'about', keywords: 'professor demo mode landing about', run: () => setDemo(!demo) },
+    { id: 'signout', label: 'Sign out', icon: 'signOut', keywords: 'log out sign out leave', run: signOut },
+  ];
+
+  const sourceControl = (id: string) => (
+    <div className="tb-source">
+      <label className="tb-source-label" htmlFor={id}>
+        Data source
+      </label>
+      <select id={id} className="select mono" value={scenario ?? ''} onChange={(e) => chooseScenario(e.target.value)} disabled={!scenarios.data || scenarios.data.scenarios.length === 0}>
+        {(scenarios.data?.scenarios ?? []).map((s) => (
+          <option key={s.scenario} value={s.scenario}>
+            {s.scenario}
+          </option>
+        ))}
+        {!scenarios.data && <option value={scenario ?? ''}>{scenario ?? (scenarios.error ? 'unavailable' : 'loading')}</option>}
+        {scenarios.data?.scenarios.length === 0 && <option value="">no stored alerts</option>}
+      </select>
+      {scenarioRow && (
+        <span className="tb-source-meta" title="Alerts are replayed from the AIT-ADS dataset (dev scenarios). Nothing here is live traffic.">
+          {fmtInt(scenarioRow.alerts)} alerts · dataset replay
+        </span>
+      )}
+      {scenarios.error && <span className="field-error">data sources: {scenarios.error.status || 'API unreachable'}</span>}
+    </div>
   );
+
+  const closeDrawer = () => {
+    setDrawer(false);
+    menuBtn.current?.focus();
+  };
+  const onRailKey = (e: React.KeyboardEvent<HTMLElement>) => {
+    const nav = railRef.current;
+    if (!nav) return;
+    if (drawer && e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      closeDrawer();
+      return;
+    }
+    if (drawer && e.key === 'Tab') {
+      // focus stays inside the open drawer
+      const all = Array.from(nav.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), select:not([disabled])')).filter((el) => el.offsetParent !== null);
+      const i = all.indexOf(document.activeElement as HTMLElement);
+      const next = e.shiftKey ? (i <= 0 ? all.length - 1 : i - 1) : i === all.length - 1 ? 0 : i + 1;
+      all[next]?.focus();
+      e.preventDefault();
+      return;
+    }
+    if (!(e.target instanceof HTMLElement) || !e.target.classList.contains('rail-link')) return;
+    const links = Array.from(nav.querySelectorAll<HTMLElement>('a.rail-link'));
+    const next = railMove(links.length, links.indexOf(e.target), e.key);
+    if (next === null) return;
+    links[next]?.focus();
+    e.preventDefault();
+  };
+  const closeUserMenu = () => {
+    setUserMenu(false);
+    userBtn.current?.focus();
+  };
 
   return (
     <AppContext.Provider value={ctx}>
       <a className="skip-link" href="#main" onClick={(e) => (e.preventDefault(), document.getElementById('main')?.focus())}>
         Skip to main content
       </a>
-      <div className="shell">
+      <div className="shell" data-collapsed={collapsed || undefined} data-drawer={drawer || undefined}>
         <header className="topbar">
+          <button
+            ref={menuBtn}
+            type="button"
+            className="btn ghost icon-only tb-menu"
+            aria-label="Open the navigation"
+            aria-expanded={drawer}
+            aria-controls="rail"
+            onClick={() => setDrawer(true)}
+          >
+            <Icon name="menu" />
+          </button>
           <a className="brand" href={`#${homeFor(session.role)}`} aria-label="SentinelAI home">
             <BrandMark size={18} />
-            SentinelAI
+            <span className="brand-name">SentinelAI</span>
           </a>
-          <label className="label" htmlFor="scenario">
-            Data source
-          </label>
-          <select
-            id="scenario"
-            className="select mono"
-            value={scenario ?? ''}
-            onChange={(e) => chooseScenario(e.target.value)}
-            disabled={!scenarios.data || scenarios.data.scenarios.length === 0}
-          >
-            {(scenarios.data?.scenarios ?? []).map((s) => (
-              <option key={s.scenario} value={s.scenario}>
-                {s.scenario}
-              </option>
-            ))}
-            {!scenarios.data && <option value={scenario ?? ''}>{scenario ?? (scenarios.error ? 'unavailable' : 'loading')}</option>}
-            {scenarios.data?.scenarios.length === 0 && <option value="">no stored alerts</option>}
-          </select>
-          {scenarioRow && <span className="muted num">{fmtInt(scenarioRow.alerts)} alerts</span>}
-          <span className="env-badge" title="Alerts are replayed from the AIT-ADS dataset (dev scenarios). Nothing here is live traffic.">
-            Dataset replay: demo data
-          </span>
-          {scenarios.error && <span className="field-error">data sources: {scenarios.error.status || 'API unreachable'}</span>}
+          <span className="tb-wide tb-contents">{sourceControl('scenario')}</span>
+          <button type="button" className="cmdk-trigger" onClick={() => setPalette(true)} aria-label="Search or jump to (Ctrl+K)" aria-keyshortcuts="Control+K s" aria-haspopup="dialog">
+            <Icon name="search" />
+            <span className="cmdk-trigger-text">Search or jump to</span>
+            <span className="kbd">Ctrl K</span>
+          </button>
           <span className="spacer" />
-          <Button kind="ghost" icon="play" onClick={() => setTour(0)} title="A 6-stop walkthrough of the console">
+          <Button kind="ghost" icon="play" className="tb-wide" onClick={startTour} title="A 6-stop walkthrough of the console">
             Start here
           </Button>
-          <GlobalSearch inputRef={globalRef} scenario={scenario} />
-          <Notifications />
-          <Button kind="ghost" icon="help" onClick={() => setHelp(true)} title="Help and keyboard shortcuts (?)">
+          <Button kind="ghost" icon="help" className="tb-wide" onClick={() => setHelp(true)} title="Help and keyboard shortcuts (?)">
             Help
           </Button>
-          <span className="who">
-            <Icon name="user" />
-            {session.username} <span className="faint">({session.role})</span>
-          </span>
-          <Button kind="ghost" icon="signOut" onClick={signOut}>
-            Sign out
-          </Button>
+          <Notifications />
+          <div className="user" ref={userBox}>
+            <button
+              ref={userBtn}
+              type="button"
+              className="btn ghost user-btn"
+              aria-expanded={userMenu}
+              aria-controls="user-menu"
+              aria-label={`Account: ${session.username} (${session.role})`}
+              onClick={() => setUserMenu(!userMenu)}
+              onKeyDown={(e) => e.key === 'Escape' && userMenu && closeUserMenu()}
+            >
+              <Icon name="user" />
+              <span className="user-name">{session.username}</span>
+              <Icon name="chevronDown" />
+            </button>
+            {userMenu && (
+              <div className="menu-pop user-pop" id="user-menu" role="region" aria-label="Account" onKeyDown={(e) => e.key === 'Escape' && closeUserMenu()}>
+                <div className="menu-head">
+                  <span className="user-pop-name">{session.username}</span>
+                  <span className="user-pop-role">Role: {session.role}</span>
+                </div>
+                <ul className="menu-list">
+                  <li className="tb-narrow">
+                    <button type="button" onClick={() => (setUserMenu(false), startTour())}>
+                      <Icon name="play" /> Start here
+                    </button>
+                  </li>
+                  <li className="tb-narrow">
+                    <button type="button" onClick={() => (setUserMenu(false), setHelp(true))}>
+                      <Icon name="help" /> Help and shortcuts
+                    </button>
+                  </li>
+                  <li>
+                    <a href="#/settings" onClick={() => setUserMenu(false)}>
+                      <Icon name="settings" /> Settings
+                    </a>
+                  </li>
+                  <li>
+                    <button type="button" onClick={signOut}>
+                      <Icon name="signOut" /> Sign out
+                    </button>
+                  </li>
+                </ul>
+              </div>
+            )}
+          </div>
         </header>
-        <nav className="rail" aria-label="Screens" ref={railRef}>
-          <span className="rail-ind" aria-hidden="true" />
-          <ul>{items.filter((n) => !n.hidden).map(link)}</ul>
-          <ul>{BOTTOM.map(link)}</ul>
+        <div className="rail-scrim" aria-hidden="true" onClick={closeDrawer} />
+        <nav className="rail" id="rail" aria-label="Screens" ref={railRef} onKeyDown={onRailKey}>
+          <div className="rail-drawer-head">
+            <span className="brand">
+              <BrandMark size={18} />
+              SentinelAI
+            </span>
+            <button type="button" className="btn ghost icon-only" aria-label="Close the navigation (Esc)" onClick={closeDrawer}>
+              <Icon name="close" />
+            </button>
+          </div>
+          <div className="rail-drawer-source">{sourceControl('scenario-drawer')}</div>
+          <div className="rail-groups">
+            {groups.map((g, gi) => (
+              <div key={g.label} className="rail-group" role="group" aria-labelledby={`rail-g${gi}`}>
+                <h2 className="rail-label" id={`rail-g${gi}`}>
+                  {g.label}
+                </h2>
+                <ul>
+                  {g.items.map((n) => (
+                    <li key={n.path}>
+                      <a className="rail-link" href={`#${n.path}`} aria-current={route.path === n.path ? 'page' : undefined} data-tip={n.label}>
+                        <Icon name={n.icon} />
+                        <span className="rail-text">{n.label}</span>
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+          <div className="rail-foot">
+            <dl className="rail-facts">
+              <div>
+                <dt>Console</dt>
+                <dd>{VERSION}</dd>
+              </div>
+              <div>
+                <dt>Data</dt>
+                <dd>AIT-ADS replay{scenario ? `, ${scenario}` : ''} (dev scenario)</dd>
+              </div>
+              <div>
+                <dt>API</dt>
+                <dd>
+                  <span className="api-dot" data-state={apiState} aria-hidden="true" />
+                  {apiText}
+                </dd>
+              </div>
+            </dl>
+            <span className="rail-api-mini" data-state={apiState} role="img" aria-label={`API: ${apiText}`} title={`API: ${apiText}`} />
+            <a className="rail-security" href="#/security">
+              Security notes
+            </a>
+            <button
+              type="button"
+              className="btn ghost rail-toggle"
+              onClick={() => setCollapsed(!collapsed)}
+              aria-expanded={!collapsed}
+              aria-controls="rail"
+              aria-label={collapsed ? 'Expand the navigation' : 'Collapse the navigation'}
+              title={collapsed ? 'Expand the navigation' : 'Collapse the navigation'}
+            >
+              <Icon name={collapsed ? 'chevronRight' : 'chevronLeft'} />
+              <span className="rail-text">Collapse</span>
+            </button>
+          </div>
         </nav>
         <main className="main" id="main" tabIndex={-1}>
           <ScreenBoundary resetKey={`${route.path}|${scenario}`}>
@@ -446,51 +610,42 @@ export function App() {
             </div>
           </ScreenBoundary>
         </main>
-        <footer className="footer">
-          <span>SentinelAI console {VERSION}</span>
-          <span>Data: AIT-ADS replay{scenario ? `, ${scenario}` : ''} (dev scenario)</span>
-          <span>
-            API:{' '}
-            {health.data ? `ok, ${health.data.database}` : health.error ? `unreachable (${health.error.status || 'no answer'})` : 'checking'}
-          </span>
-          <span className="spacer" />
-          <a href="#/security">Security notes</a>
-        </footer>
+        {tour !== null && <TourPanel step={tour} onStep={setTour} onClose={() => setTour(null)} />}
+        <HelpChat path={route.path} screenName={current?.label ?? 'Unknown page'} incidentId={route.path === '/incidents' ? (route.params.id ?? null) : null} />
+        <div className="toasts">
+          {toasts.map((t) => (
+            <div key={t.id} className="toast" data-kind={t.kind} role={t.kind === 'error' ? 'alert' : 'status'}>
+              {t.text}
+            </div>
+          ))}
+        </div>
       </div>
-      {tour !== null && <TourPanel step={tour} onStep={setTour} onClose={() => setTour(null)} />}
-      <HelpChat path={route.path} screenName={current?.label ?? 'Unknown page'} incidentId={route.path === '/incidents' ? (route.params.id ?? null) : null} />
-      <div className="toasts">
-        {toasts.map((t) => (
-          <div key={t.id} className="toast" data-kind={t.kind} role={t.kind === 'error' ? 'alert' : 'status'}>
-            {t.text}
-          </div>
-        ))}
-      </div>
+      {palette && <CommandPalette screens={screens} actions={actions} scenario={scenario} currentPath={route.path} onClose={() => setPalette(false)} />}
       {help && (
         <Dialog title="Help" onClose={() => setHelp(false)}>
-          <h3 className="section-title">Keyboard shortcuts</h3>
-          <dl className="shortcuts">
-            {SHORTCUTS.map(([keys, what]) => (
-              <div key={keys} style={{ display: 'contents' }}>
-                <dt className="mono">{keys}</dt>
-                <dd>{what}</dd>
-              </div>
-            ))}
-          </dl>
-          <h3 className="section-title" style={{ marginTop: 'var(--sp-12)' }}>
-            Screens for your role ({session.role})
-          </h3>
-          <dl className="shortcuts">
-            {[...items.filter((n) => !n.hidden), ...BOTTOM].map((n) => (
-              <div key={n.path} style={{ display: 'contents' }}>
-                <dt>{n.label}</dt>
-                <dd>{n.about}</dd>
-              </div>
-            ))}
-          </dl>
-          <p className="faint" style={{ fontSize: 'var(--fs-small)' }}>
-            All data is a replay of the AIT-ADS dev scenarios. The console shows platform outputs (alerts, incidents, reports, approvals); it shows no labels.
-          </p>
+          <section className="help-sec" aria-labelledby="help-keys">
+            <h3 id="help-keys">Keyboard shortcuts</h3>
+            <dl className="help-list">
+              {SHORTCUTS.map(([keys, what]) => (
+                <div key={keys}>
+                  <dt className="mono">{keys}</dt>
+                  <dd>{what}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+          <section className="help-sec" aria-labelledby="help-screens">
+            <h3 id="help-screens">Screens for your role ({session.role})</h3>
+            <dl className="help-list">
+              {screens.map((n) => (
+                <div key={n.path}>
+                  <dt>{n.label}</dt>
+                  <dd>{n.about}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+          <p className="help-note">All data is a replay of the AIT-ADS dev scenarios. The console shows platform outputs (alerts, incidents, reports, approvals); it shows no labels.</p>
         </Dialog>
       )}
     </AppContext.Provider>

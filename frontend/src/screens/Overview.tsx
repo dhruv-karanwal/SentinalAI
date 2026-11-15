@@ -1,12 +1,12 @@
-// Overview (DESIGN.md 11.5): a status row, then charts over the stored alerts and incidents of
-// the data source. Every chart filters the alert table at the bottom of the page (the filter is
-// kept in the URL, so a filtered view can be linked). All numbers come from GET /overview.
+// Overview (DESIGN.md 5): "What needs attention right now?" Header, KPI row, one primary chart
+// (alerts over time), the incidents to look at first as a list, and everything else in tabs. Every
+// chart filters the alert table in the Alerts tab (the filter is kept in the URL, so a filtered view
+// can be linked). All numbers come from GET /overview and GET /incidents (summaries).
 
 import { useCallback, useMemo, useState } from 'react';
 
 import { api, type AlertFilter, type IncidentSummaryRow, type Overview } from '../api.ts';
-import { Reveal } from '../components/motion.tsx';
-import { Explain, Term } from '../components/Term.tsx';
+import { Term } from '../components/Term.tsx';
 import { distinctLabels } from '../lib/explain.ts';
 import { compareQueue } from '../lib/format.ts';
 import { ChainStrip, HeatStrip } from '../charts/Attack.tsx';
@@ -14,7 +14,8 @@ import { HBars, StackedHBars } from '../charts/Bars.tsx';
 import { ChartFrame, DETECTOR_ORDER, detectorTone, sevTone, type LegendItem } from '../charts/ChartFrame.tsx';
 import { TimeBars } from '../charts/TimeBars.tsx';
 import { AlertQueryTable, describeFilter } from '../components/AlertQueryTable.tsx';
-import { Button, ErrorNotice, ErrorState, SeverityCell, SkeletonLines, Time, detectorName } from '../components/ui.tsx';
+import { Button, ErrorNotice, ErrorState, Kpi, Page, PageHeader, Section, SeverityCell, Tabs, Time, detectorName, type TabItem } from '../components/ui.tsx';
+import { Icon } from '../icons.tsx';
 import { buildHash, storageGet, storageSet, useLoad, useScreenContext, type RouteApi } from '../hooks.ts';
 import { epochSeconds, fmtDuration, fmtInt, fmtStep } from '../lib/format.ts';
 import { fmtPct, heatStep } from '../lib/scale.ts';
@@ -23,123 +24,142 @@ const SEVS = ['High', 'Medium', 'Low'] as const;
 const STATUS_PATTERN: Record<string, 'solid' | 'hatch' | 'outline'> = { open: 'solid', investigating: 'hatch', contained: 'outline', closed: 'outline' };
 const FILTER_KEYS: Array<keyof AlertFilter> = ['detector', 'level', 'rule_id', 'technique', 'host', 'ip', 'since', 'until'];
 
+type DetailTab = 'attack' | 'entities' | 'detectors' | 'queue' | 'chain' | 'alerts';
+const DETAIL_TABS: readonly TabItem<DetailTab>[] = [
+  { id: 'attack', label: 'ATT&CK' },
+  { id: 'entities', label: 'Hosts and IPs' },
+  { id: 'detectors', label: 'Detectors' },
+  { id: 'queue', label: 'Incident queue' },
+  { id: 'chain', label: 'Attack chain' },
+  { id: 'alerts', label: 'Alerts' },
+];
+/** the selected detail tab (replaces the wave G "More detail" flag, sentinel.overview.more) */
+const TAB_KEY = 'sentinel.overview.tab';
+const isTab = (v: string | null): v is DetailTab => DETAIL_TABS.some((t) => t.id === v);
+
 export function sevLevel(sev: string | null | undefined): 0 | 1 | 2 | 3 {
   return sev === 'High' ? 3 : sev === 'Medium' ? 2 : sev === 'Low' ? 1 : 0;
+}
+
+/** Still skeleton in the shape of a dashboard page: KPI row, one chart, one list (shared with Executive and Study). */
+export function DashSkeleton({ title, purpose, note }: { title: string; purpose: string; note?: string }) {
+  return (
+    <Page>
+      <PageHeader title={title} purpose={purpose} actions={note ? <span className="page-meta">{note}</span> : undefined} />
+      <div className="dash-skel" aria-busy="true" aria-label="Loading">
+        <div className="skel-kpis">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="skel-block" />
+          ))}
+        </div>
+        <div className="skel-block skel-chart" />
+        <div className="skel-block skel-list" />
+      </div>
+    </Page>
+  );
 }
 
 export function OverviewScreen({ scenario, route }: { scenario: string; route: RouteApi }) {
   const { data, error, loading, reload } = useLoad((signal) => api.overview(scenario, signal), [scenario]);
   const [log, setLog] = useState(() => storageGet('sentinel.overview.log') === '1');
   const filter = useMemo<AlertFilter>(() => Object.fromEntries(FILTER_KEYS.map((k) => [k, route.params[k] ?? null])), [route.params]);
+  const active = FILTER_KEYS.some((k) => filter[k]);
+  // the selected detail tab is remembered; a filter in the URL opens the Alerts tab
+  const [tab, setTabState] = useState<DetailTab>(() => {
+    if (active) return 'alerts';
+    const v = storageGet(TAB_KEY);
+    return isTab(v) ? v : 'attack';
+  });
+  const setTab = useCallback((t: DetailTab) => {
+    setTabState(t);
+    storageSet(TAB_KEY, t);
+  }, []);
   const setFilter = useCallback(
     (patch: Partial<AlertFilter>) => {
       route.setParams(Object.fromEntries(Object.entries(patch).map(([k, v]) => [k, v ?? null])) as Record<string, string | null>);
-      // the alert table lives under "More detail": open it (its toggle handler renders the table)
-      document.querySelector('details.more-detail')?.setAttribute('open', '');
-      window.setTimeout(() => document.getElementById('ov-table')?.scrollIntoView({ block: 'start', behavior: 'auto' }), 50);
+      // the alert table lives in the Alerts tab: switch to it and bring it into view
+      setTab('alerts');
+      window.setTimeout(() => document.getElementById('ov-detail')?.scrollIntoView({ block: 'start', behavior: 'auto' }), 50);
     },
-    [route],
+    [route, setTab],
   );
   const clear = () => route.setParams(Object.fromEntries(FILTER_KEYS.map((k) => [k, null])));
-  const active = FILTER_KEYS.some((k) => filter[k]);
   const incidents = useLoad((signal) => api.incidentSummaries(scenario, signal), [scenario]);
-  const [more, setMore] = useState(() => active || storageGet('sentinel.overview.more') === '1');
   useScreenContext(
     'overview',
     data
-      ? `Data source ${scenario}: ${data.alerts} stored alerts. Open incidents by severity: High ${data.status.open_by_severity.High ?? 0}, Medium ${data.status.open_by_severity.Medium ?? 0}, Low ${data.status.open_by_severity.Low ?? 0}; ${data.status.incidents} incidents in total (triage gap 300 s). Pending approvals: ${data.status.pending_approvals}. Alerts by detector: ${data.detectors.map((d) => `${d.detector} ${d.alerts}`).join(', ')}. ATT&CK-mapped alerts: ${data.attack.mapped_alerts} of ${data.attack.alerts}. IOC matching: ${data.ioc_loaded ? 'loaded' : 'not measured (no indicator list loaded)'}. Charts on screen: headline numbers, alerts over time by detector, incidents to look at first; under More detail: incident severity and status, detector comparison, ATT&CK techniques by tactic, top hosts and source IPs, attack chain, alert table.`
+      ? `Data source ${scenario}: ${data.alerts} stored alerts. Open incidents by severity: High ${data.status.open_by_severity.High ?? 0}, Medium ${data.status.open_by_severity.Medium ?? 0}, Low ${data.status.open_by_severity.Low ?? 0}; ${data.status.incidents} incidents in total (triage gap 300 s). Pending approvals: ${data.status.pending_approvals}. Alerts by detector: ${data.detectors.map((d) => `${d.detector} ${d.alerts}`).join(', ')}. ATT&CK-mapped alerts: ${data.attack.mapped_alerts} of ${data.attack.alerts}. IOC matching: ${data.ioc_loaded ? 'loaded' : 'not measured (no indicator list loaded)'}. On screen: headline numbers, alerts over time by detector, incidents to look at first; in tabs: ATT&CK techniques by tactic, top hosts and source IPs, detector comparison, incident severity and status, attack chain, alert table.`
       : '',
   );
 
   if (error && !data) return <ErrorState what="the overview" error={error} onRetry={reload} />;
-  if (!data) {
-    return (
-      <div className="page" aria-busy="true">
-        <div className="page-head">
-          <h1>Overview</h1>
-          <span className="faint">Building the per-scenario index (first load after a restart takes a few seconds).</span>
-        </div>
-        <div className="page-body">{loading && <SkeletonLines lines={8} />}</div>
-      </div>
-    );
-  }
+  if (!data) return <DashSkeleton title="Overview" purpose="What needs attention right now?" note="Building the per-scenario index (the first load after a restart takes a few seconds)." />;
   return (
-    <div className="page draw-charts">
-      <div className="page-head">
-        <h1>Overview</h1>
-        <span className="muted num">
-          {scenario} · {fmtInt(data.alerts)} stored alerts
-          {data.timeseries.start && (
-            <>
-              {' '}
-              · <Time ts={data.timeseries.start} /> to <Time ts={data.timeseries.end} kind="data" />
-            </>
+    <Page className="draw-charts">
+      <PageHeader
+        title="Overview"
+        purpose="What needs attention right now?"
+        actions={
+          <>
+            <span className="page-meta num">
+              {scenario} · {fmtInt(data.alerts)} stored alerts
+              {data.timeseries.start && (
+                <>
+                  <br />
+                  <Time ts={data.timeseries.start} /> to <Time ts={data.timeseries.end} kind="data" />
+                </>
+              )}
+            </span>
+            <Button icon="refresh" onClick={reload} disabled={loading}>
+              Reload
+            </Button>
+          </>
+        }
+      />
+      {error && <ErrorNotice what="the overview" error={error} onRetry={reload} />}
+      <KpiRow data={data} />
+      <VolumeChart data={data} log={log} setLog={(v) => (setLog(v), storageSet('sentinel.overview.log', v ? '1' : '0'))} filter={filter} setFilter={setFilter} />
+      <LookFirst rows={incidents.data?.incidents ?? null} error={incidents.error} />
+      <section className="sec" id="ov-detail" aria-label="Detail">
+        <Tabs tabs={DETAIL_TABS.map((t) => (t.id === 'alerts' && active ? { ...t, count: 'filtered' } : t))} value={tab} onChange={setTab} label="Overview detail" idBase="ov" inset />
+        <div className="tab-panel tab-enter" key={tab} role="tabpanel" id={`ov-panel-${tab}`} aria-labelledby={`ov-tab-${tab}`}>
+          {tab === 'attack' && <AttackChart data={data} filter={filter} setFilter={setFilter} />}
+          {tab === 'entities' && (
+            <div className="grid-12">
+              <div className="col-6">
+                <EntityChart data={data} kind="host" scenario={scenario} />
+              </div>
+              <div className="col-6">
+                <EntityChart data={data} kind="ip" scenario={scenario} />
+              </div>
+            </div>
           )}
-        </span>
-        <span className="spacer" />
-        <Button icon="refresh" onClick={reload} disabled={loading}>
-          Reload
-        </Button>
-      </div>
-      <div className="page-body">
-        {error && <ErrorNotice what="the overview" error={error} onRetry={reload} />}
-        <StatusRow data={data} />
-        <VolumeChart data={data} log={log} setLog={(v) => (setLog(v), storageSet('sentinel.overview.log', v ? '1' : '0'))} filter={filter} setFilter={setFilter} />
-        <LookFirst rows={incidents.data?.incidents ?? null} error={incidents.error} />
-        <details
-          className="more-detail"
-          open={more}
-          onToggle={(e) => {
-            const o = (e.currentTarget as HTMLDetailsElement).open;
-            setMore(o);
-            storageSet('sentinel.overview.more', o ? '1' : '0');
-          }}
-        >
-          <summary>
-            More detail <span className="faint">: queue by status, detector comparison, ATT&amp;CK techniques, top hosts and IPs, attack chain, the alert table</span>
-          </summary>
-          {more && (
-        <div className="page-body">
-        <div className="grid-2">
-          <QueueCharts data={data} />
-          <DetectorChart data={data} setFilter={setFilter} />
-        </div>
-        <AttackChart data={data} filter={filter} setFilter={setFilter} />
-        <div className="grid-2">
-          <EntityChart data={data} kind="host" scenario={scenario} />
-          <EntityChart data={data} kind="ip" scenario={scenario} />
-        </div>
-        <ChainChart data={data} />
-        <section id="ov-table" className="chart" style={{ padding: 0 }} aria-labelledby="ov-table-t">
-          <div className="pane-head">
-            <h2 id="ov-table-t" style={{ fontSize: 'var(--fs-title)' }}>
-              Alerts behind the charts
-            </h2>
-            <span className="muted">{describeFilter(filter)}</span>
-            <span className="spacer" />
-            {active && (
-              <Button icon="close" onClick={clear}>
-                Clear filter
-              </Button>
-            )}
-            <a className="btn" href={buildHash('/alerts', Object.fromEntries(FILTER_KEYS.map((k) => [k, filter[k] ?? null])))}>
-              Open in Alerts
-            </a>
-          </div>
-          <div style={{ height: 420, display: 'flex', flexDirection: 'column' }}>
-            <AlertQueryTable
-              scenario={scenario}
-              filter={filter}
-              label="Alerts filtered by the overview charts"
-              onOpen={(a) => (window.location.hash = buildHash('/alerts', { id: a.alert_id }))}
-            />
-          </div>
-        </section>
-        </div>
+          {tab === 'detectors' && <DetectorChart data={data} setFilter={setFilter} />}
+          {tab === 'queue' && <QueueCharts data={data} />}
+          {tab === 'chain' && <ChainChart data={data} />}
+          {tab === 'alerts' && (
+            <section id="ov-table" className="chart table-card" aria-labelledby="ov-table-t">
+              <div className="table-card-head">
+                <h3 id="ov-table-t">Alerts behind the charts</h3>
+                <span className="muted">{describeFilter(filter)}</span>
+                <span className="spacer" />
+                {active && (
+                  <Button icon="close" onClick={clear}>
+                    Clear filter
+                  </Button>
+                )}
+                <a className="btn" href={buildHash('/alerts', Object.fromEntries(FILTER_KEYS.map((k) => [k, filter[k] ?? null])))}>
+                  Open in Alerts
+                </a>
+              </div>
+              <div className="table-card-body">
+                <AlertQueryTable scenario={scenario} filter={filter} label="Alerts filtered by the overview charts" onOpen={(a) => (window.location.hash = buildHash('/alerts', { id: a.alert_id }))} />
+              </div>
+            </section>
           )}
-        </details>
-      </div>
-    </div>
+        </div>
+      </section>
+    </Page>
   );
 }
 
@@ -148,106 +168,110 @@ function LookFirst({ rows, error }: { rows: IncidentSummaryRow[] | null; error: 
   const top = useMemo(() => (rows ?? []).filter((r) => (r.status ?? 'open') !== 'closed').map((r) => ({ ...r, status: r.status ?? 'open' })).sort(compareQueue).slice(0, 6), [rows]);
   const labels = useMemo(() => distinctLabels(top), [top]);
   return (
-    <section className="chart" aria-labelledby="ov-first-t">
-      <header className="chart-head">
-        <div>
-          <h3 className="chart-title" id="ov-first-t">
-            <Term id="incident">Incidents to look at first</Term>
-          </h3>
-          <Explain
-            what="The open incidents at the top of the queue: highest severity first, then not yet touched, then most recent. Each is named by its main host or source IP and when it started in the data."
-            why="This is where an analyst starts a shift. Open one to see what happened, in plain words, and the evidence."
-          />
-        </div>
-        <div className="chart-actions">
-          <a className="btn" href="#/incidents">
-            Open the queue
-          </a>
-        </div>
-      </header>
-      {error && !rows ? (
-        <p className="faint">Incidents could not be loaded ({error.status || 'API unreachable'}).</p>
-      ) : !rows ? (
-        <SkeletonLines lines={3} />
-      ) : top.length === 0 ? (
-        <p className="faint">No open incident. Build incidents on the Incidents screen (triage).</p>
-      ) : (
-        <ul className="look-first cards">
-          {top.map((r, i) => (
-            <Reveal as="li" key={r.incident_id} i={i} sev={(r.severity ?? '').toLowerCase()}>
-              <SeverityCell value={r.severity} />
-              <a className="lf-name mono" href={buildHash('/incidents', { id: r.incident_id })} title={`${r.incident_id}: ${labels.get(r.incident_id)}`}>
-                {labels.get(r.incident_id)}
-              </a>
-              <span className="num faint">{fmtInt(r.alerts)} alerts</span>
-              <span className="faint">{r.status}{r.detail.severity_row ? ` · rule ${r.detail.severity_row}` : ''}</span>
-            </Reveal>
-          ))}
-        </ul>
-      )}
-      <p className="chart-note">Times are data times (the 2022 recording), in UTC.</p>
-    </section>
+    <Section
+      id="ov-first"
+      title={<Term id="incident">Incidents to look at first</Term>}
+      description="Open incidents in queue order: highest severity, then untouched, then most recent. Named by main host or source IP and data time (UTC)."
+      actions={
+        <a className="btn" href="#/incidents">
+          Open the queue
+        </a>
+      }
+    >
+      <div className="card flush">
+        {error && !rows ? (
+          <p className="inc-empty">Incidents could not be loaded ({error.status || 'API unreachable'}).</p>
+        ) : !rows ? (
+          <div className="inc-empty" aria-busy="true" aria-label="Loading">
+            <div className="skeleton-bar" style={{ width: '60%' }} />
+          </div>
+        ) : top.length === 0 ? (
+          <p className="inc-empty">No open incident. Build incidents on the Incidents screen (triage).</p>
+        ) : (
+          <ul className="inc-list">
+            {top.map((r, i) => (
+              <li key={r.incident_id} className="row-enter" style={{ '--i': i } as React.CSSProperties}>
+                <a className="inc-row" href={buildHash('/incidents', { id: r.incident_id })} title={`${r.incident_id}: ${labels.get(r.incident_id)}`}>
+                  <SeverityCell value={r.severity} />
+                  <span className="inc-name mono">{labels.get(r.incident_id)}</span>
+                  <span className="inc-count num">{fmtInt(r.alerts)} alerts</span>
+                  <span className="inc-meta">
+                    {r.status}
+                    {r.detail.severity_row ? ` · rule ${r.detail.severity_row}` : ''}
+                  </span>
+                  <span className="inc-chev" aria-hidden="true">
+                    <Icon name="chevronRight" />
+                  </span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </Section>
   );
 }
 
-function StatusRow({ data }: { data: Overview }) {
+function KpiRow({ data }: { data: Overview }) {
   const s = data.status;
   const oldest = s.oldest_unreviewed_high;
   return (
-    <div className="statusrow" role="group" aria-label="Status">
-      <div className="status-cell">
-        <div className="k">
-          Open <Term id="incident-severity">incidents, by severity</Term>
-        </div>
-        <div className="v">
-          {SEVS.map((sev) => (
-            <a key={sev} href={buildHash('/incidents', { sev, status: 'open' })} title={`Open ${sev} incidents`}>
-              <SeverityCell value={sev} /> {fmtInt(s.open_by_severity[sev] ?? 0)}
-            </a>
-          ))}
-        </div>
-        <div className="s">
-          {fmtInt(s.incidents)} in total, <Term id="triage-gap">gap</Term> 5 min
-        </div>
-      </div>
-      <div className="status-cell">
-        <div className="k">
-          <Term id="alert">Alerts</Term> received (replayed)
-        </div>
-        <div className="v num">{fmtInt(data.alerts)}</div>
-        <div className="s">{DETECTOR_ORDER.filter((d) => data.timeseries.series[d]).map((d) => `${detectorName(d)} ${fmtInt(data.timeseries.series[d]!.reduce((a, b) => a + b, 0))}`).join(' · ')}</div>
-      </div>
-      <div className="status-cell">
-        <div className="k">Oldest High incident nobody has opened</div>
-        {oldest ? (
+    <div className="kpi-row" role="group" aria-label="Status">
+      <Kpi
+        label={
           <>
-            <div className="v">
-              <a className="num" href={buildHash('/incidents', { id: oldest.incident_id })}>
-                {fmtDuration(oldest.age_seconds)}
+            Open <Term id="incident-severity">incidents by severity</Term>
+          </>
+        }
+        value={
+          <span className="kpi-sevs">
+            {SEVS.map((sev) => (
+              <a key={sev} href={buildHash('/incidents', { sev, status: 'open' })} title={`Open ${sev} incidents`}>
+                <SeverityCell value={sev} />
+                <span>{fmtInt(s.open_by_severity[sev] ?? 0)}</span>
               </a>
-            </div>
-            <div className="s mono" title={oldest.incident_id}>
-              {oldest.incident_id} · {fmtInt(oldest.alerts)} alerts · waiting since it was created (not the data date)
-            </div>
-          </>
-        ) : (
+            ))}
+          </span>
+        }
+        hint={
           <>
-            <div className="v">none</div>
-            <div className="s">No open High incident</div>
+            {fmtInt(s.incidents)} in total, <Term id="triage-gap">gap</Term> 5 min
           </>
-        )}
-      </div>
-      <div className="status-cell">
-        <div className="k">
-          Actions waiting for <Term id="four-eyes">approval</Term>
-        </div>
-        <div className="v">
-          <a className="num" href="#/approvals">
-            {fmtInt(s.pending_approvals)}
-          </a>
-        </div>
-        <div className="s">A second person must decide each one</div>
-      </div>
+        }
+      />
+      <Kpi
+        label={
+          <>
+            <Term id="alert">Alerts</Term> stored (replayed)
+          </>
+        }
+        value={fmtInt(data.alerts)}
+        hint={DETECTOR_ORDER.filter((d) => data.timeseries.series[d]).map((d) => `${detectorName(d)} ${fmtInt(data.timeseries.series[d]!.reduce((a, b) => a + b, 0))}`).join(' · ')}
+      />
+      {oldest ? (
+        <Kpi
+          label="Oldest High nobody has opened"
+          value={fmtDuration(oldest.age_seconds)}
+          href={buildHash('/incidents', { id: oldest.incident_id })}
+          hint={
+            <span className="mono" title={`${oldest.incident_id}: waiting since it was created (not the data date)`}>
+              {oldest.incident_id} · {fmtInt(oldest.alerts)} alerts
+            </span>
+          }
+        />
+      ) : (
+        <Kpi label="Oldest High nobody has opened" value="none" hint="No open High incident" />
+      )}
+      <Kpi
+        label={
+          <>
+            Waiting for <Term id="four-eyes">approval</Term>
+          </>
+        }
+        value={fmtInt(s.pending_approvals)}
+        href="#/approvals"
+        hint="A second person decides each one"
+      />
     </div>
   );
 }
@@ -274,15 +298,15 @@ function VolumeChart({ data, log, setLog, filter, setFilter }: { data: Overview;
       id="ch-volume"
       title="Alerts over time, by detector"
       term="detector"
-      question="Where did alert volume spike, and which detector raised it? Drag across the bars to filter the alert table to that time."
+      question="Where did alert volume spike, and which detector raised it? Drag across the bars to filter the alerts."
       what="How many alerts arrived in each time slice of the recording, stacked by the tool that raised them. Triangles under the axis mark where High (filled) and Medium (outline) incidents start."
-      why="Spikes are where the attack steps are likely to be; drag across bars to see those alerts in the table under More detail."
+      why="Spikes are where the attack steps are likely to be; drag across bars (or use Shift and the arrow keys) to see those alerts in the Alerts tab."
       legend={[...legend, { key: 'h', label: 'High incident start', tone: 'high', mark: 'dot' }, { key: 'm', label: 'Medium incident start', tone: 'medium', mark: 'hollow' }]}
       table={table}
       empty={ts.total === 0 ? 'No stored alerts for this data source. Replay one with app.main platform-ingest.' : undefined}
       actions={
         <>
-          <span className="seg-toggle" role="group" aria-label="Count axis">
+          <span className="segmented" role="group" aria-label="Count axis">
             <Button aria-pressed={!log} onClick={() => setLog(false)}>
               Linear
             </Button>
@@ -304,7 +328,7 @@ function VolumeChart({ data, log, setLog, filter, setFilter }: { data: Overview;
         start={start}
         binSeconds={step}
         log={log}
-        height={200}
+        height={220}
         markers={markers}
         selection={selection}
         label="Alerts over time"
@@ -347,9 +371,8 @@ function QueueCharts({ data }: { data: Overview }) {
       note="Age in queue counts from the created date (when triage stored the incident), not the data date of its alerts (2022). Click a bar to open those incidents."
     >
       <StackedHBars rows={rows} unit="incidents" />
-      <h4 className="section-title" style={{ marginTop: 'var(--sp-12)' }}>
-        Age in queue of incidents not closed (count per age band; stronger colour = more)
-      </h4>
+      <h4 className="chart-subtitle">Age in queue of incidents not closed (count per age band; stronger shade = more)</h4>
+      <div className="table-scroll">
       <table className="data-table">
         <thead>
           <tr>
@@ -382,6 +405,7 @@ function QueueCharts({ data }: { data: Overview }) {
           })}
         </tbody>
       </table>
+      </div>
     </ChartFrame>
   );
 }
@@ -404,6 +428,7 @@ function DetectorChart({ data, setFilter }: { data: Overview; setFilter: (p: Par
       empty={rows.length === 0 ? 'No stored alerts.' : undefined}
       note={`Counts from the stores, no labels. ${data.ioc_loaded ? '' : 'No local indicator list is loaded (the OTX / MISP / VirusTotal feeds are disabled), so IOC match is not measured, not 0 %. '}Duplicates are Wazuh copies of Suricata fast.log lines, excluded from evaluation by default.`}
     >
+      <div className="table-scroll">
       <table className="data-table">
         <thead>
           <tr>
@@ -451,6 +476,7 @@ function DetectorChart({ data, setFilter }: { data: Overview; setFilter: (p: Par
           ))}
         </tbody>
       </table>
+      </div>
     </ChartFrame>
   );
 }
@@ -463,11 +489,11 @@ function AttackChart({ data, filter, setFilter }: { data: Overview; filter: Aler
       title="ATT&CK techniques by tactic"
       term="attack-tactic"
       question="Which tactics do the mapped alerts point to, and which technique carries the volume? Click a cell to filter the alerts."
-      what="Columns are attacker goals (tactics); each cell is a technique with its alert count printed. A stronger olive means more alerts."
+      what="Columns are attacker goals (tactics); each cell is a technique with its alert count printed. A stronger shade means more alerts."
       why="It says what kind of attack the evidence suggests; click a cell to see those alerts."
       legend={[
         { key: 'h1', label: 'fewer alerts', tone: 'heat-1', mark: 'square' },
-        { key: 'h4', label: 'more alerts (stronger olive; count printed in each cell)', tone: 'heat-4', mark: 'square' },
+        { key: 'h4', label: 'more alerts (stronger shade; count printed in each cell)', tone: 'heat-4', mark: 'square' },
       ]}
       table={{
         columns: ['tactic', 'technique', 'name', 'alerts'],

@@ -1,5 +1,6 @@
 // Copilot answers for an incident: the answer text, the citations that passed the verifier as
 // links into the evidence pane, and everything the verifier dropped, marked and explained.
+// Verified = mark + the word "verified"; dropped = dashed, struck through + the reason. Never colour alone.
 
 import { useState } from 'react';
 
@@ -32,17 +33,17 @@ export function Finding({ entry, onOpenEvidence }: { entry: AskEntry; onOpenEvid
   const a = entry.answer;
   const v = a.verification;
   const failed = a.status !== 'ok';
+  const dropped = a.dropped_citations ?? [];
   return (
-    <article className="finding" aria-label={`Answer to: ${entry.question}`}>
-      <div className="meta-row">
-        <span>
-          <span className="k">Question</span>
-          {entry.question}
+    <article className="fd" aria-label={`Answer to: ${entry.question}`}>
+      <div className="fd-q">
+        <span className="q">{entry.question}</span>
+        <span className="quiet-note">
+          asked <Time ts={entry.askedUtc} />
         </span>
-        <Time ts={entry.askedUtc} />
       </div>
       {failed ? (
-        <p className="field-error" role="alert">
+        <p className="fd-error" role="alert">
           The model run did not produce an answer (status {a.status}
           {a.parse_status ? `, ${a.parse_status}` : ''}){a.error ? `: ${a.error}` : '.'}
         </p>
@@ -54,7 +55,7 @@ export function Finding({ entry, onOpenEvidence }: { entry: AskEntry; onOpenEvid
               <strong>{a.verdict}</strong>
             </div>
           )}
-          <ul className="answer">
+          <ul className="fd-answer">
             {a.answer.map((line, i) => (
               <li key={i}>{line}</li>
             ))}
@@ -62,81 +63,89 @@ export function Finding({ entry, onOpenEvidence }: { entry: AskEntry; onOpenEvid
         </>
       )}
 
-      <div className="cites">
-        <span className="muted">
-          Cited alerts ({v.citations_kept} verified{v.citations_dropped ? `, ${v.citations_dropped} dropped` : ''}):
-        </span>
-        {a.cited_alert_ids.length === 0 && (a.dropped_citations?.length ?? 0) === 0 && <span className="faint">none</span>}
-        <span className="chips">
-          {a.cited_alert_ids.map((id) => {
-            const quotes = needlesFor(a, id);
-            return (
-              <button
-                key={id}
-                type="button"
-                className="chip mono"
-                data-state="verified"
-                onClick={() => onOpenEvidence(id, quotes)}
-                title={`verified citation; opens the evidence${quotes.length ? ' with the quoted span marked' : ''}`}
-              >
-                {id}
-                <span className="visually-hidden"> (verified)</span>
-              </button>
-            );
-          })}
-          {a.dropped_citations?.map((id) => (
-            <span key={`d-${id}`} className="chip mono" data-state="dropped" title="dropped by the verifier: not an alert of this incident">
-              {id}
-              <span className="visually-hidden"> (dropped by the verifier)</span>
-            </span>
-          ))}
-        </span>
+      <div className="cite-group">
+        <div className="cite-group-head">
+          <span className="v-mark" aria-hidden="true" />
+          <span>
+            <span className="v-word">Verified</span> citations <span className="num">{v.citations_kept}</span>
+            {a.cited_alert_ids.length > 0 && <span className="faint"> · open one to read its evidence</span>}
+          </span>
+        </div>
+        {a.cited_alert_ids.length === 0 && dropped.length === 0 && <span className="faint">none</span>}
+        {a.cited_alert_ids.length > 0 && (
+          <div className="cite-list">
+            {a.cited_alert_ids.map((id) => {
+              const quotes = needlesFor(a, id);
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  className="cite"
+                  data-state="verified"
+                  onClick={() => onOpenEvidence(id, quotes)}
+                  title={`verified citation; opens the evidence${quotes.length ? ' with the quoted span marked' : ''}`}
+                >
+                  <span className="v-mark" aria-hidden="true" />
+                  {id}
+                  <span className="visually-hidden"> (verified)</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {(a.claims?.length ?? 0) > 0 && (
-        <table className="plain-table">
-          <caption className="visually-hidden">Claims that passed the verifier</caption>
-          <thead>
-            <tr>
-              <th>Claim</th>
-              <th>Alert</th>
-              <th>Field</th>
-              <th>Value</th>
-            </tr>
-          </thead>
-          <tbody>
-            {a.claims?.map((c, i) => (
-              <tr key={i}>
-                <td>
-                  <span className="tag" data-tone="verified">
-                    verified
-                  </span>
-                </td>
-                <td>
-                  <button type="button" className="linklike mono" onClick={() => onOpenEvidence(c.record_id, c.kind === 'quote' ? [c.value] : [])}>
-                    {c.record_id}
-                  </button>
-                </td>
-                <td className="mono">{c.kind === 'quote' ? 'quote' : c.field}</td>
-                <td className="mono">{c.value}</td>
+        <div className="table-scroll">
+          <table className="plain-table">
+            <caption className="visually-hidden">Claims that passed the verifier</caption>
+            <thead>
+              <tr>
+                <th>Claim</th>
+                <th>Alert</th>
+                <th>Field</th>
+                <th>Value</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {a.claims?.map((c, i) => (
+                <tr key={i}>
+                  <td className="nowrap">
+                    <span className="cite-group-head">
+                      <span className="v-mark" aria-hidden="true" />
+                      <span className="v-word">verified</span>
+                    </span>
+                  </td>
+                  <td>
+                    <button type="button" className="linklike mono" onClick={() => onOpenEvidence(c.record_id, c.kind === 'quote' ? [c.value] : [])}>
+                      {c.record_id}
+                    </button>
+                  </td>
+                  <td className="mono">{c.kind === 'quote' ? 'quote' : c.field}</td>
+                  <td className="mono">{c.value}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {(v.citations_dropped > 0 || v.claims_dropped > 0) && (
-        <div className="dropped" role="group" aria-label="Dropped by the verifier">
-          <div>
-            <span className="tag" data-tone="dropped">
-              dropped by verifier
-            </span>{' '}
-            {v.citations_dropped} citation{v.citations_dropped === 1 ? '' : 's'}, {v.claims_dropped} of {v.claims_checked} claim
-            {v.claims_checked === 1 ? '' : 's'}. These are not supported by the incident's alerts.
+        <div className="fd-dropped" role="group" aria-label="Dropped by the verifier">
+          <div className="cite-group-head">
+            <span className="x-mark" aria-hidden="true" />
+            <span>
+              <span className="x-word">Dropped by the verifier</span>: {v.citations_dropped} citation{v.citations_dropped === 1 ? '' : 's'}, {v.claims_dropped} of{' '}
+              {v.claims_checked} claim{v.claims_checked === 1 ? '' : 's'}. They are not supported by the incident's alerts.
+            </span>
           </div>
-          {a.dropped_citations?.map((id) => (
+          {dropped.map((id) => (
             <div key={id}>
-              <span className="mono struck">{id}</span> <span className="muted">citation: not an alert of this incident</span>
+              <span className="cite" data-state="dropped" title="dropped by the verifier: not an alert of this incident">
+                {id}
+                <span className="visually-hidden"> (dropped by the verifier)</span>
+              </span>{' '}
+              <span className="muted">citation: not an alert of this incident</span>
             </div>
           ))}
           {a.dropped_claims?.map((c, i) => (
@@ -147,15 +156,13 @@ export function Finding({ entry, onOpenEvidence }: { entry: AskEntry; onOpenEvid
               <span className="muted">claim: {c.reason}</span>
             </div>
           ))}
-          {a.dropped_citations === undefined && a.dropped_claims === undefined && (
-            <div className="muted">This API build returns counts only, not the dropped items.</div>
-          )}
+          {a.dropped_citations === undefined && a.dropped_claims === undefined && <div className="muted">This API build returns counts only, not the dropped items.</div>}
         </div>
       )}
 
-      <div className="faint num">
-        {a.tool_calls} tool call{a.tool_calls === 1 ? '' : 's'} · {fmtInt(a.input_tokens)} input tokens · {fmtInt(a.output_tokens)} output tokens ·
-        demo feature, not a study result
+      <div className="quiet-note num">
+        {a.tool_calls} tool call{a.tool_calls === 1 ? '' : 's'} · {fmtInt(a.input_tokens)} input tokens · {fmtInt(a.output_tokens)} output tokens · demo
+        feature, not a study result
       </div>
     </article>
   );
@@ -190,7 +197,7 @@ export function AskForm({ incidentId, store }: { incidentId: string; store: AskS
   };
 
   return (
-    <form className="ask-form" onSubmit={(e) => void submit(e)}>
+    <form className="ask-row" onSubmit={(e) => void submit(e)}>
       <div className="field">
         <label htmlFor={`ask-${incidentId}`}>Question about this incident (answered from its alerts only; citations are verified)</label>
         <input

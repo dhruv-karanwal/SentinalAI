@@ -9,9 +9,10 @@ import { epochSeconds, fmtDuration, fmtInt } from '../lib/format.ts';
 import { binByKey } from '../lib/scale.ts';
 import { DataTable, type Column } from '../components/DataTable.tsx';
 import { SplitPane } from '../components/SplitPane.tsx';
-import { Button, EmptyState, ErrorNotice, ErrorState, Time } from '../components/ui.tsx';
+import { Button, EmptyState, ErrorNotice, ErrorState, PageHeader, SkeletonLines, Time } from '../components/ui.tsx';
 import { useLoad, type Route } from '../hooks.ts';
 import { Icon } from '../icons.tsx';
+import { fitColumns, useNarrow } from '../components/narrow.ts';
 
 interface Props {
   route: Route & { setParams: (patch: Record<string, string | null>, replace?: boolean) => void };
@@ -33,6 +34,7 @@ export function AuditScreen({ route, searchRef }: Props) {
     );
   }, [all, q, user, action]);
   const activity = useMemo(() => binByKey(rows.map((e) => ({ t: epochSeconds(e.ts), key: family(e.action) }))), [rows]);
+  const filtered = q.trim() !== '' || user !== '' || action !== '';
   const selectedId = route.params.id ?? null;
   const selected = (data?.entries ?? []).find((e) => String(e.id) === selectedId) ?? null;
 
@@ -57,46 +59,46 @@ export function AuditScreen({ route, searchRef }: Props) {
     [],
   );
 
+  const narrow = useNarrow();
+  const cols = useMemo(() => fitColumns(columns, narrow, ['role', 'target']), [columns, narrow]);
+
   const list = (
-    <>
-      <div className="pane-head">
-        <h1>Audit</h1>
-        <span className="spacer" />
-        <Button icon="refresh" onClick={reload} disabled={loading}>
-          Reload
-        </Button>
-      </div>
-      <div className="filters" role="search">
-        <div className="search">
+    <div className="al-list">
+      <div className="toolbar" role="search" aria-label="Filter the audit log">
+        <div className="searchbox">
           <Icon name="search" />
           <label className="visually-hidden" htmlFor="audit-q">
             Filter by user, role, action or target
           </label>
           <input id="audit-q" ref={searchRef} className="input" placeholder="Filter by user, action or target ( / )" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
-        <label className="label" htmlFor="audit-user">
-          User
-        </label>
-        <select id="audit-user" className="select" value={user} onChange={(e) => setUser(e.target.value)}>
-          <option value="">all</option>
-          {users.map((u) => (
-            <option key={u}>{u}</option>
-          ))}
-        </select>
-        <label className="label" htmlFor="audit-action">
-          Action
-        </label>
-        <select id="audit-action" className="select mono" value={action} onChange={(e) => setAction(e.target.value)}>
-          <option value="">all</option>
-          {actions.map((a) => (
-            <option key={a}>{a}</option>
-          ))}
-        </select>
+        <span className="tb-field">
+          <label className="tb-label" htmlFor="audit-user">
+            User
+          </label>
+          <select id="audit-user" className="select" value={user} onChange={(e) => setUser(e.target.value)}>
+            <option value="">all</option>
+            {users.map((u) => (
+              <option key={u}>{u}</option>
+            ))}
+          </select>
+        </span>
+        <span className="tb-field">
+          <label className="tb-label" htmlFor="audit-action">
+            Action
+          </label>
+          <select id="audit-action" className="select mono" value={action} onChange={(e) => setAction(e.target.value)}>
+            <option value="">all</option>
+            {actions.map((a) => (
+              <option key={a}>{a}</option>
+            ))}
+          </select>
+        </span>
       </div>
       {activity.bins > 0 && (
-        <div style={{ padding: '0 var(--sp-12)' }}>
+        <div className="al-chart">
           <ChartFrame
-            className="compact-chart"
+            className="flat-chart compact-chart"
             title="Activity over time"
             question="When did people act, and when were requests refused?"
             legend={[
@@ -120,6 +122,7 @@ export function AuditScreen({ route, searchRef }: Props) {
         </div>
       )}
       {error && data && <ErrorNotice what="the audit log" error={error} onRetry={reload} />}
+      <div className="al-table">
       {error && !data ? (
         <ErrorState what="the audit log" error={error} onRetry={reload} />
       ) : (
@@ -128,27 +131,38 @@ export function AuditScreen({ route, searchRef }: Props) {
           unit="entries"
           primary
           rows={rows}
-          columns={columns}
+          columns={cols}
           rowKey={(e) => String(e.id)}
           selectedKey={selectedId}
           onSelect={(e) => route.setParams({ id: String(e.id) })}
           loading={loading}
           footer={<span>The newest 1,000 entries are loaded</span>}
-          empty={q.trim() ? <EmptyState title={`No audit entry matches "${q.trim()}".`} /> : <EmptyState title="The audit log is empty." />}
+          empty={
+            filtered ? (
+              <EmptyState title="No audit entry matches the filters.">
+                <button type="button" className="linklike" onClick={() => (setQ(''), setUser(''), setAction(''))}>
+                  Clear filters
+                </button>
+              </EmptyState>
+            ) : (
+              <EmptyState title="The audit log is empty.">Every write and every refused request is recorded here.</EmptyState>
+            )
+          }
         />
       )}
-    </>
+      </div>
+    </div>
   );
 
   const detail = selected ? (
     <>
-      <div className="pane-head">
+      <div className="pane-bar">
         <h2>
           Entry <span className="mono num">{selected.id}</span>
         </h2>
       </div>
       <div className="detail-scroll">
-        <div className="section">
+        <section className="block" aria-label="Entry">
           <dl className="kv">
             <dt>Time (UTC)</dt>
             <dd>
@@ -163,18 +177,36 @@ export function AuditScreen({ route, searchRef }: Props) {
             <dt>Target</dt>
             <dd className="mono">{selected.target ?? '-'}</dd>
           </dl>
-        </div>
-        <div className="section">
-          <h3>Detail</h3>
-          <pre className="raw">{typeof selected.detail === 'string' ? selected.detail : JSON.stringify(selected.detail, null, 2)}</pre>
-        </div>
+        </section>
+        <section className="block" aria-labelledby="audit-detail-t">
+          <h3 className="block-title" id="audit-detail-t">
+            Detail
+          </h3>
+          <pre className="ev-raw">{typeof selected.detail === 'string' ? selected.detail : JSON.stringify(selected.detail, null, 2)}</pre>
+        </section>
       </div>
     </>
+  ) : loading && !data ? (
+    <SkeletonLines lines={4} />
   ) : (
     <EmptyState title="No entry selected.">Select a row to read its detail.</EmptyState>
   );
 
-  return <SplitPane id="audit" left={list} right={detail} initial={62} />;
+  return (
+    <div className="work">
+      <PageHeader
+        bar
+        title="Audit"
+        purpose="Who did what?"
+        actions={
+          <Button icon="refresh" onClick={reload} disabled={loading}>
+            Reload
+          </Button>
+        }
+      />
+      <SplitPane id="audit" left={list} right={detail} initial={62} />
+    </div>
+  );
 }
 
 export function family(action: string): 'write' | 'sign-in' | 'refused' {

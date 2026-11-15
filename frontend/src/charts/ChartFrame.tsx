@@ -5,7 +5,8 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useSeen } from '../components/motion.tsx';
 
-import { Explain, Term } from '../components/Term.tsx';
+import { Term } from '../components/Term.tsx';
+import { Disclosure } from '../components/ui.tsx';
 
 export type Tone = 'wazuh' | 'suricata' | 'aminer' | 'sigma' | 'high' | 'medium' | 'low' | 'verified' | 'heat-1' | 'heat-4' | 'ref' | 'muted';
 
@@ -102,8 +103,10 @@ function LegendMark({ item }: { item: LegendItem }) {
 }
 
 export function HiddenTable({ caption, table }: { caption: string; table: TableSpec }) {
+  // the wrapper is hidden, not the table: a table ignores the 1 px box and would widen the page
   return (
-    <table className="visually-hidden">
+    <div className="visually-hidden">
+    <table>
       <caption>{caption}</caption>
       <thead>
         <tr>
@@ -122,6 +125,7 @@ export function HiddenTable({ caption, table }: { caption: string; table: TableS
         ))}
       </tbody>
     </table>
+    </div>
   );
 }
 
@@ -140,7 +144,7 @@ interface FrameProps {
   id?: string;
   /** glossary id: a "?" after the title */
   term?: string;
-  /** plain-language pair shown instead of the question line (explainable console) */
+  /** plain-language pair (explainable console): kept behind the "About this chart" disclosure */
   what?: ReactNode;
   why?: ReactNode;
 }
@@ -169,7 +173,7 @@ export function ChartFrame({ title, question, legend = [], table, actions, note,
           <h3 className="chart-title" id={id ? `${id}-t` : undefined}>
             {term ? <Term id={term}>{title}</Term> : title}
           </h3>
-          {what || why ? <Explain what={what ?? question} why={why ?? ''} /> : <p className="chart-q">{question}</p>}
+          {question && <p className="chart-q">{question}</p>}
         </div>
         {actions && <div className="chart-actions">{actions}</div>}
       </header>
@@ -184,7 +188,19 @@ export function ChartFrame({ title, question, legend = [], table, actions, note,
           <HiddenTable caption={title} table={table} />
         </>
       )}
-      {note && <p className="chart-note">{note}</p>}
+      {(note || what || why) && (
+        <footer className="chart-foot">
+          {note && <p className="chart-note">{note}</p>}
+          {(what || why) && (
+            <Disclosure summary="About this chart">
+              <div className="chart-about">
+                {what && <p>{what}</p>}
+                {why && <p>{why}</p>}
+              </div>
+            </Disclosure>
+          )}
+        </footer>
+      )}
       {tip && (
         <div
           className="chart-tip"
